@@ -1171,6 +1171,7 @@ export const fr: TranslationResources = {
     },
     nav: {
       title: "Navigation",
+      resize: "Redimensionner la navigation",
     },
     host: {
       noHost: "Aucun hôte",
