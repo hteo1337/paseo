@@ -1203,6 +1203,7 @@ export const ko: TranslationResources = {
     },
     nav: {
       title: "탐색",
+      resize: "탐색 크기 조절",
     },
     host: {
       noHost: "호스트 없음",

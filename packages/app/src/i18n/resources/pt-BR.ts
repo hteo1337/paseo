@@ -1222,6 +1222,7 @@ export const ptBR: TranslationResources = {
     },
     nav: {
       title: "Navegação",
+      resize: "Redimensionar navegação",
     },
     host: {
       noHost: "Nenhum host",
