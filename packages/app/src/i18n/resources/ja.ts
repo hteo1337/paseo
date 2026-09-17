@@ -1232,6 +1232,9 @@ export const ja: TranslationResources = {
     pinned: {
       title: "固定済み",
     },
+    nav: {
+      title: "ナビゲーション",
+    },
     host: {
       noHost: "ホストなし",
       switchTitle: "ホストを切り替え",
