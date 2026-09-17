@@ -1218,6 +1218,9 @@ export const ar: TranslationResources = {
     pinned: {
       title: "المثبتة",
     },
+    nav: {
+      title: "التنقل",
+    },
     host: {
       noHost: "لا مضيف",
       switchTitle: "تبديل المضيف",
