@@ -1235,6 +1235,9 @@ export const ru: TranslationResources = {
     pinned: {
       title: "Закреплённые",
     },
+    nav: {
+      title: "Навигация",
+    },
     host: {
       noHost: "Нет хоста",
       switchTitle: "Сменить хост",
