@@ -1294,6 +1294,7 @@ export const ru: TranslationResources = {
     },
     nav: {
       title: "Навигация",
+      resize: "Изменить размер навигации",
     },
     host: {
       noHost: "Нет хоста",
