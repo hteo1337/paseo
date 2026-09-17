@@ -1229,6 +1229,9 @@ export const en = {
     pinned: {
       title: "Pinned",
     },
+    nav: {
+      title: "Navigation",
+    },
     host: {
       noHost: "No host",
       switchTitle: "Switch host",
