@@ -1283,6 +1283,7 @@ export const ja: TranslationResources = {
     },
     nav: {
       title: "ナビゲーション",
+      resize: "ナビゲーションのサイズを変更",
     },
     host: {
       noHost: "ホストなし",

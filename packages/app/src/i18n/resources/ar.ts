@@ -1269,6 +1269,7 @@ export const ar: TranslationResources = {
     },
     nav: {
       title: "التنقل",
+      resize: "تغيير حجم التنقل",
     },
     host: {
       noHost: "لا مضيف",
