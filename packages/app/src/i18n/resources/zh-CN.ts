@@ -1211,6 +1211,7 @@ export const zhCN: TranslationResources = {
     },
     nav: {
       title: "导航",
+      resize: "调整导航大小",
     },
     host: {
       noHost: "没有 Host",
