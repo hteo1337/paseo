@@ -2,8 +2,11 @@ import { router, usePathname } from "expo-router";
 import { CalendarClock, History, Plus, Search } from "lucide-react-native";
 import { memo, useCallback, useMemo, useRef, type ComponentType, type ReactNode } from "react";
 import { useTranslation } from "react-i18next";
-import { View, type StyleProp, type ViewStyle } from "react-native";
+import { ScrollView, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
+import { SidebarSectionHeader } from "@/components/sidebar/sidebar-section-header";
+import { useSidebarViewStore } from "@/stores/sidebar-view-store";
+import { resolveSidebarNavGroupMaxHeight } from "@/sidebar-nav/group-layout";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { useShortcutKeys } from "@/hooks/use-shortcut-keys";
 import { PluginSidebarItem } from "@/plugins/sidebar-items";
@@ -44,6 +47,14 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
   const { items } = useSidebarNavItems("header");
   const visibleItems = useMemo(() => items.filter((item) => item.visible), [items]);
   const groupRef = useRef<View | null>(null);
+  const { t } = useTranslation();
+  const collapsed = useSidebarViewStore((state) => state.navCollapsed);
+  const toggleCollapsed = useSidebarViewStore((state) => state.toggleNavCollapsed);
+  const { height: viewportHeight } = useWindowDimensions();
+  const rowsStyle = useMemo(
+    () => [styles.rows, { maxHeight: resolveSidebarNavGroupMaxHeight(viewportHeight) }],
+    [viewportHeight],
+  );
 
   if (visibleItems.length === 0 && !firstRowTrailing) return null;
 
@@ -64,16 +75,22 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
   });
 
   return (
-    <View ref={groupRef} collapsable={false} style={style}>
-      {firstRowTrailing ? (
-        <View style={styles.firstRow}>
-          <View style={styles.firstRowItem}>{firstRow}</View>
-          {firstRowTrailing}
-        </View>
-      ) : (
-        firstRow
+    <View ref={groupRef} collapsable={false} style={style} testID="sidebar-nav-group">
+      <SidebarSectionHeader
+        title={t("sidebar.nav.title")}
+        collapsed={collapsed}
+        onToggle={toggleCollapsed}
+        testID="sidebar-nav-group-header"
+      >
+        {firstRowTrailing}
+      </SidebarSectionHeader>
+      {collapsed ? null : (
+        <ScrollView style={rowsStyle} contentContainerStyle={styles.rowsContent}
+          showsVerticalScrollIndicator={false} testID="sidebar-nav-group-rows">
+          {firstRow}
+          {restRows}
+        </ScrollView>
       )}
-      {restRows}
     </View>
   );
 }
@@ -193,12 +210,6 @@ const BUILTIN_ROWS: Record<BuiltinSidebarNavId, ComponentType<SidebarNavRowProps
 };
 
 const styles = StyleSheet.create({
-  firstRow: {
-    flexDirection: "row",
-    alignItems: "center",
-  },
-  firstRowItem: {
-    flex: 1,
-    minWidth: 0,
-  },
+  rows: { flexGrow: 0, flexShrink: 1 },
+  rowsContent: { gap: 2 },
 });
