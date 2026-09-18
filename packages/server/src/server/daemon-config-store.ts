@@ -803,6 +803,7 @@ const METADATA_GENERATION_KINDS = [
   "commitMessage",
   "pullRequest",
   "promptSuggestions",
+  "newChatSuggestions",
 ] as const;
 
 function mergeMetadataGeneration(
