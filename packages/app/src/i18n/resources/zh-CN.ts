@@ -2215,6 +2215,11 @@ export const zhCN: TranslationResources = {
       modelHint: "只使用此模型。如果失败，Paseo 不会尝试其他模型",
       docs: "文档",
       saveError: "无法更新元数据生成设置",
+      suggestionModel: "建议模型",
+      suggestionShared: "相同",
+      suggestionCustom: "自定义",
+      suggestionSharedHint: "建议使用上方的模型",
+      suggestionCustomHint: "建议、草拟回答和新对话提示都使用此模型",
     },
     general: {
       title: "通用",
