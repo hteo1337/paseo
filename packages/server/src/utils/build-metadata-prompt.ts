@@ -6,7 +6,8 @@ export type MetadataConfigKey =
   | "branchName"
   | "commitMessage"
   | "pullRequest"
-  | "promptSuggestions";
+  | "promptSuggestions"
+  | "newChatSuggestions";
 
 export interface RepoRootResolver {
   resolveRepoRoot: (cwd: string) => Promise<string>;
