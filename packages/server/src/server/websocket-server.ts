@@ -585,6 +585,8 @@ export class VoiceAssistantWebSocketServer {
   private readonly checkoutDiffManager: CheckoutDiffManager;
   private readonly github: ForgeService;
   private readonly workspaceGitService: WorkspaceGitService;
+  // Assigned after construction: the suggestion service needs this server first.
+  private promptSuggestionRequester: SessionOptions["requestPromptSuggestions"] = undefined;
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly downloadTokenStore: DownloadTokenStore;
   private readonly paseoHome: string;
@@ -1048,6 +1050,10 @@ export class VoiceAssistantWebSocketServer {
       return;
     }
     this.sendMessageToSockets(this.sessions.keys(), message);
+  }
+
+  public setPromptSuggestionRequester(requester: SessionOptions["requestPromptSuggestions"]): void {
+    this.promptSuggestionRequester = requester;
   }
 
   public listSessions(): Session[] {
@@ -1677,6 +1683,7 @@ export class VoiceAssistantWebSocketServer {
       worktreesRoot: this.worktreesRoot,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
+      requestPromptSuggestions: this.promptSuggestionRequester ?? undefined,
       messageReceipts: this.messageReceipts,
       agentMessages: this.agentMessages,
       creationService: this.creationService,
