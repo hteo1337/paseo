@@ -1976,6 +1976,9 @@ export async function createPaseoDaemon(
               workspaceLabelService,
               workspaceArchiveOperations,
             );
+            wsServer.setPromptSuggestionRequester((agentId) =>
+              promptSuggestions.requestFor(agentId),
+            );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
             providerSnapshotManager.settlePluginProviders();
