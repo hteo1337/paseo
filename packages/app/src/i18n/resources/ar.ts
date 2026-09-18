@@ -2014,6 +2014,12 @@ export const ar: TranslationResources = {
       fallbackHint: "إذا لم يكن متاحًا، يستخدم Paseo نموذجًا آخر متاحًا",
       docs: "الوثائق",
       saveError: "تعذر تحديث إنشاء البيانات الوصفية",
+      suggestionModel: "نموذج الاقتراحات",
+      suggestionShared: "نفسه",
+      suggestionCustom: "مخصص",
+      suggestionSharedHint: "تستخدم الاقتراحات النموذج أعلاه",
+      suggestionCustomHint:
+        "تستخدم الاقتراحات والإجابات المقترحة وأفكار المحادثة الجديدة هذا النموذج",
     },
     general: {
       title: "عام",
