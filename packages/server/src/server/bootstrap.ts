@@ -236,6 +236,8 @@ import {
 import { deleteLocalCredential, writeLocalCredential } from "./local-credential.js";
 import { createWebUiMiddleware } from "./web-ui.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
+import { PromptSuggestionService } from "./agent/prompt-suggestions/service.js";
+import { createAgentStructuredTextGeneration } from "./session/checkout/git-metadata-generator.js";
 import { createGitMutationService } from "./session/git-mutation/git-mutation-service.js";
 import { workspaceIdsOnCheckout } from "./workspace-directory.js";
 import { configureGitProcessPolicy } from "../utils/run-git-command.js";
@@ -486,6 +488,7 @@ export interface PaseoDaemonConfig {
       thinkingOptionId?: string;
     }>;
   };
+  promptSuggestions?: { enabled?: boolean };
   providerOverrides?: Record<string, ProviderOverride>;
   log?: PersistedConfig["log"];
   onLifecycleIntent?: (intent: DaemonLifecycleIntent) => void;
@@ -583,6 +586,10 @@ function resolveReloadEnv(config: PaseoDaemonConfig): NodeJS.ProcessEnv {
   return config.configReload?.env ?? process.env;
 }
 
+function resolvePromptSuggestionsConfig(config: PaseoDaemonConfig): { enabled: boolean } {
+  return { enabled: config.promptSuggestions?.enabled ?? true };
+}
+
 function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): MutableDaemonConfig {
   const providers = config.providerOverrides ?? {};
 
@@ -606,6 +613,7 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
     metadataGeneration: {
       providers: config.metadataGeneration?.providers ?? [],
     },
+    promptSuggestions: resolvePromptSuggestionsConfig(config),
     autoArchiveAfterMerge: config.autoArchiveAfterMerge ?? false,
     enableTerminalAgentHooks: config.enableTerminalAgentHooks ?? false,
     idleRuntimeCleanup: config.idleRuntimeCleanup !== false,
@@ -1224,6 +1232,22 @@ export async function createPaseoDaemon(
     },
     logger,
   });
+
+  const promptSuggestions = new PromptSuggestionService({
+    agents: agentManager,
+    generation: createAgentStructuredTextGeneration({
+      agentManager,
+      providerSnapshotManager,
+      readDaemonConfig: () => ({ metadataGeneration: daemonConfigStore.get().metadataGeneration }),
+      getFocusedSelection: () => undefined,
+    }),
+    emit: emitExternalSessionMessage,
+    workspaceGitService,
+    isEnabled: () => daemonConfigStore.get().promptSuggestions?.enabled !== false,
+    hasListeners: () => (wsServer?.listSessions().length ?? 0) > 0,
+    logger,
+  });
+  promptSuggestions.start();
 
   setupAutoArchiveOnMerge({
     paseoHome: config.paseoHome,
@@ -2037,6 +2061,7 @@ export async function createPaseoDaemon(
     let terminalShutdownError: unknown = null;
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
+    promptSuggestions.stop();
     // Stop tracking plugin provider registrations before anything tears plugins
     // down, so plugin shutdown cannot withdraw a provider from under an agent
     // that is still open. Plugins themselves are stopped once every session
