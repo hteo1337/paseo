@@ -8,9 +8,57 @@ import {
   selectAgentTurnPresentation,
   selectAgentTimelineState,
   useSessionStore,
+  type Agent,
   type WorkspaceDescriptor,
 } from "./session-store";
 import type { StreamItem } from "../types/stream";
+import { reduceTurnLiveness, type TurnLivenessTransition } from "@/timeline/turn-liveness";
+
+function createTestAgent(agentId: string): Agent {
+  return {
+    serverId: "test-server",
+    id: agentId,
+    provider: "codex",
+    status: "idle",
+    turn: { phase: "idle", cancellationRequestId: null },
+    createdAt: new Date(0),
+    updatedAt: new Date(0),
+    lastUserMessageAt: null,
+    lastActivityAt: new Date(0),
+    capabilities: {
+      supportsStreaming: true,
+      supportsSessionPersistence: true,
+      supportsDynamicModes: false,
+      supportsMcpServers: false,
+      supportsReasoningStream: false,
+      supportsToolInvocations: false,
+    },
+    currentModeId: null,
+    availableModes: [],
+    pendingPermissions: [],
+    persistence: null,
+    title: null,
+    cwd: "/repo",
+    model: null,
+    parentAgentId: null,
+    labels: {},
+  };
+}
+
+function applyTestTurn(
+  serverId: string,
+  agentId: string,
+  transition: TurnLivenessTransition | readonly TurnLivenessTransition[],
+): void {
+  useSessionStore.getState().setAgents(serverId, (agents) => {
+    const agent = agents.get(agentId) ?? createTestAgent(agentId);
+    const transitions = Array.isArray(transition) ? transition : [transition];
+    const turn = transitions.reduce(reduceTurnLiveness, agent.turn);
+    const next = new Map(agents);
+    next.set(agentId, { ...agent, status: turn.phase === "open" ? "running" : "idle", turn });
+    return next;
+  });
+}
 
 function createWorkspace(
   input: Partial<WorkspaceDescriptor> & Pick<WorkspaceDescriptor, "id">,
@@ -222,22 +270,25 @@ describe("agent timeline state", () => {
   it("stores turn liveness transitions without duplicating their policy", () => {
     initializeTestSession();
     const store = useSessionStore.getState();
-    store.applyAgentTurnLiveness("test-server", "agent-1", {
+    applyTestTurn("test-server", "agent-1", {
       type: "snapshot",
       activeTurn: { turnId: "turn-1", startedAt: null },
     });
-    expect(store.getSession("test-server")?.agentTurnLiveness.get("agent-1")).toEqual({
+    expect(store.getSession("test-server")?.agents.get("agent-1")?.turn).toEqual({
       phase: "open",
       turnId: "turn-1",
       startedAt: null,
       cancellationRequestId: null,
     });
 
-    store.applyAgentTurnLiveness("test-server", "agent-1", {
+    applyTestTurn("test-server", "agent-1", {
       type: "snapshot",
       activeTurn: null,
     });
-    expect(store.getSession("test-server")?.agentTurnLiveness.has("agent-1")).toBe(false);
+    expect(store.getSession("test-server")?.agents.get("agent-1")?.turn).toEqual({
+      phase: "idle",
+      cancellationRequestId: null,
+    });
   });
 });
 
@@ -267,27 +318,27 @@ describe("message submission ordering", () => {
       return;
     }
     if (step === "stream-open") {
-      store.applyAgentTurnLiveness("test-server", agentId, {
+      applyTestTurn("test-server", agentId, {
         type: "stream_open",
         turn: { turnId: "turn-1", startedAt },
       });
       return;
     }
     if (step === "snapshot-open") {
-      store.applyAgentTurnLiveness("test-server", agentId, {
+      applyTestTurn("test-server", agentId, {
         type: "snapshot",
         activeTurn: { turnId: "turn-1", startedAt },
       });
       return;
     }
     if (step === "snapshot-idle") {
-      store.applyAgentTurnLiveness("test-server", agentId, {
+      applyTestTurn("test-server", agentId, {
         type: "snapshot",
         activeTurn: null,
       });
       return;
     }
-    store.applyAgentTurnLiveness("test-server", agentId, {
+    applyTestTurn("test-server", agentId, {
       type: "stream_close",
       turnId: "turn-1",
     });
@@ -322,7 +373,7 @@ describe("message submission ordering", () => {
       store.setAgentStreamState("test-server", agentId, {
         acknowledgedClientMessageIds: [clientMessageId],
       });
-      store.applyAgentTurnLiveness("test-server", agentId, [
+      applyTestTurn("test-server", agentId, [
         { type: "stream_close", turnId: "turn-1" },
         { type: "snapshot", activeTurn: null },
       ]);
@@ -747,5 +798,65 @@ describe("removeWorkspace", () => {
     expect(after.sessions).toBe(before.sessions);
     expect(after.session).toBe(before.session);
     expect(after.workspaces).toBe(before.workspaces);
+  });
+});
+
+describe("prompt suggestions", () => {
+  function storeSuggestion(agentId: string, generatedAt: string): void {
+    useSessionStore.getState().setPromptSuggestions("test-server", {
+      agentId,
+      turnSeq: 1,
+      suggestions: [{ id: "s1", text: `suggestion for ${agentId}` }],
+      generatedAt,
+    });
+  }
+
+  function storedAgents(): string[] {
+    const session = useSessionStore.getState().sessions["test-server"];
+    return session ? [...session.promptSuggestions.keys()] : [];
+  }
+
+  it("keeps only the newest entries and refreshes an updated agent", () => {
+    initializeTestSession();
+    for (let index = 0; index <= 32; index += 1) {
+      storeSuggestion(`a${index}`, "2026-09-18T10:00:00.000Z");
+    }
+
+    expect(storedAgents()).toHaveLength(32);
+    expect(storedAgents()[0]).toBe("a1");
+
+    storeSuggestion("a1", "2026-09-18T10:00:01.000Z");
+
+    expect(storedAgents().at(-1)).toBe("a1");
+  });
+
+  // A host's directory fetch replaces the activity map wholesale, so freshness
+  // cannot be inferred from the map at render time.
+  it("drops a suggestion the moment newer activity is recorded, not at render", () => {
+    initializeTestSession();
+    storeSuggestion("agent-a", "2026-09-18T10:00:00.000Z");
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-a", new Date("2026-09-18T10:00:30.000Z")]]));
+
+    expect(storedAgents()).toEqual([]);
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-b", new Date("2026-09-18T09:00:00.000Z")]]));
+
+    expect(storedAgents()).toEqual([]);
+  });
+
+  it("leaves a suggestion generated after the recorded activity alone", () => {
+    initializeTestSession();
+    storeSuggestion("agent-a", "2026-09-18T10:00:33.000Z");
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-a", new Date("2026-09-18T10:00:30.000Z")]]));
+
+    expect(storedAgents()).toEqual(["agent-a"]);
   });
 });
