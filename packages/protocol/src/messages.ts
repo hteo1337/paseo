@@ -205,6 +205,7 @@ const MutableMetadataGenerationConfigSchema = z
     commitMessage: MutableMetadataGenerationKindConfigSchema.optional(),
     pullRequest: MutableMetadataGenerationKindConfigSchema.optional(),
     promptSuggestions: MutableMetadataGenerationKindConfigSchema.optional(),
+    newChatSuggestions: MutableMetadataGenerationKindConfigSchema.optional(),
   })
   .passthrough();
 
