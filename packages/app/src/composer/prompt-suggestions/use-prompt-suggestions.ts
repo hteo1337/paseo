@@ -59,6 +59,23 @@ export function usePromptSuggestions(input: UsePromptSuggestionsInput): PromptSu
     wasAgentRunning.current = input.isAgentRunning;
   }, [input.isAgentRunning, input.serverId, input.agentId, clearPromptSuggestions]);
 
+  // Suggestions only exist in the daemon's memory, so a chat opened after a
+  // restart has none until we ask. One request per agent per mount.
+  const client = useSessionStore((state) => state.sessions[input.serverId]?.client ?? null);
+  const requestedFor = useRef<string | null>(null);
+  useEffect(() => {
+    if (!client || stored || input.hasText || input.isAgentRunning || input.isReadOnly) {
+      return;
+    }
+    if (requestedFor.current === input.agentId) {
+      return;
+    }
+    requestedFor.current = input.agentId;
+    void client.requestPromptSuggestions(input.agentId).catch(() => {
+      requestedFor.current = null;
+    });
+  }, [client, stored, input.agentId, input.hasText, input.isAgentRunning, input.isReadOnly]);
+
   const dismiss = useCallback(() => {
     if (stored) {
       setDismissedTurnSeq(stored.turnSeq);
