@@ -4828,6 +4828,9 @@ export const AgentPromptSuggestionsMessageSchema = z.object({
     turnSeq: z.number().int().nonnegative(),
     suggestions: z.array(PromptSuggestionSchema).max(PROMPT_SUGGESTION_MAX_COUNT),
     generatedAt: z.string(),
+    // Set when these answer a question the agent asked: they belong in that
+    // permission's answer box, not in the composer.
+    answersPermissionId: z.string().optional(),
   }),
 });
 export type AgentPromptSuggestionsMessage = z.infer<typeof AgentPromptSuggestionsMessageSchema>;

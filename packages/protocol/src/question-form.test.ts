@@ -6,7 +6,7 @@ import {
   questionShowsTextInput,
   resolveDismissLabel,
   shouldSubmitEmptyOnDismiss,
-} from "./question-form-card-core";
+} from "./question-form.js";
 
 describe("question form card core", () => {
   test("treats optional input prompts as skippable empty answers", () => {

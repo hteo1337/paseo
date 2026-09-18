@@ -55,6 +55,7 @@ function mountCard(question: Record<string, unknown>) {
   act(() =>
     root.render(
       <QuestionFormCard
+        serverId="server-1"
         permission={buildPermission(question)}
         onRespond={onRespond}
         isResponding={false}
