@@ -2759,8 +2759,7 @@ export class Session {
       case "agent.config.apply.request":
         return this.agentConfigSession.handleAgentConfigApplyRequest(msg);
       case "agent.prompt_suggestions.request":
-        this.handlePromptSuggestionsRequest(msg);
-        return undefined;
+        return this.handlePromptSuggestionsRequest(msg);
       case "get_daemon_config_request":
         this.emit({
           type: "get_daemon_config_response",
@@ -4816,9 +4815,9 @@ export class Session {
   /**
    * Handle clearing agent attention flag
    */
-  private handlePromptSuggestionsRequest(
+  private async handlePromptSuggestionsRequest(
     msg: Extract<SessionInboundMessage, { type: "agent.prompt_suggestions.request" }>,
-  ): void {
+  ): Promise<void> {
     const respond = (accepted: boolean, error?: string): void => {
       this.emit({
         type: "agent.prompt_suggestions.response",
@@ -4838,6 +4837,18 @@ export class Session {
     const request = this.requestPromptSuggestions;
     if (!request) {
       respond(false, "Prompt suggestions are unavailable on this host.");
+      return;
+    }
+    // A chat the daemon has not resumed since launch has no live agent to read a
+    // timeline from, which is exactly the chat a client opens after a restart.
+    try {
+      await ensureAgentLoaded(msg.agentId, {
+        agentManager: this.agentManager,
+        agentStorage: this.agentStorage,
+        logger: this.sessionLogger,
+      });
+    } catch (error) {
+      respond(false, getErrorMessage(error));
       return;
     }
     const outcome = request(msg.agentId);
