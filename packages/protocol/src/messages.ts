@@ -1917,6 +1917,17 @@ export const SetAgentTimelineSubscriptionRequestMessageSchema = z.object({
   requestId: z.string(),
 });
 
+// A client that opened a chat with an empty composer and holds no suggestion asks
+// for one; the suggestions themselves arrive as the usual agent_prompt_suggestions event.
+export const AgentPromptSuggestionsRequestMessageSchema = z.object({
+  type: z.literal("agent.prompt_suggestions.request"),
+  agentId: z.string(),
+  requestId: z.string(),
+});
+export type AgentPromptSuggestionsRequestMessage = z.infer<
+  typeof AgentPromptSuggestionsRequestMessageSchema
+>;
+
 export const AgentForkContextRequestMessageSchema = z.object({
   type: z.literal("agent.fork_context.request"),
   agentId: z.string(),
@@ -3288,6 +3299,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ProviderSubagentListRequestMessageSchema,
   ProviderSubagentTimelineRequestMessageSchema,
   SetAgentTimelineSubscriptionRequestMessageSchema,
+  AgentPromptSuggestionsRequestMessageSchema,
   AgentForkContextRequestMessageSchema,
   SetAgentModeRequestMessageSchema,
   SetAgentModelRequestMessageSchema,
@@ -4844,6 +4856,21 @@ export const AgentPromptSuggestionsMessageSchema = z.object({
   }),
 });
 export type AgentPromptSuggestionsMessage = z.infer<typeof AgentPromptSuggestionsMessageSchema>;
+
+export const AgentPromptSuggestionsResponseMessageSchema = z.object({
+  type: z.literal("agent.prompt_suggestions.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    // False when the host has the feature off, the agent has nothing to guess
+    // from, or a generation for it is already under way.
+    accepted: z.boolean(),
+    error: z.string().optional(),
+  }),
+});
+export type AgentPromptSuggestionsResponseMessage = z.infer<
+  typeof AgentPromptSuggestionsResponseMessageSchema
+>;
 
 export const AgentForkContextResponseMessageSchema = z.object({
   type: z.literal("agent.fork_context.response"),
@@ -6946,6 +6973,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SetAgentTimelineSubscriptionResponseMessageSchema,
   AgentAttentionRequiredMessageSchema,
   AgentPromptSuggestionsMessageSchema,
+  AgentPromptSuggestionsResponseMessageSchema,
   AgentForkContextResponseMessageSchema,
   CancelAgentResponseMessageSchema,
   ClearAgentAttentionResponseMessageSchema,
