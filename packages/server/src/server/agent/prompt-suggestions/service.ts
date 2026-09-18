@@ -7,11 +7,13 @@ import {
 import type { AgentPermissionRequest } from "../agent-sdk-types.js";
 import type { AgentManager } from "../agent-manager.js";
 import {
+  buildNewChatSuggestionPrompt,
   buildPromptSuggestionPrompt,
   buildQuestionAnswerPrompt,
   type BuildPromptSuggestionPromptInput,
   type BuiltPromptSuggestionPrompt,
 } from "./prompt.js";
+import type { WorkspaceContextReader } from "./workspace-context.js";
 import type { RepoRootResolver } from "../../../utils/build-metadata-prompt.js";
 import {
   PROMPT_SUGGESTIONS_SCHEMA,
@@ -29,7 +31,7 @@ export interface PromptSuggestionGeneration {
     schema: z.ZodType<T>;
     schemaName: string;
     agentTitle: string;
-    configKey?: "promptSuggestions";
+    configKey?: "promptSuggestions" | "newChatSuggestions";
     currentSelection?: { provider?: string | null; model?: string | null };
   }): Promise<T>;
 }
@@ -47,6 +49,9 @@ export interface PromptSuggestionServiceOptions {
   // Lets paseo.json steer the suggestion wording, the same way it steers every
   // other metadata prompt; absent, the built-in rules stand.
   workspaceGitService?: RepoRootResolver;
+  // Reads the checkout a brand-new chat starts in; absent, an empty chat is left
+  // without suggestions rather than guessed at blind.
+  readWorkspaceContext?: WorkspaceContextReader;
   hasListeners?: () => boolean;
   debounceMs?: number;
   maxConcurrent?: number;
@@ -62,7 +67,7 @@ interface PreparedPrompt {
   built: BuiltPromptSuggestionPrompt;
   // Set for a question: the prompt number of each answerable question, to its card index.
   answerable: ReadonlyMap<number, number> | null;
-  configKey: "promptSuggestions";
+  configKey: "promptSuggestions" | "newChatSuggestions";
 }
 
 interface CachedSuggestions {
@@ -272,6 +277,23 @@ export class PromptSuggestionService {
     return Boolean(agent) && !agent?.internal;
   }
 
+  // An empty chat has nothing to read but the checkout it opened in.
+  private async buildFromWorkspace(common: {
+    agentTitle: string | null;
+    cwd: string;
+    workspaceGitService?: RepoRootResolver;
+  }): Promise<Awaited<ReturnType<typeof buildPromptSuggestionPrompt>>> {
+    const read = this.options.readWorkspaceContext;
+    if (!read) {
+      return null;
+    }
+    const workspace = await read(common.cwd);
+    if (!workspace) {
+      return null;
+    }
+    return buildNewChatSuggestionPrompt({ ...common, workspace });
+  }
+
   private async preparePrompt(
     common: BuildPromptSuggestionPromptInput & { agentTitle: string | null; cwd: string },
     question: PendingQuestion | undefined,
@@ -281,7 +303,13 @@ export class PromptSuggestionService {
       return built ? { built, answerable: built.answerable, configKey: "promptSuggestions" } : null;
     }
     const built = await buildPromptSuggestionPrompt(common);
-    return built ? { built, answerable: null, configKey: "promptSuggestions" } : null;
+    if (built) {
+      return { built, answerable: null, configKey: "promptSuggestions" };
+    }
+    const fromWorkspace = await this.buildFromWorkspace(common);
+    return fromWorkspace
+      ? { built: fromWorkspace, answerable: null, configKey: "newChatSuggestions" }
+      : null;
   }
 
   // A question's drafts come back filed by question, so each can be tagged with it.
