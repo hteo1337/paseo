@@ -1746,8 +1746,10 @@ export async function createPaseoDaemon(
               orchestrationSkills,
               workspaceLabelService,
             );
-            wsServer.setPromptSuggestionRequester((agentId) =>
-              promptSuggestions.requestFor(agentId),
+            wsServer.setPromptSuggestionRequester((agentId, draft) =>
+              draft
+                ? promptSuggestions.requestForDraft(agentId, draft.cwd)
+                : promptSuggestions.requestFor(agentId),
             );
             pluginRuntime.bindPaseoSessionHost(wsServer);
             await pluginRuntime.start();
