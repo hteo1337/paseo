@@ -591,6 +591,7 @@ export type ResolvedDaemonSettings = Pick<
   | "appBaseUrl"
   | "idleRuntimeCleanup"
   | "providerCatalogRefreshTimeoutMs"
+  | "promptSuggestions"
   | "metadataGeneration"
   | "providerOverrides"
 >;
@@ -679,6 +680,7 @@ export function resolveReloadableConfig(
     idleRuntimeCleanup: persisted.agents?.idleRuntimeCleanup ?? true,
     providerCatalogRefreshTimeoutMs: persisted.agents?.catalogRefreshTimeoutMs,
     metadataGeneration: persisted.agents?.metadataGeneration,
+    promptSuggestions: persisted.agents?.promptSuggestions,
     providerOverrides: extractProviderOverrides(
       persisted.agents?.providers as Record<string, unknown> | undefined,
     ),
