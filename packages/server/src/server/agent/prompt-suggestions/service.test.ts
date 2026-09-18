@@ -119,6 +119,63 @@ describe("PromptSuggestionService", () => {
     });
   });
 
+  it("generates on request for a chat opened with nothing cached", async () => {
+    const harness = createHarness();
+
+    expect(harness.service.requestFor("a1")).toEqual({ accepted: true });
+    await vi.runAllTimersAsync();
+    expect(harness.pending).toHaveLength(1);
+
+    harness.pending[0].resolve({ suggestions: ["open a PR"] });
+    await vi.runAllTimersAsync();
+    expect(harness.emitted).toHaveLength(1);
+  });
+
+  it("re-emits the cached suggestion instead of generating twice", async () => {
+    const harness = createHarness();
+
+    harness.emitStream("a1", "turn_completed");
+    await vi.advanceTimersByTimeAsync(400);
+    harness.pending[0].resolve({ suggestions: ["open a PR"] });
+    await vi.runAllTimersAsync();
+
+    expect(harness.service.requestFor("a1")).toEqual({ accepted: true });
+    await vi.runAllTimersAsync();
+
+    expect(harness.pending).toHaveLength(1);
+    expect(harness.emitted).toHaveLength(2);
+    expect(harness.emitted[1].payload).toEqual(harness.emitted[0].payload);
+  });
+
+  it("declines a request while the host has the feature off", () => {
+    const harness = createHarness({ enabled: false });
+
+    expect(harness.service.requestFor("a1").accepted).toBe(false);
+    expect(harness.pending).toHaveLength(0);
+  });
+
+  it("declines a request for an unknown agent", () => {
+    const harness = createHarness();
+
+    expect(harness.service.requestFor("nope").accepted).toBe(false);
+    expect(harness.pending).toHaveLength(0);
+  });
+
+  it("drops the cache when a new turn starts", async () => {
+    const harness = createHarness();
+
+    harness.emitStream("a1", "turn_completed");
+    await vi.advanceTimersByTimeAsync(400);
+    harness.pending[0].resolve({ suggestions: ["open a PR"] });
+    await vi.runAllTimersAsync();
+
+    harness.emitStream("a1", "turn_started");
+    expect(harness.service.requestFor("a1")).toEqual({ accepted: true });
+    await vi.runAllTimersAsync();
+
+    expect(harness.pending).toHaveLength(2);
+  });
+
   // Without it, a machine whose metadata chain has no usable model never gets a
   // suggestion, even though the agent's own model is working.
   it("offers the agent's own model as the last resort", async () => {
