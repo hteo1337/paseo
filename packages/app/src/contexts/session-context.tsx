@@ -552,10 +552,14 @@ function SessionProviderInternal({ children, serverId, client }: SessionProvider
 
     const unsubPromptSuggestions = onFeed("agent_prompt_suggestions", (message) => {
       if (message.type !== "agent_prompt_suggestions") return;
-      const { agentId, turnSeq, suggestions, generatedAt } = message.payload;
-      useSessionStore
-        .getState()
-        .setPromptSuggestions(serverId, { agentId, turnSeq, suggestions, generatedAt });
+      const { agentId, turnSeq, suggestions, generatedAt, answersPermissionId } = message.payload;
+      useSessionStore.getState().setPromptSuggestions(serverId, {
+        agentId,
+        turnSeq,
+        suggestions,
+        generatedAt,
+        ...(answersPermissionId ? { answersPermissionId } : {}),
+      });
     });
 
     const unsubProviderSubagentUpdate = onFeed("agent.provider_subagents.update", (message) => {

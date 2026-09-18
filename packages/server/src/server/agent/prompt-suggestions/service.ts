@@ -1,6 +1,11 @@
 import type { AgentPromptSuggestionsMessage } from "@getpaseo/protocol/messages";
+import {
+  parseQuestionFormQuestions,
+  type QuestionFormQuestion,
+} from "@getpaseo/protocol/question-form";
+import type { AgentPermissionRequest } from "../agent-sdk-types.js";
 import type { AgentManager } from "../agent-manager.js";
-import { buildPromptSuggestionPrompt } from "./prompt.js";
+import { buildPromptSuggestionPrompt, buildQuestionAnswerPrompt } from "./prompt.js";
 import type { RepoRootResolver } from "../../../utils/build-metadata-prompt.js";
 import {
   PROMPT_SUGGESTIONS_SCHEMA,
@@ -40,6 +45,11 @@ export interface PromptSuggestionServiceOptions {
   now?: () => Date;
 }
 
+interface PendingQuestion {
+  permissionId: string;
+  questions: QuestionFormQuestion[];
+}
+
 interface CachedSuggestions {
   payload: AgentPromptSuggestionsMessage["payload"];
   timelineLength: number;
@@ -63,6 +73,7 @@ export class PromptSuggestionService {
   private readonly options: PromptSuggestionServiceOptions;
   private readonly entries = new Map<string, AgentEntry>();
   private readonly lastEmitted = new Map<string, CachedSuggestions>();
+  private readonly pendingQuestions = new Map<string, PendingQuestion>();
   private readonly queue: string[] = [];
   private unsubscribe: (() => void) | null = null;
   private inFlight = 0;
@@ -83,6 +94,12 @@ export class PromptSuggestionService {
         switch (event.event.type) {
           case "turn_completed":
             this.schedule(event.agentId);
+            break;
+          case "permission_requested":
+            this.scheduleQuestion(event.agentId, event.event.request);
+            break;
+          case "permission_resolved":
+            this.pendingQuestions.delete(event.agentId);
             break;
           case "turn_started":
           case "turn_failed":
@@ -105,6 +122,7 @@ export class PromptSuggestionService {
     }
     this.entries.clear();
     this.lastEmitted.clear();
+    this.pendingQuestions.clear();
     this.queue.length = 0;
   }
 
@@ -123,7 +141,13 @@ export class PromptSuggestionService {
     }
 
     const cached = this.lastEmitted.get(agentId);
-    if (cached && cached.timelineLength === this.options.agents.getTimeline(agentId).length) {
+    const pendingPermissionId = this.pendingQuestions.get(agentId)?.permissionId;
+    const cacheMatchesQuestion = cached?.payload.answersPermissionId === pendingPermissionId;
+    if (
+      cached &&
+      cacheMatchesQuestion &&
+      cached.timelineLength === this.options.agents.getTimeline(agentId).length
+    ) {
       this.options.emit({ type: "agent_prompt_suggestions", payload: cached.payload });
       return { accepted: true };
     }
@@ -163,6 +187,20 @@ export class PromptSuggestionService {
     if (queued >= 0) {
       this.queue.splice(queued, 1);
     }
+  }
+
+  // Only a question: a tool or plan approval is a decision to read, and a guess
+  // next to it would be a nudge to approve something unread.
+  private scheduleQuestion(agentId: string, request: AgentPermissionRequest): void {
+    if (request.kind !== "question") {
+      return;
+    }
+    const questions = parseQuestionFormQuestions(request.input);
+    if (!questions) {
+      return;
+    }
+    this.pendingQuestions.set(agentId, { permissionId: request.id, questions });
+    this.schedule(agentId);
   }
 
   private schedule(agentId: string): void {
@@ -232,13 +270,17 @@ export class PromptSuggestionService {
     let built: Awaited<ReturnType<typeof buildPromptSuggestionPrompt>>;
     const timeline = this.options.agents.getTimeline(agentId);
     const timelineLengthAtBuild = timeline.length;
+    const question = this.pendingQuestions.get(agentId);
     try {
-      built = await buildPromptSuggestionPrompt({
+      const common = {
         timeline,
         agentTitle: agent.config?.title ?? null,
         cwd: agent.cwd,
         workspaceGitService: this.options.workspaceGitService,
-      });
+      };
+      built = question
+        ? await buildQuestionAnswerPrompt({ ...common, questions: question.questions })
+        : await buildPromptSuggestionPrompt(common);
     } catch (error) {
       this.options.logger.debug({ err: error, agentId }, "prompt suggestions: timeline unreadable");
       return;
@@ -273,6 +315,7 @@ export class PromptSuggestionService {
         turnSeq: token,
         suggestions,
         generatedAt: (this.options.now?.() ?? new Date()).toISOString(),
+        ...(question ? { answersPermissionId: question.permissionId } : {}),
       };
       // Kept so a client that opens this chat later can be answered without
       // spending a second call on a conversation that has not moved.

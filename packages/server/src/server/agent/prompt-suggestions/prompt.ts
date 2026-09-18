@@ -5,6 +5,10 @@ import {
   type RepoRootResolver,
 } from "../../../utils/build-metadata-prompt.js";
 import { PROMPT_SUGGESTION_MAX_CHARS, PROMPT_SUGGESTION_MAX_COUNT } from "./types.js";
+import {
+  questionShowsTextInput,
+  type QuestionFormQuestion,
+} from "@getpaseo/protocol/question-form";
 
 // Suggestions guess the next message, not a summary of the session, so the last
 // exchange carries almost all the signal.
@@ -67,6 +71,62 @@ export async function buildPromptSuggestionPrompt(
   };
 }
 
+export interface BuildQuestionAnswerPromptInput extends BuildPromptSuggestionPromptInput {
+  // The free-text questions the agent is waiting on, in the order it asked them.
+  questions: readonly QuestionFormQuestion[];
+}
+
+/**
+ * Answers to a question the agent asked, for the question card's own answer box.
+ * Null when no question carries a free-text box: a question that only offers
+ * options is answered by picking one, and a guess there would just be noise.
+ */
+export async function buildQuestionAnswerPrompt(
+  input: BuildQuestionAnswerPromptInput,
+): Promise<BuiltPromptSuggestionPrompt | null> {
+  const answerable = input.questions.filter((question) => questionShowsTextInput(question));
+  if (answerable.length === 0) {
+    return null;
+  }
+
+  const activity = curateAgentActivity([...input.timeline], {
+    labelAssistantMessages: true,
+    includeKinds: CONTEXT_KINDS,
+    includeExternalToolInput: false,
+  });
+  const context = takeTail(activity, input.maxContextChars ?? PROMPT_SUGGESTION_CONTEXT_CHARS);
+  const header = buildHeader(input);
+  const conversation = context.text.trim()
+    ? `<conversation>\n${context.text}\n</conversation>`
+    : "";
+  const asked = answerable.map((question) => renderQuestion(question)).join("\n\n");
+
+  const prompt = await buildMetadataPrompt({
+    cwd: input.cwd ?? "",
+    workspaceGitService: input.workspaceGitService,
+    contract: QUESTION_CONTRACT,
+    styles: [{ configKey: "promptSuggestions", default: QUESTION_RULES }],
+    after: [header, conversation, `<question>\n${asked}\n</question>`]
+      .filter((section) => Boolean(section))
+      .join("\n\n"),
+    trailing: JSON_SHAPE,
+  });
+
+  return { prompt, contextChars: context.text.length, truncated: context.truncated };
+}
+
+function renderQuestion(question: QuestionFormQuestion): string {
+  const lines = [question.question.trim()];
+  if (question.options.length > 0) {
+    lines.push(
+      `Options the developer can already pick: ${question.options
+        .map((option) => option.label)
+        .join(" | ")}`,
+    );
+  }
+  return lines.join("\n");
+}
+
 function hasConversation(timeline: readonly AgentTimelineItem[]): boolean {
   return timeline.some(
     (item) =>
@@ -120,3 +180,19 @@ const RULES = [
 ].join("\n");
 
 const JSON_SHAPE = 'Return JSON only: {"suggestions": ["...", "..."]}';
+
+const QUESTION_CONTRACT = [
+  "A coding agent has stopped to ask the developer a question, and the developer's",
+  "answer box is empty. Write the answers they are most likely to give:",
+  `at least one, at most ${PROMPT_SUGGESTION_MAX_COUNT}, best guess first.`,
+].join(" ");
+
+const QUESTION_RULES = [
+  "Rules:",
+  "- Answer the question as the developer would, in their own voice.",
+  `- One line each, at most ${PROMPT_SUGGESTION_MAX_CHARS} characters, no numbering or quotes.`,
+  "- Each answer must be a different decision, not a rewording of the same one.",
+  "- Repeat nothing the developer can already pick from the listed options.",
+  "- Decide: no 'up to you', no restating the question, no asking a question back.",
+  "- Write in the language the developer has been using.",
+].join("\n");

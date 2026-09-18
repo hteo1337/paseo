@@ -5,6 +5,7 @@ import type { AgentPermissionResponse } from "@getpaseo/protocol/agent-types";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { i18n as testI18n } from "@/i18n/i18next";
 import type { PendingPermission } from "@/types/shared";
+import { useSessionStore } from "@/stores/session-store";
 import { QuestionFormCard } from "./question-form-card";
 
 // Load translations so controls expose their real accessible names.
@@ -55,6 +56,7 @@ function mountCard(question: Record<string, unknown>) {
   act(() =>
     root.render(
       <QuestionFormCard
+        serverId="server-1"
         permission={buildPermission(question)}
         onRespond={onRespond}
         isResponding={false}
@@ -77,13 +79,15 @@ function mountCard(question: Record<string, unknown>) {
       input.dispatchEvent(new InputEvent("input", { bubbles: true, data: text }));
     });
   };
+  const pickDraft = (text: string) =>
+    act(() => view.getByRole("button", { name: `Use suggestion: ${text}` }).click());
   const submit = () => act(() => view.getByRole("button", { name: "Submit" }).click());
   const submittedAnswers = (): Record<string, string> => {
     const response = onRespond.mock.calls[0]?.[0];
     if (!response || response.behavior !== "allow") throw new Error("card did not submit");
     return (response.updatedInput as { answers: Record<string, string> }).answers;
   };
-  return { check, type, otherInput, submit, submittedAnswers };
+  return { check, type, pickDraft, otherInput, submit, submittedAnswers };
 }
 
 const multiSelectQuestion = {
@@ -145,5 +149,29 @@ describe("QuestionFormCard other answers", () => {
     expect(card.otherInput().value).toBe("");
     card.submit();
     expect(card.submittedAnswers()).toEqual({ Provider: "Codex" });
+  });
+});
+
+describe("QuestionFormCard drafted answers", () => {
+  afterEach(() => useSessionStore.setState({ sessions: {} }));
+
+  it("shows a picked draft in the answer box and submits it", () => {
+    const suggestions = [{ id: "s1", text: "OpenCode" }];
+    const promptSuggestions = new Map([
+      ["agent-1", { turnSeq: 1, suggestions, generatedAt: "", answersPermissionId: "perm-1" }],
+    ]);
+    useSessionStore.setState({
+      sessions: { "server-1": { promptSuggestions } } as unknown as ReturnType<
+        typeof useSessionStore.getState
+      >["sessions"],
+    });
+    const card = mountCard(singleSelectQuestion);
+
+    card.check("Codex");
+    card.pickDraft("OpenCode");
+
+    expect(card.otherInput().value).toBe("OpenCode");
+    card.submit();
+    expect(card.submittedAnswers()).toEqual({ Provider: "OpenCode" });
   });
 });

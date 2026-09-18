@@ -25,6 +25,27 @@ function streamEvent(agentId: string, type: AgentStreamEvent["type"]): AgentMana
   } as AgentManagerEvent;
 }
 
+function questionEvent(
+  agentId: string,
+  request: { id: string; kind: string; input?: unknown },
+): AgentManagerEvent {
+  return {
+    type: "agent_stream",
+    agentId,
+    event: {
+      type: "permission_requested",
+      provider: "claude",
+      request: { name: "question", title: "Question", ...request },
+    },
+  } as AgentManagerEvent;
+}
+
+const FREE_TEXT_QUESTION = {
+  questions: [
+    { question: "Which database should the worker write to?", header: "DB", options: [] },
+  ],
+};
+
 function createHarness(
   overrides: {
     agents?: Record<string, FakeAgent>;
@@ -80,6 +101,9 @@ function createHarness(
     emitStream(agentId: string, type: AgentStreamEvent["type"]) {
       subscriber?.(streamEvent(agentId, type));
     },
+    emitEvent(event: AgentManagerEvent) {
+      subscriber?.(event);
+    },
   };
 }
 
@@ -117,6 +141,59 @@ describe("PromptSuggestionService", () => {
       ],
       generatedAt: "2026-09-18T10:00:00.000Z",
     });
+  });
+
+  it("drafts answers when the agent asks the developer a question", async () => {
+    const harness = createHarness();
+
+    harness.emitEvent(
+      questionEvent("a1", { id: "perm-1", kind: "question", input: FREE_TEXT_QUESTION }),
+    );
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(harness.pending).toHaveLength(1);
+    expect(harness.pending[0].prompt).toContain("Which database should the worker write to?");
+    expect(harness.pending[0].prompt).toContain("stopped to ask the developer a question");
+
+    harness.pending[0].resolve({ suggestions: ["Postgres, the one the API already uses"] });
+    await vi.runAllTimersAsync();
+
+    expect(harness.emitted[0].payload.answersPermissionId).toBe("perm-1");
+  });
+
+  // A suggestion beside a tool approval is a nudge to approve something unread.
+  it("stays out of a tool approval", async () => {
+    const harness = createHarness();
+
+    harness.emitEvent(
+      questionEvent("a1", { id: "perm-2", kind: "tool", input: FREE_TEXT_QUESTION }),
+    );
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(harness.pending).toHaveLength(0);
+  });
+
+  it("skips a question that only offers options to pick", async () => {
+    const harness = createHarness();
+
+    harness.emitEvent(
+      questionEvent("a1", {
+        id: "perm-3",
+        kind: "question",
+        input: {
+          questions: [
+            {
+              question: "Which database?",
+              header: "DB",
+              options: [{ label: "Postgres" }, { label: "SQLite" }],
+            },
+          ],
+        },
+      }),
+    );
+    await vi.advanceTimersByTimeAsync(400);
+
+    expect(harness.pending).toHaveLength(0);
   });
 
   it("generates on request for a chat opened with nothing cached", async () => {
