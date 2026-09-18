@@ -34,6 +34,7 @@ interface SupportedMutableConfigPatch {
   providers?: MutableDaemonConfig["providers"];
   removeProviders?: string[];
   metadataGeneration?: MutableDaemonConfig["metadataGeneration"];
+  promptSuggestions?: MutableDaemonConfig["promptSuggestions"];
   autoArchiveAfterMerge?: boolean;
   enableTerminalAgentHooks?: boolean;
   idleRuntimeCleanup?: boolean;
@@ -257,6 +258,7 @@ const RELOADABLE_PATHS = [
   "agents.providers",
   "agents.catalogRefreshTimeoutMs",
   "agents.metadataGeneration",
+  "agents.promptSuggestions",
   "agents.skills.selection",
   "pluginsEnabled",
 ] as const;
@@ -285,6 +287,7 @@ const PERSISTED_TO_MUTABLE_PATH = new Map<string, string>([
   ["agents.providers", "providers"],
   ["agents.catalogRefreshTimeoutMs", "catalogRefreshTimeoutMs"],
   ["agents.metadataGeneration", "metadataGeneration"],
+  ["agents.promptSuggestions", "promptSuggestions"],
   ["agents.skills.selection", "skills.selection"],
   ["pluginsEnabled", "pluginsEnabled"],
 ]);
@@ -350,6 +353,9 @@ function pickSupportedPatchFields(patch: MutableDaemonConfigPatch): SupportedMut
     ...(patch.removeProviders !== undefined ? { removeProviders: patch.removeProviders } : {}),
     ...(patch.metadataGeneration?.providers !== undefined
       ? { metadataGeneration: { providers: patch.metadataGeneration.providers } }
+      : {}),
+    ...(patch.promptSuggestions?.enabled !== undefined
+      ? { promptSuggestions: { enabled: patch.promptSuggestions.enabled } }
       : {}),
     ...(patch.autoArchiveAfterMerge !== undefined
       ? { autoArchiveAfterMerge: patch.autoArchiveAfterMerge }
@@ -794,6 +800,7 @@ function mergeMutableAgentPatch(
   if (
     patch.providers === undefined &&
     patch.metadataGeneration === undefined &&
+    patch.promptSuggestions === undefined &&
     patch.skills === undefined &&
     !hasRestartRecoveryPatch(patch) &&
     patch.idleRuntimeCleanup === undefined &&
@@ -823,6 +830,10 @@ function mergeMutableAgentPatch(
         (entry) => !removed.has(entry.provider),
       ),
     };
+  }
+
+  if (patch.promptSuggestions?.enabled !== undefined) {
+    next["promptSuggestions"] = { enabled: patch.promptSuggestions.enabled };
   }
 
   if (patch.skills?.selection !== undefined) {

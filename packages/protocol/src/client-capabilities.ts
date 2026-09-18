@@ -56,6 +56,9 @@ export const CLIENT_CAPS = {
   // update subscriptions, because older apps auto-open a tab for every replicated root agent.
   backgroundAgents: "background_agents",
   browserHost: "browser_host",
+  // Prompt suggestions are additive chrome; a client that does not advertise
+  // this never receives the message, and the daemon skips generating for it.
+  promptSuggestions: "prompt_suggestions",
 } as const;
 
 export type ClientCapability = (typeof CLIENT_CAPS)[keyof typeof CLIENT_CAPS];
