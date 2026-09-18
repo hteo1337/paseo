@@ -2408,7 +2408,7 @@ export const ar: TranslationResources = {
         },
         promptSuggestions: {
           title: "اقتراح الرسائل التالية",
-          hint: "بعد انتهاء الوكيل، اقترح ما يمكن طلبه بعد ذلك",
+          hint: "اقتراح ما يمكن إرساله كلما كان مربع الكتابة فارغًا",
           accessibilityLabel: "اقتراح الرسائل التالية",
         },
         systemPrompt: {
