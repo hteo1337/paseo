@@ -5,7 +5,12 @@ import {
 } from "@getpaseo/protocol/question-form";
 import type { AgentPermissionRequest } from "../agent-sdk-types.js";
 import type { AgentManager } from "../agent-manager.js";
-import { buildPromptSuggestionPrompt, buildQuestionAnswerPrompt } from "./prompt.js";
+import {
+  buildNewChatSuggestionPrompt,
+  buildPromptSuggestionPrompt,
+  buildQuestionAnswerPrompt,
+} from "./prompt.js";
+import type { WorkspaceContextReader } from "./workspace-context.js";
 import type { RepoRootResolver } from "../../../utils/build-metadata-prompt.js";
 import {
   PROMPT_SUGGESTIONS_SCHEMA,
@@ -21,7 +26,7 @@ export interface PromptSuggestionGeneration {
     schema: typeof PROMPT_SUGGESTIONS_SCHEMA;
     schemaName: string;
     agentTitle: string;
-    configKey?: "promptSuggestions";
+    configKey?: "promptSuggestions" | "newChatSuggestions";
     currentSelection?: { provider?: string | null; model?: string | null };
   }): Promise<PromptSuggestionsResponse>;
 }
@@ -39,6 +44,9 @@ export interface PromptSuggestionServiceOptions {
   // Lets paseo.json steer the suggestion wording, the same way it steers every
   // other metadata prompt; absent, the built-in rules stand.
   workspaceGitService?: RepoRootResolver;
+  // Reads the checkout a brand-new chat starts in; absent, an empty chat is left
+  // without suggestions rather than guessed at blind.
+  readWorkspaceContext?: WorkspaceContextReader;
   hasListeners?: () => boolean;
   debounceMs?: number;
   maxConcurrent?: number;
@@ -257,6 +265,23 @@ export class PromptSuggestionService {
     return Boolean(agent) && !agent?.internal;
   }
 
+  // An empty chat has nothing to read but the checkout it opened in.
+  private async buildFromWorkspace(common: {
+    agentTitle: string | null;
+    cwd: string;
+    workspaceGitService?: RepoRootResolver;
+  }): Promise<Awaited<ReturnType<typeof buildPromptSuggestionPrompt>>> {
+    const read = this.options.readWorkspaceContext;
+    if (!read) {
+      return null;
+    }
+    const workspace = await read(common.cwd);
+    if (!workspace) {
+      return null;
+    }
+    return buildNewChatSuggestionPrompt({ ...common, workspace });
+  }
+
   private async generate(agentId: string, entry: AgentEntry): Promise<void> {
     const token = entry.token;
     if (!this.shouldGenerate(agentId)) {
@@ -268,6 +293,7 @@ export class PromptSuggestionService {
     }
 
     let built: Awaited<ReturnType<typeof buildPromptSuggestionPrompt>>;
+    let configKey: "promptSuggestions" | "newChatSuggestions" = "promptSuggestions";
     const timeline = this.options.agents.getTimeline(agentId);
     const timelineLengthAtBuild = timeline.length;
     const question = this.pendingQuestions.get(agentId);
@@ -278,9 +304,15 @@ export class PromptSuggestionService {
         cwd: agent.cwd,
         workspaceGitService: this.options.workspaceGitService,
       };
-      built = question
-        ? await buildQuestionAnswerPrompt({ ...common, questions: question.questions })
-        : await buildPromptSuggestionPrompt(common);
+      if (question) {
+        built = await buildQuestionAnswerPrompt({ ...common, questions: question.questions });
+      } else {
+        built = await buildPromptSuggestionPrompt(common);
+        if (!built) {
+          built = await this.buildFromWorkspace(common);
+          configKey = built ? "newChatSuggestions" : configKey;
+        }
+      }
     } catch (error) {
       this.options.logger.debug({ err: error, agentId }, "prompt suggestions: timeline unreadable");
       return;
@@ -298,7 +330,7 @@ export class PromptSuggestionService {
         schema: PROMPT_SUGGESTIONS_SCHEMA,
         schemaName: PROMPT_SUGGESTIONS_SCHEMA_NAME,
         agentTitle: "Prompt suggestions",
-        configKey: "promptSuggestions",
+        configKey,
         // When the metadata chain has nothing usable, fall back to the agent's own
         // model: it has already seen this conversation, so nothing new leaves.
         currentSelection: { provider: agent.provider, model: agent.config?.model ?? null },
