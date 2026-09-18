@@ -34,6 +34,7 @@ export function usePromptSuggestions(input: UsePromptSuggestionsInput): PromptSu
         suggestions: stored?.suggestions,
         turnSeq: stored?.turnSeq,
         generatedAt: stored?.generatedAt,
+        answersPermissionId: stored?.answersPermissionId,
         lastUserMessageAt,
         hasText: input.hasText,
         isAgentRunning: input.isAgentRunning,
