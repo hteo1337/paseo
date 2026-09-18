@@ -9,6 +9,8 @@ export interface UsePromptSuggestionsInput {
   hasText: boolean;
   isAgentRunning: boolean;
   isReadOnly: boolean;
+  // A new chat has no agent yet: agentId is its draft key and this is where it will run.
+  draftCwd?: string;
 }
 
 export interface PromptSuggestionsState extends PromptSuggestionView {
@@ -64,18 +66,32 @@ export function usePromptSuggestions(input: UsePromptSuggestionsInput): PromptSu
   // restart has none until we ask. One request per agent per mount.
   const client = useSessionStore((state) => state.sessions[input.serverId]?.client ?? null);
   const requestedFor = useRef<string | null>(null);
+  const draftCwd = input.draftCwd || undefined;
   useEffect(() => {
     if (!client || stored || input.hasText || input.isAgentRunning || input.isReadOnly) {
       return;
     }
-    if (requestedFor.current === input.agentId) {
+    // A draft that moves to another directory is a different chat to guess for.
+    const requestKey = `${input.agentId}\u0000${draftCwd ?? ""}`;
+    if (requestedFor.current === requestKey) {
       return;
     }
-    requestedFor.current = input.agentId;
-    void client.requestPromptSuggestions(input.agentId).catch(() => {
+    requestedFor.current = requestKey;
+    const pending = draftCwd
+      ? client.requestPromptSuggestions(input.agentId, { draftCwd })
+      : client.requestPromptSuggestions(input.agentId);
+    void pending.catch(() => {
       requestedFor.current = null;
     });
-  }, [client, stored, input.agentId, input.hasText, input.isAgentRunning, input.isReadOnly]);
+  }, [
+    client,
+    stored,
+    draftCwd,
+    input.agentId,
+    input.hasText,
+    input.isAgentRunning,
+    input.isReadOnly,
+  ]);
 
   const dismiss = useCallback(() => {
     if (stored) {
