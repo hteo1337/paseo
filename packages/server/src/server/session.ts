@@ -8539,6 +8539,13 @@ export class Session {
     if (shouldNotify) notified.add(subscription.owner.source);
   }
 
+  // Subscribing to an event is not the same as understanding its payload: a
+  // client that never advertised the capability must not receive it either way.
+  private sourceUnderstandsEvent(message: SessionOutboundMessage, source: object): boolean {
+    if (message.type !== "agent_prompt_suggestions") return true;
+    return this.supportsForSource(CLIENT_CAPS.promptSuggestions, source);
+  }
+
   private emitSubscribedEvent(message: SessionOutboundMessage, onlySource?: object): boolean {
     const event = sessionEventCategory(message);
     if (!event) return false;
@@ -8554,6 +8561,8 @@ export class Session {
             subscription.owner.source,
           )) ||
         (onlySource && subscription.owner.source !== onlySource)
+ ||
+        !this.sourceUnderstandsEvent(message, subscription.owner.source)
       )
         continue;
       this.emitEventToOwner(subscription, message, notified);
@@ -8566,6 +8575,7 @@ export class Session {
           (!onlySource || source === onlySource) &&
           !delivered.has(source) &&
           !this.delivery.isModern(source) &&
+          this.sourceUnderstandsEvent(message, source) &&
           this.wantsEvent(event, source)
         )
           this.onMessageToSource(source, this.workspaceSetupMessageForClient(message, source));
@@ -8768,6 +8778,7 @@ function sessionEventCategory(message: SessionOutboundMessage): SessionEventSubs
     case "project.update":
     case "providers_snapshot_update":
     case "agent_attention_required":
+    case "agent_prompt_suggestions":
     case "agent_permission_request":
     case "agent_permission_resolved":
     case "checkout_status_update":
@@ -8812,6 +8823,8 @@ function legacyWantsEvent(
       return !capabilities.has(CLIENT_CAPS.explicitEventSubscriptions);
     case "agent.provider_subagents.update":
       return capabilities.has(CLIENT_CAPS.providerSubagents);
+    case "agent_prompt_suggestions":
+      return capabilities.has(CLIENT_CAPS.promptSuggestions);
     default:
       return true;
   }
