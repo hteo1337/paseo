@@ -1854,6 +1854,7 @@ export const useSessionStore = create<SessionStore>()(
             turnSeq: next.turnSeq,
             suggestions: next.suggestions,
             generatedAt: next.generatedAt,
+            ...(next.answersPermissionId ? { answersPermissionId: next.answersPermissionId } : {}),
           });
           while (promptSuggestions.size > MAX_PROMPT_SUGGESTION_ENTRIES) {
             const oldest = promptSuggestions.keys().next();
