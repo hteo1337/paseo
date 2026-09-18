@@ -2681,7 +2681,7 @@ export const ptBR: TranslationResources = {
         },
         promptSuggestions: {
           title: "Sugerir próximas mensagens",
-          hint: "Quando um agente terminar, sugerir o que pedir em seguida",
+          hint: "Sugerir o que enviar sempre que o campo de mensagem estiver vazio",
           accessibilityLabel: "Sugerir próximas mensagens",
         },
         systemPrompt: {
