@@ -527,4 +527,94 @@ describe("PromptSuggestionService", () => {
       expect(harness.pending).toHaveLength(0);
     });
   });
+
+  describe("a new-chat screen, before any agent exists", () => {
+    const WORKSPACE: NewChatWorkspaceContext = {
+      branch: "feat/drafts",
+      changedPaths: ["src/draft.ts"],
+      recentCommits: ["wip: drafts"],
+      moreChangedPaths: 0,
+    };
+
+    it("answers to the draft key from the checkout it will run in", async () => {
+      const reads: string[] = [];
+      const harness = createHarness({
+        agents: {},
+        readWorkspaceContext: async (cwd) => {
+          reads.push(cwd);
+          return WORKSPACE;
+        },
+      });
+
+      expect(harness.service.requestForDraft("draft:1", "/repo")).toEqual({ accepted: true });
+      await vi.advanceTimersByTimeAsync(0);
+
+      expect(reads).toEqual(["/repo"]);
+      expect(harness.pending).toHaveLength(1);
+      expect(harness.pending[0].configKey).toBe("newChatSuggestions");
+      expect(harness.pending[0].prompt).toContain("src/draft.ts");
+
+      harness.pending[0].resolve({ suggestions: ["finish the draft path"] });
+      await vi.runAllTimersAsync();
+      expect(harness.emitted[0].payload).toMatchObject({
+        agentId: "draft:1",
+        suggestions: [{ text: "finish the draft path" }],
+      });
+    });
+
+    it("re-sends a delivered answer instead of paying for it twice", async () => {
+      const harness = createHarness({ agents: {}, readWorkspaceContext: async () => WORKSPACE });
+
+      harness.service.requestForDraft("draft:1", "/repo");
+      await vi.advanceTimersByTimeAsync(0);
+      harness.pending[0].resolve({ suggestions: ["finish the draft path"] });
+      await vi.runAllTimersAsync();
+
+      harness.service.requestForDraft("draft:1", "/repo");
+      await vi.runAllTimersAsync();
+
+      expect(harness.pending).toHaveLength(1);
+      expect(harness.emitted).toHaveLength(2);
+      expect(harness.emitted[1].payload.agentId).toBe("draft:1");
+    });
+
+    it("drops the answer for a directory the draft has since left", async () => {
+      const harness = createHarness({ agents: {}, readWorkspaceContext: async () => WORKSPACE });
+
+      harness.service.requestForDraft("draft:1", "/repo");
+      await vi.advanceTimersByTimeAsync(0);
+      harness.service.requestForDraft("draft:1", "/other");
+      await vi.advanceTimersByTimeAsync(0);
+
+      harness.pending[0].resolve({ suggestions: ["stale guess"] });
+      harness.pending[1].resolve({ suggestions: ["current guess"] });
+      await vi.runAllTimersAsync();
+
+      expect(harness.emitted).toHaveLength(1);
+      expect(harness.emitted[0].payload.suggestions[0].text).toBe("current guess");
+    });
+
+    it("lets the next open retry when the directory said nothing", async () => {
+      let workspace: NewChatWorkspaceContext | null = null;
+      const harness = createHarness({ agents: {}, readWorkspaceContext: async () => workspace });
+
+      harness.service.requestForDraft("draft:1", "/empty");
+      await vi.runAllTimersAsync();
+      expect(harness.pending).toHaveLength(0);
+
+      workspace = WORKSPACE;
+      harness.service.requestForDraft("draft:1", "/empty");
+      await vi.advanceTimersByTimeAsync(0);
+      expect(harness.pending).toHaveLength(1);
+    });
+
+    it("declines when suggestions are turned off", () => {
+      const harness = createHarness({
+        agents: {},
+        enabled: false,
+        readWorkspaceContext: async () => WORKSPACE,
+      });
+      expect(harness.service.requestForDraft("draft:1", "/repo").accepted).toBe(false);
+    });
+  });
 });
