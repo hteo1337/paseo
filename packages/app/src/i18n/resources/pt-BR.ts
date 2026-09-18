@@ -2288,6 +2288,12 @@ export const ptBR: TranslationResources = {
       modelHint: "Somente este modelo é usado. Se ele falhar, o Paseo não tenta outro modelo",
       docs: "Documentação",
       saveError: "Não foi possível atualizar a geração de metadados",
+      suggestionModel: "Modelo de sugestões",
+      suggestionShared: "Igual",
+      suggestionCustom: "Personalizado",
+      suggestionSharedHint: "As sugestões usam o modelo acima",
+      suggestionCustomHint:
+        "Sugestões, respostas propostas e ideias para novos chats usam este modelo",
     },
     voice: {
       offline: "Conecte-se a este host para configurar a voz.",
