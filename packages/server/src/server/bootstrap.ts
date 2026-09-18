@@ -214,6 +214,7 @@ import { deleteLocalCredential, writeLocalCredential } from "./local-credential.
 import { createWebUiMiddleware } from "./web-ui.js";
 import { WorkspaceAutoName } from "./workspace-auto-name.js";
 import { PromptSuggestionService } from "./agent/prompt-suggestions/service.js";
+import { createWorkspaceContextReader } from "./agent/prompt-suggestions/workspace-context.js";
 import { createAgentStructuredTextGeneration } from "./session/checkout/git-metadata-generator.js";
 import { createGitMutationService } from "./session/git-mutation/git-mutation-service.js";
 import { workspaceIdsOnCheckout } from "./workspace-directory.js";
@@ -1110,6 +1111,7 @@ export async function createPaseoDaemon(
     }),
     emit: emitExternalSessionMessage,
     workspaceGitService,
+    readWorkspaceContext: createWorkspaceContextReader(),
     isEnabled: () => daemonConfigStore.get().promptSuggestions?.enabled !== false,
     hasListeners: () => (wsServer?.listSessions().length ?? 0) > 0,
     logger,
