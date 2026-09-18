@@ -2291,6 +2291,12 @@ export const ar: TranslationResources = {
       modelHint: "يُستخدم هذا النموذج فقط. إذا فشل، لا يجرّب Paseo نموذجًا آخر",
       docs: "الوثائق",
       saveError: "تعذر تحديث إنشاء البيانات الوصفية",
+      suggestionModel: "نموذج الاقتراحات",
+      suggestionShared: "نفسه",
+      suggestionCustom: "مخصص",
+      suggestionSharedHint: "تستخدم الاقتراحات النموذج أعلاه",
+      suggestionCustomHint:
+        "تستخدم الاقتراحات والإجابات المقترحة وأفكار المحادثة الجديدة هذا النموذج",
     },
     voice: {
       offline: "اتصل بهذا المضيف لضبط الصوت.",
