@@ -40,6 +40,11 @@ export interface PromptSuggestionServiceOptions {
   now?: () => Date;
 }
 
+interface CachedSuggestions {
+  payload: AgentPromptSuggestionsMessage["payload"];
+  timelineLength: number;
+}
+
 interface AgentEntry {
   timer: ReturnType<typeof setTimeout> | null;
   // A turn that lands while this agent is generating waits here; dropping it
@@ -57,6 +62,7 @@ const DEFAULT_MAX_CONCURRENT = 2;
 export class PromptSuggestionService {
   private readonly options: PromptSuggestionServiceOptions;
   private readonly entries = new Map<string, AgentEntry>();
+  private readonly lastEmitted = new Map<string, CachedSuggestions>();
   private readonly queue: string[] = [];
   private unsubscribe: (() => void) | null = null;
   private inFlight = 0;
@@ -98,7 +104,37 @@ export class PromptSuggestionService {
       this.cancel(agentId);
     }
     this.entries.clear();
+    this.lastEmitted.clear();
     this.queue.length = 0;
+  }
+
+  /**
+   * Answer a client that opened a chat and holds no suggestion for it. A cached
+   * payload is re-emitted when the conversation has not moved since; otherwise
+   * this queues a generation and the usual event carries the result.
+   */
+  requestFor(agentId: string): { accepted: boolean; error?: string } {
+    if (!this.options.isEnabled()) {
+      return { accepted: false, error: "Prompt suggestions are turned off for this host." };
+    }
+    const agent = this.options.agents.getAgent(agentId);
+    if (!agent || agent.internal) {
+      return { accepted: false, error: "Unknown agent." };
+    }
+
+    const cached = this.lastEmitted.get(agentId);
+    if (cached && cached.timelineLength === this.options.agents.getTimeline(agentId).length) {
+      this.options.emit({ type: "agent_prompt_suggestions", payload: cached.payload });
+      return { accepted: true };
+    }
+
+    const entry = this.entryFor(agentId);
+    if (entry.generating || entry.timer || this.queue.includes(agentId)) {
+      return { accepted: true };
+    }
+    entry.token += 1;
+    this.enqueue(agentId);
+    return { accepted: true };
   }
 
   private entryFor(agentId: string): AgentEntry {
@@ -122,6 +158,7 @@ export class PromptSuggestionService {
     }
     entry.token += 1;
     entry.requeue = false;
+    this.lastEmitted.delete(agentId);
     const queued = this.queue.indexOf(agentId);
     if (queued >= 0) {
       this.queue.splice(queued, 1);
@@ -193,9 +230,11 @@ export class PromptSuggestionService {
     }
 
     let built: Awaited<ReturnType<typeof buildPromptSuggestionPrompt>>;
+    const timeline = this.options.agents.getTimeline(agentId);
+    const timelineLengthAtBuild = timeline.length;
     try {
       built = await buildPromptSuggestionPrompt({
-        timeline: this.options.agents.getTimeline(agentId),
+        timeline,
         agentTitle: agent.config?.title ?? null,
         cwd: agent.cwd,
         workspaceGitService: this.options.workspaceGitService,
@@ -229,15 +268,16 @@ export class PromptSuggestionService {
       if (suggestions.length === 0) {
         return;
       }
-      this.options.emit({
-        type: "agent_prompt_suggestions",
-        payload: {
-          agentId,
-          turnSeq: token,
-          suggestions,
-          generatedAt: (this.options.now?.() ?? new Date()).toISOString(),
-        },
-      });
+      const payload = {
+        agentId,
+        turnSeq: token,
+        suggestions,
+        generatedAt: (this.options.now?.() ?? new Date()).toISOString(),
+      };
+      // Kept so a client that opens this chat later can be answered without
+      // spending a second call on a conversation that has not moved.
+      this.lastEmitted.set(agentId, { payload, timelineLength: timelineLengthAtBuild });
+      this.options.emit({ type: "agent_prompt_suggestions", payload });
     } catch (error) {
       // A guess that did not arrive is not an event the user needs to know about.
       this.options.logger.debug({ err: error, agentId }, "prompt suggestions: generation failed");
