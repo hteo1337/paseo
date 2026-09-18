@@ -431,6 +431,9 @@ export interface AgentPromptSuggestionsState {
   turnSeq: number;
   suggestions: PromptSuggestion[];
   generatedAt: string;
+  // Present when these answer a question the agent asked; the composer ignores
+  // them and the question card shows them beside its answer box.
+  answersPermissionId?: string;
 }
 
 // Suggestions arrive for every agent that finishes a turn, whether or not its
