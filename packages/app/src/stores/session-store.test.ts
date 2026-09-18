@@ -800,3 +800,63 @@ describe("removeWorkspace", () => {
     expect(after.workspaces).toBe(before.workspaces);
   });
 });
+
+describe("prompt suggestions", () => {
+  function storeSuggestion(agentId: string, generatedAt: string): void {
+    useSessionStore.getState().setPromptSuggestions("test-server", {
+      agentId,
+      turnSeq: 1,
+      suggestions: [{ id: "s1", text: `suggestion for ${agentId}` }],
+      generatedAt,
+    });
+  }
+
+  function storedAgents(): string[] {
+    const session = useSessionStore.getState().sessions["test-server"];
+    return session ? [...session.promptSuggestions.keys()] : [];
+  }
+
+  it("keeps only the newest entries and refreshes an updated agent", () => {
+    initializeTestSession();
+    for (let index = 0; index <= 32; index += 1) {
+      storeSuggestion(`a${index}`, "2026-09-18T10:00:00.000Z");
+    }
+
+    expect(storedAgents()).toHaveLength(32);
+    expect(storedAgents()[0]).toBe("a1");
+
+    storeSuggestion("a1", "2026-09-18T10:00:01.000Z");
+
+    expect(storedAgents().at(-1)).toBe("a1");
+  });
+
+  // A host's directory fetch replaces the activity map wholesale, so freshness
+  // cannot be inferred from the map at render time.
+  it("drops a suggestion the moment newer activity is recorded, not at render", () => {
+    initializeTestSession();
+    storeSuggestion("agent-a", "2026-09-18T10:00:00.000Z");
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-a", new Date("2026-09-18T10:00:30.000Z")]]));
+
+    expect(storedAgents()).toEqual([]);
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-b", new Date("2026-09-18T09:00:00.000Z")]]));
+
+    expect(storedAgents()).toEqual([]);
+  });
+
+  it("leaves a suggestion generated after the recorded activity alone", () => {
+    initializeTestSession();
+    storeSuggestion("agent-a", "2026-09-18T10:00:33.000Z");
+
+    useSessionStore
+      .getState()
+      .setAgentLastActivityBatch(new Map([["agent-a", new Date("2026-09-18T10:00:30.000Z")]]));
+
+    expect(storedAgents()).toEqual(["agent-a"]);
+  });
+});

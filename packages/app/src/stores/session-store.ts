@@ -39,6 +39,7 @@ import type {
   ServerCapabilities,
   WorkspaceDescriptorPayload,
   WorkspaceProjectDescriptorPayload,
+  PromptSuggestion,
 } from "@getpaseo/protocol/messages";
 import {
   normalizeWorkspaceOpaqueId,
@@ -421,7 +422,20 @@ export interface SessionState {
     string,
     Array<{ id: string; text: string; attachments: ComposerAttachment[] }>
   >;
+
+  // Prompt suggestions, keyed by agent id
+  promptSuggestions: Map<string, AgentPromptSuggestionsState>;
 }
+
+export interface AgentPromptSuggestionsState {
+  turnSeq: number;
+  suggestions: PromptSuggestion[];
+  generatedAt: string;
+}
+
+// Suggestions arrive for every agent that finishes a turn, whether or not its
+// composer is ever opened, so the map keeps only the newest few.
+const MAX_PROMPT_SUGGESTION_ENTRIES = 32;
 
 // Global store state
 interface SessionStoreState {
@@ -601,6 +615,12 @@ interface SessionStoreActions {
         ) => Map<string, Array<{ id: string; text: string; attachments: ComposerAttachment[] }>>),
   ) => void;
 
+  setPromptSuggestions: (
+    serverId: string,
+    next: AgentPromptSuggestionsState & { agentId: string },
+  ) => void;
+  clearPromptSuggestions: (serverId: string, agentId: string) => void;
+
   // Hydration
   setHasHydratedAgents: (serverId: string, hydrated: boolean) => void;
   setHasHydratedWorkspaces: (serverId: string, hydrated: boolean) => void;
@@ -653,6 +673,7 @@ function createInitialSessionState(
     pendingPermissions: new Map(),
     fileExplorer: new Map(),
     queuedMessages: new Map(),
+    promptSuggestions: new Map(),
   };
 }
 
@@ -699,6 +720,44 @@ function isSessionServerInfoUnchanged(input: {
   );
 }
 
+// The activity map is replaced wholesale per host, so an entry can be missing by
+// the time a composer reads it; a suggestion older than recorded activity dies here.
+function pruneSuggestionsPastActivity(
+  sessions: Record<string, SessionState>,
+  activity: ReadonlyMap<string, Date>,
+): Record<string, SessionState> | null {
+  let nextSessions: Record<string, SessionState> | null = null;
+  for (const [serverId, session] of Object.entries(sessions)) {
+    const promptSuggestions = withoutSuggestionsPastActivity(session.promptSuggestions, activity);
+    if (!promptSuggestions) {
+      continue;
+    }
+    nextSessions ??= { ...sessions };
+    nextSessions[serverId] = { ...session, promptSuggestions };
+  }
+  return nextSessions;
+}
+
+function withoutSuggestionsPastActivity(
+  current: Map<string, AgentPromptSuggestionsState>,
+  activity: ReadonlyMap<string, Date>,
+): Map<string, AgentPromptSuggestionsState> | null {
+  let next: Map<string, AgentPromptSuggestionsState> | null = null;
+  for (const [agentId, entry] of current) {
+    const activeAt = activity.get(agentId);
+    if (!activeAt) {
+      continue;
+    }
+    const generated = Date.parse(entry.generatedAt);
+    if (!Number.isFinite(generated) || activeAt.getTime() <= generated) {
+      continue;
+    }
+    next ??= new Map(current);
+    next.delete(agentId);
+  }
+  return next;
+}
+
 export const useSessionStore = create<SessionStore>()(
   subscribeWithSelector((set, get) => {
     const commitActivityUpdates: AgentLastActivityCommitter = (updates) => {
@@ -717,8 +776,10 @@ export const useSessionStore = create<SessionStore>()(
         if (!nextActivity) {
           return prev;
         }
+        const prunedSessions = pruneSuggestionsPastActivity(prev.sessions, nextActivity);
         return {
           ...prev,
+          sessions: prunedSessions ?? prev.sessions,
           agentLastActivity: nextActivity,
         };
       });
@@ -1724,8 +1785,10 @@ export const useSessionStore = create<SessionStore>()(
           if (!changed && nextActivity.size === prev.agentLastActivity.size) {
             return prev;
           }
+          const prunedSessions = pruneSuggestionsPastActivity(prev.sessions, nextActivity);
           return {
             ...prev,
+            sessions: prunedSessions ?? prev.sessions,
             agentLastActivity: new Map(nextActivity),
           };
         });
@@ -1794,6 +1857,51 @@ export const useSessionStore = create<SessionStore>()(
               ...prev.sessions,
               [serverId]: { ...session, queuedMessages: nextValue },
             },
+          };
+        });
+      },
+
+      setPromptSuggestions: (serverId, next) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session) {
+            return prev;
+          }
+          const current = session.promptSuggestions.get(next.agentId);
+          // A payload from a turn the client has already moved past is stale.
+          if (current && current.turnSeq > next.turnSeq) {
+            return prev;
+          }
+          const promptSuggestions = new Map(session.promptSuggestions);
+          promptSuggestions.delete(next.agentId);
+          promptSuggestions.set(next.agentId, {
+            turnSeq: next.turnSeq,
+            suggestions: next.suggestions,
+            generatedAt: next.generatedAt,
+          });
+          while (promptSuggestions.size > MAX_PROMPT_SUGGESTION_ENTRIES) {
+            const oldest = promptSuggestions.keys().next();
+            if (oldest.done) break;
+            promptSuggestions.delete(oldest.value);
+          }
+          return {
+            ...prev,
+            sessions: { ...prev.sessions, [serverId]: { ...session, promptSuggestions } },
+          };
+        });
+      },
+
+      clearPromptSuggestions: (serverId, agentId) => {
+        set((prev) => {
+          const session = prev.sessions[serverId];
+          if (!session?.promptSuggestions.has(agentId)) {
+            return prev;
+          }
+          const promptSuggestions = new Map(session.promptSuggestions);
+          promptSuggestions.delete(agentId);
+          return {
+            ...prev,
+            sessions: { ...prev.sessions, [serverId]: { ...session, promptSuggestions } },
           };
         });
       },
