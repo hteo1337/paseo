@@ -599,6 +599,7 @@ export type ResolvedDaemonSettings = Pick<
   | "resumeOnStartup"
   | "resumePrompt"
   | "providerCatalogRefreshTimeoutMs"
+  | "promptSuggestions"
   | "metadataGeneration"
   | "providerOverrides"
 >;
@@ -688,6 +689,7 @@ export function resolveReloadableConfig(
     ...resolveRestartRecoveryConfig(persisted.agents),
     providerCatalogRefreshTimeoutMs: persisted.agents?.catalogRefreshTimeoutMs,
     metadataGeneration: persisted.agents?.metadataGeneration,
+    promptSuggestions: persisted.agents?.promptSuggestions,
     providerOverrides: extractProviderOverrides(
       persisted.agents?.providers as Record<string, unknown> | undefined,
     ),
