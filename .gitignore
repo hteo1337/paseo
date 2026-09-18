@@ -10,6 +10,10 @@ result
 
 # Environment variables
 .env
+# vitest browser-mode artifacts
+packages/app/.vitest-attachments/
+packages/app/.vitest-screenshots/
+
 .env.test
 .env.local
 .env.test.local
