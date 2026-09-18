@@ -29,7 +29,7 @@ Suggestions are proposed at three moments: when an agent finishes a turn, when y
 
 The suggestion model only sees the recent user and assistant messages of that conversation. Tool calls, command output, sub-agent logs, and attachments are never included.
 
-A chat with no messages has no conversation to read, so its suggestions are built from the checkout instead: the current branch name, the subjects of the last few commits, and the paths of uncommitted files. Only names and subjects are sent — never the contents of a file or a diff. If the workspace is not a git repository, that chat gets no suggestions.
+A new chat, before you send anything, has no conversation to read, so its suggestions are built from the directory it will start in: the current branch name, the subjects of the last few commits, and the paths of uncommitted files. Only names and subjects are sent — never the contents of a file or a diff. If that directory is not a git repository, the new chat gets no suggestions.
 
 Suggestions cost one generation per finished turn, and one more for each chat you open that has none. To turn them off, open **Settings → Host** and turn off **Suggest next prompts**, or set it in `~/.paseo/config.json`:
 
