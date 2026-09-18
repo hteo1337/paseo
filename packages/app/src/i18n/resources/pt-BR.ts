@@ -2047,6 +2047,12 @@ export const ptBR: TranslationResources = {
       fallbackHint: "Se ele não estiver disponível, o Paseo usa outro modelo disponível",
       docs: "Documentação",
       saveError: "Não foi possível atualizar a geração de metadados",
+      suggestionModel: "Modelo de sugestões",
+      suggestionShared: "Igual",
+      suggestionCustom: "Personalizado",
+      suggestionSharedHint: "As sugestões usam o modelo acima",
+      suggestionCustomHint:
+        "Sugestões, respostas propostas e ideias para novos chats usam este modelo",
     },
     general: {
       title: "Geral",

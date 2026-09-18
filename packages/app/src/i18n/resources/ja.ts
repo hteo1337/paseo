@@ -2034,6 +2034,11 @@ export const ja: TranslationResources = {
       fallbackHint: "利用できない場合、Paseo は別の利用可能なモデルを使用します",
       docs: "ドキュメント",
       saveError: "メタデータ生成を更新できません",
+      suggestionModel: "提案モデル",
+      suggestionShared: "同じ",
+      suggestionCustom: "カスタム",
+      suggestionSharedHint: "提案には上のモデルを使用します",
+      suggestionCustomHint: "提案、回答の下書き、新しいチャットの案にこのモデルを使用します",
     },
     general: {
       title: "一般",
