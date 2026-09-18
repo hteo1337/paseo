@@ -184,6 +184,7 @@ const AgentMetadataGenerationSchema = z
     commitMessage: AgentMetadataGenerationKindSchema.optional(),
     pullRequest: AgentMetadataGenerationKindSchema.optional(),
     promptSuggestions: AgentMetadataGenerationKindSchema.optional(),
+    newChatSuggestions: AgentMetadataGenerationKindSchema.optional(),
   })
   .strict();
 
