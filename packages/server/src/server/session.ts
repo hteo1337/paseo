@@ -468,6 +468,9 @@ export interface SessionOptions {
   // defaults to the real checkout-git implementation.
   renameCurrentBranch?: typeof renameCurrentBranchDefault;
   workspaceGitService: WorkspaceGitService;
+  // Set by the daemon once the suggestion service exists; absent in tests and in
+  // hosts that never built one, where the request is simply declined.
+  requestPromptSuggestions?: (agentId: string) => { accepted: boolean; error?: string };
   workspaceAutoName: WorkspaceAutoName;
   daemonConfigStore: DaemonConfigStore;
   pluginRuntime?: {
@@ -719,6 +722,7 @@ export class Session {
   private readonly github: ForgeService;
   private readonly renameCurrentBranch: typeof renameCurrentBranchDefault;
   private readonly workspaceGitService: WorkspaceGitService;
+  private readonly requestPromptSuggestions: SessionOptions["requestPromptSuggestions"];
   private readonly workspaceAutoName: WorkspaceAutoName;
   private readonly gitMutation: GitMutationService;
   private readonly workspaceProvisioning: WorkspaceProvisioningService;
@@ -891,6 +895,7 @@ export class Session {
     this.github = github ?? createGitHubService();
     this.renameCurrentBranch = renameCurrentBranch ?? renameCurrentBranchDefault;
     this.workspaceGitService = workspaceGitService;
+    this.requestPromptSuggestions = options.requestPromptSuggestions;
     this.gitMutation = createGitMutationService({
       workspaceGitService: this.workspaceGitService,
       logger: this.sessionLogger,
@@ -2753,6 +2758,9 @@ export class Session {
         return this.agentConfigSession.handleSetAgentThinkingRequest(msg);
       case "agent.config.apply.request":
         return this.agentConfigSession.handleAgentConfigApplyRequest(msg);
+      case "agent.prompt_suggestions.request":
+        this.handlePromptSuggestionsRequest(msg);
+        return undefined;
       case "get_daemon_config_request":
         this.emit({
           type: "get_daemon_config_response",
@@ -4808,6 +4816,34 @@ export class Session {
   /**
    * Handle clearing agent attention flag
    */
+  private handlePromptSuggestionsRequest(
+    msg: Extract<SessionInboundMessage, { type: "agent.prompt_suggestions.request" }>,
+  ): void {
+    const respond = (accepted: boolean, error?: string): void => {
+      this.emit({
+        type: "agent.prompt_suggestions.response",
+        payload: {
+          requestId: msg.requestId,
+          agentId: msg.agentId,
+          accepted,
+          ...(error ? { error } : {}),
+        },
+      });
+    };
+    // Without the capability the client could not read the event this produces.
+    if (!this.supports(CLIENT_CAPS.promptSuggestions)) {
+      respond(false, "Client does not support prompt suggestions.");
+      return;
+    }
+    const request = this.requestPromptSuggestions;
+    if (!request) {
+      respond(false, "Prompt suggestions are unavailable on this host.");
+      return;
+    }
+    const outcome = request(msg.agentId);
+    respond(outcome.accepted, outcome.error);
+  }
+
   private async handleClearAgentAttention(
     agentId: string | string[],
     requestId?: string,
