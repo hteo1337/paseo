@@ -1904,6 +1904,9 @@ export const AgentPromptSuggestionsRequestMessageSchema = z.object({
   type: z.literal("agent.prompt_suggestions.request"),
   agentId: z.string(),
   requestId: z.string(),
+  // Set for a chat that has no agent yet: agentId is then the client's draft key,
+  // and the suggestion is built from the checkout the chat will start in.
+  draftCwd: z.string().optional(),
 });
 export type AgentPromptSuggestionsRequestMessage = z.infer<
   typeof AgentPromptSuggestionsRequestMessageSchema
