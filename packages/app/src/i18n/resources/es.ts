@@ -2286,10 +2286,10 @@ export const es: TranslationResources = {
       modelHint: "Solo se usa este modelo. Si falla, Paseo no prueba otro modelo",
       docs: "Documentación",
       saveError: "No se pudo actualizar la generación de metadatos",
-      suggestionModel: "Modelo de sugerencias",
+      suggestionSection: "Sugerencias de mensajes",
       suggestionShared: "Igual",
       suggestionCustom: "Personalizado",
-      suggestionSharedHint: "Las sugerencias usan el modelo de arriba",
+      suggestionSharedHint: "Las sugerencias usan el modelo de generación de metadatos",
       suggestionCustomHint:
         "Las sugerencias, las respuestas propuestas y las ideas para chats nuevos usan este modelo",
     },
