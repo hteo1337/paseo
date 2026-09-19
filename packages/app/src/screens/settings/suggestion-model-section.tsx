@@ -7,12 +7,13 @@ import { CombinedModelSelector } from "@/components/combined-model-selector";
 import { SegmentedControl } from "@/components/ui/segmented-control";
 import type { useProvidersSnapshot } from "@/hooks/use-providers-snapshot";
 import type { buildSelectableProviderSelectorProviders } from "@/provider-selection/provider-selection";
+import { SettingsSection } from "@/components/settings/headings/settings-section";
 import { settingsStyles } from "@/styles/settings";
 
 type SuggestionMode = "shared" | "custom";
 type ProviderEntry = MutableDaemonConfig["metadataGeneration"]["providers"][number];
 
-interface SuggestionModelRowProps {
+interface SuggestionModelSectionProps {
   serverId: string;
   metadataGeneration: MutableDaemonConfig["metadataGeneration"];
   patchConfig: (patch: MutableDaemonConfigPatch) => Promise<unknown>;
@@ -22,15 +23,16 @@ interface SuggestionModelRowProps {
 
 // One model for every suggestion kind; "Same" empties the per-kind lists so they
 // fall back to the shared model.
-export function SuggestionModelRow({
+export function SuggestionModelSection({
   serverId,
   metadataGeneration,
   patchConfig,
   providers,
   snapshot,
-}: SuggestionModelRowProps) {
+}: SuggestionModelSectionProps) {
   const { t } = useTranslation();
-  const configured = metadataGeneration.promptSuggestions?.providers?.[0] ?? null;
+  const configuredList = metadataGeneration.promptSuggestions?.providers;
+  const configured = configuredList?.[0] ?? null;
   const savedMode: SuggestionMode = configured ? "custom" : "shared";
   const [draftMode, setDraftMode] = useState<SuggestionMode | null>(null);
   const [isSaving, setIsSaving] = useState(false);
@@ -86,9 +88,9 @@ export function SuggestionModelRow({
   const handleModelSelect = useCallback(
     (provider: AgentProvider, model: string) => {
       setDraftMode("custom");
-      void save([{ provider, ...(model ? { model } : {}) }]);
+      void save([{ provider, ...(model ? { model } : {}) }, ...(configuredList?.slice(1) ?? [])]);
     },
-    [save],
+    [configuredList, save],
   );
 
   const handleSelectorOpen = useCallback(() => {
@@ -100,50 +102,55 @@ export function SuggestionModelRow({
   );
 
   return (
-    <>
-      <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
-        <View style={settingsStyles.rowContent}>
-          <Text style={settingsStyles.rowTitle}>
-            {t("settings.metadataGeneration.suggestionModel")}
-          </Text>
-          <Text style={settingsStyles.rowHint}>
-            {mode === "shared"
-              ? t("settings.metadataGeneration.suggestionSharedHint")
-              : t("settings.metadataGeneration.suggestionCustomHint")}
-          </Text>
-        </View>
-        <SegmentedControl
-          options={modeOptions}
-          value={mode}
-          onValueChange={handleModeChange}
-          size="sm"
-          testID="suggestion-model-mode"
-        />
-      </View>
-      {mode === "custom" ? (
-        <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+    <SettingsSection
+      title={t("settings.metadataGeneration.suggestionSection")}
+      testID="suggestion-model-settings"
+    >
+      <View style={settingsStyles.card}>
+        <View style={settingsStyles.row}>
           <View style={settingsStyles.rowContent}>
-            <Text style={settingsStyles.rowTitle}>{t("settings.metadataGeneration.model")}</Text>
+            <Text style={settingsStyles.rowTitle}>
+              {t("settings.metadataGeneration.selection")}
+            </Text>
             <Text style={settingsStyles.rowHint}>
-              {t("settings.metadataGeneration.fallbackHint")}
+              {mode === "shared"
+                ? t("settings.metadataGeneration.suggestionSharedHint")
+                : t("settings.metadataGeneration.suggestionCustomHint")}
             </Text>
           </View>
-          <CombinedModelSelector
-            providers={providers}
-            selectedProvider={configured?.provider ?? ""}
-            selectedModel={configured?.model ?? ""}
-            onSelect={handleModelSelect}
-            isLoading={snapshot.isLoading || snapshot.isFetching}
-            onOpen={handleSelectorOpen}
-            onRetryProvider={handleRetryProvider}
-            isRetryingProvider={snapshot.isRefreshing}
-            disabled={isSaving}
-            serverId={serverId}
-            desktopPlacement="bottom-start"
-            desktopMinWidth={360}
+          <SegmentedControl
+            options={modeOptions}
+            value={mode}
+            onValueChange={handleModeChange}
+            size="sm"
+            testID="suggestion-model-mode"
           />
         </View>
-      ) : null}
-    </>
+        {mode === "custom" ? (
+          <View style={[settingsStyles.row, settingsStyles.rowBorder]}>
+            <View style={settingsStyles.rowContent}>
+              <Text style={settingsStyles.rowTitle}>{t("settings.metadataGeneration.model")}</Text>
+              <Text style={settingsStyles.rowHint}>
+                {t("settings.metadataGeneration.fallbackHint")}
+              </Text>
+            </View>
+            <CombinedModelSelector
+              providers={providers}
+              selectedProvider={configured?.provider ?? ""}
+              selectedModel={configured?.model ?? ""}
+              onSelect={handleModelSelect}
+              isLoading={snapshot.isLoading || snapshot.isFetching}
+              onOpen={handleSelectorOpen}
+              onRetryProvider={handleRetryProvider}
+              isRetryingProvider={snapshot.isRefreshing}
+              disabled={isSaving}
+              serverId={serverId}
+              desktopPlacement="bottom-start"
+              desktopMinWidth={360}
+            />
+          </View>
+        ) : null}
+      </View>
+    </SettingsSection>
   );
 }
