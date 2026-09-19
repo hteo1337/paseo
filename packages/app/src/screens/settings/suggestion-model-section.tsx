@@ -21,7 +21,7 @@ interface SuggestionModelSectionProps {
   snapshot: ReturnType<typeof useProvidersSnapshot>;
 }
 
-// One model for every suggestion kind; "Same" empties the per-kind lists so they
+// One model for every suggestion kind; "Automatic" empties the per-kind lists so they
 // fall back to the shared model.
 export function SuggestionModelSection({
   serverId,
@@ -44,8 +44,8 @@ export function SuggestionModelSection({
 
   const modeOptions = useMemo(
     () => [
-      { value: "shared" as const, label: t("settings.metadataGeneration.suggestionShared") },
-      { value: "custom" as const, label: t("settings.metadataGeneration.suggestionCustom") },
+      { value: "shared" as const, label: t("settings.metadataGeneration.automatic") },
+      { value: "custom" as const, label: t("settings.metadataGeneration.preferred") },
     ],
     [t],
   );
