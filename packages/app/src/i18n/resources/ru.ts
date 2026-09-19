@@ -2289,10 +2289,10 @@ export const ru: TranslationResources = {
         "Используется только эта модель. Если она не сработает, Paseo не будет пробовать другую модель",
       docs: "Документация",
       saveError: "Не удалось обновить настройки генерации метаданных",
-      suggestionModel: "Модель подсказок",
+      suggestionSection: "Подсказки сообщений",
       suggestionShared: "Та же",
       suggestionCustom: "Своя",
-      suggestionSharedHint: "Подсказки используют модель выше",
+      suggestionSharedHint: "Подсказки используют модель генерации метаданных",
       suggestionCustomHint:
         "Подсказки, черновики ответов и идеи для нового чата используют эту модель",
     },
