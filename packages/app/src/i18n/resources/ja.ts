@@ -2035,8 +2035,6 @@ export const ja: TranslationResources = {
       docs: "ドキュメント",
       saveError: "メタデータ生成を更新できません",
       suggestionSection: "メッセージの提案",
-      suggestionShared: "同じ",
-      suggestionCustom: "カスタム",
       suggestionSharedHint: "提案にはメタデータ生成のモデルを使用します",
       suggestionCustomHint: "提案、回答の下書き、新しいチャットの案にこのモデルを使用します",
     },

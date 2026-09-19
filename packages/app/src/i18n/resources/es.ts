@@ -2063,8 +2063,6 @@ export const es: TranslationResources = {
       docs: "Documentación",
       saveError: "No se pudo actualizar la generación de metadatos",
       suggestionSection: "Sugerencias de mensajes",
-      suggestionShared: "Igual",
-      suggestionCustom: "Personalizado",
       suggestionSharedHint: "Las sugerencias usan el modelo de generación de metadatos",
       suggestionCustomHint:
         "Las sugerencias, las respuestas propuestas y las ideas para chats nuevos usan este modelo",
