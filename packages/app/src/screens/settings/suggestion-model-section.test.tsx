@@ -18,6 +18,11 @@ vi.mock("react-i18next", () => ({
 
 vi.mock("@/styles/settings", () => ({ settingsStyles: {} }));
 
+vi.mock("@/components/settings/headings/settings-section", () => ({
+  SettingsSection: ({ title, children }: { title: string; children?: React.ReactNode }) =>
+    React.createElement("section", { "aria-label": title }, children),
+}));
+
 vi.mock("@/components/ui/segmented-control", () => ({
   SegmentedControl: ({
     options,
@@ -60,7 +65,7 @@ vi.mock("@/components/combined-model-selector", () => ({
     ),
 }));
 
-import { SuggestionModelRow } from "./suggestion-model-row";
+import { SuggestionModelSection } from "./suggestion-model-section";
 
 const SHARED = [{ provider: "claude-auto", model: "haiku" }];
 
@@ -78,7 +83,7 @@ const snapshot = {
   refresh: vi.fn(),
 } as never;
 
-describe("SuggestionModelRow", () => {
+describe("SuggestionModelSection", () => {
   let container: HTMLDivElement;
   let root: Root;
   const patchConfig = vi.fn(async () => undefined);
@@ -100,7 +105,7 @@ describe("SuggestionModelRow", () => {
   function render(config: MutableDaemonConfig["metadataGeneration"]) {
     act(() => {
       root.render(
-        <SuggestionModelRow
+        <SuggestionModelSection
           serverId="s1"
           metadataGeneration={config}
           patchConfig={patchConfig}
@@ -159,6 +164,26 @@ describe("SuggestionModelRow", () => {
         providers: SHARED,
         promptSuggestions: { providers: [] },
         newChatSuggestions: { providers: [] },
+      },
+    });
+  });
+
+  it("keeps the fallback models when the first choice changes", async () => {
+    const fallback = { provider: "opencode", model: "gpt-5.6-luna" };
+    render(
+      metadata({
+        promptSuggestions: { providers: [{ provider: "claude-auto", model: "sonnet" }, fallback] },
+      }),
+    );
+    click(container.querySelector("[data-testid=selector]"));
+    await act(async () => {});
+
+    const entries = [{ provider: "codex-auto", model: "gpt-6-astra" }, fallback];
+    expect(patchConfig).toHaveBeenCalledWith({
+      metadataGeneration: {
+        providers: SHARED,
+        promptSuggestions: { providers: entries },
+        newChatSuggestions: { providers: entries },
       },
     });
   });
