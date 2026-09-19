@@ -2015,8 +2015,6 @@ export const ar: TranslationResources = {
       docs: "الوثائق",
       saveError: "تعذر تحديث إنشاء البيانات الوصفية",
       suggestionSection: "اقتراحات الرسائل",
-      suggestionShared: "نفسه",
-      suggestionCustom: "مخصص",
       suggestionSharedHint: "تستخدم الاقتراحات نموذج إنشاء البيانات الوصفية",
       suggestionCustomHint:
         "تستخدم الاقتراحات والإجابات المقترحة وأفكار المحادثة الجديدة هذا النموذج",

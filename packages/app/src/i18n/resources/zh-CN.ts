@@ -1993,8 +1993,6 @@ export const zhCN: TranslationResources = {
       docs: "文档",
       saveError: "无法更新元数据生成设置",
       suggestionSection: "消息建议",
-      suggestionShared: "相同",
-      suggestionCustom: "自定义",
       suggestionSharedHint: "建议使用元数据生成模型",
       suggestionCustomHint: "建议、草拟回答和新对话提示都使用此模型",
     },
