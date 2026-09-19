@@ -2048,8 +2048,6 @@ export const ru: TranslationResources = {
       docs: "Документация",
       saveError: "Не удалось обновить настройки генерации метаданных",
       suggestionSection: "Подсказки сообщений",
-      suggestionShared: "Та же",
-      suggestionCustom: "Своя",
       suggestionSharedHint: "Подсказки используют модель генерации метаданных",
       suggestionCustomHint:
         "Подсказки, черновики ответов и идеи для нового чата используют эту модель",
