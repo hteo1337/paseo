@@ -2157,8 +2157,6 @@ export const en = {
       docs: "Docs",
       saveError: "Unable to update metadata generation",
       suggestionSection: "Prompt suggestions",
-      suggestionShared: "Same",
-      suggestionCustom: "Custom",
       suggestionSharedHint: "Suggestions use the metadata generation model",
       suggestionCustomHint: "Suggestions, drafted answers and new-chat ideas use this model",
     },
