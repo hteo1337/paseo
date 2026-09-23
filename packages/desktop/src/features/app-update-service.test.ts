@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import {
   createAppUpdateService,
+  LOCAL_BUILD_INSTALL_MESSAGE,
   type AppUpdateInstallRequest,
   type AppUpdateRuntime,
   type AppUpdateRuntimeConfiguration,
@@ -151,11 +152,16 @@ class FakeAppUpdateRuntime implements AppUpdateRuntime {
   }
 }
 
-function createService(input?: { now?: () => number; bucket?: () => Promise<number> }) {
+function createService(input?: {
+  now?: () => number;
+  bucket?: () => Promise<number>;
+  isLocalBuild?: () => boolean;
+}) {
   const runtime = new FakeAppUpdateRuntime();
   const service = createAppUpdateService({
     runtime,
     isPackaged: () => true,
+    isLocalBuild: input?.isLocalBuild,
     now: input?.now ?? (() => Date.parse("2026-04-28T12:00:00.000Z")),
     bucket: input?.bucket ?? (async () => 0.99),
   });
@@ -499,6 +505,64 @@ describe("app update service", () => {
     expect(runtime.installModes).toEqual([
       { targetVersion: "1.2.5", isSilent: false, isForceRunAfter: true },
     ]);
+  });
+
+  it("still reports a new release to a locally patched build", async () => {
+    const { runtime, service } = createService({ isLocalBuild: () => true });
+    runtime.nextCheck({ isUpdateAvailable: true, updateInfo: rolledOutUpdate });
+
+    const result = await service.checkForAppUpdate({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      intent: "manual",
+    });
+
+    expect(result.hasUpdate).toBe(true);
+    expect(result.latestVersion).toBe("1.2.4");
+  });
+
+  it("never installs over a locally patched build on quit", async () => {
+    const { runtime, service } = createService({ bucket: async () => 0, isLocalBuild: () => true });
+    runtime.nextCheck({ isUpdateAvailable: true, updateInfo: rolledOutUpdate });
+    await service.checkForAppUpdate({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      intent: "automatic",
+    });
+    runtime.finishUpdateDownload(rolledOutUpdate);
+    runtime.nextCheck({ isUpdateAvailable: true, updateInfo: rolledOutUpdate });
+
+    const installed = await service.installUpdateOnQuit({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      signal: new AbortController().signal,
+    });
+
+    expect(installed).toBe(false);
+    expect(runtime.installedVersions).toEqual([]);
+  });
+
+  it("refuses a manual install over a locally patched build", async () => {
+    const { runtime, service } = createService({ isLocalBuild: () => true });
+    runtime.nextCheck({ isUpdateAvailable: true, updateInfo: rolledOutUpdate });
+    await service.checkForAppUpdate({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+      intent: "manual",
+    });
+    runtime.finishUpdateDownload(rolledOutUpdate);
+
+    const result = await service.downloadAndInstallUpdate({
+      currentVersion: "1.2.3",
+      releaseChannel: "stable",
+    });
+
+    expect(result).toEqual({
+      installed: false,
+      version: "1.2.3",
+      message: LOCAL_BUILD_INSTALL_MESSAGE,
+    });
+    expect(runtime.installedVersions).toEqual([]);
   });
 
   it("waits for a stale active download before downloading and installing the rechecked version", async () => {
