@@ -31,6 +31,8 @@ extraResources:
     to: app-dist
   - from: assets/editor-targets
     to: editor-target-icons
+  - from: assets/local-build.json
+    to: local-build.json
 publish:
   provider: github
   owner: getpaseo
