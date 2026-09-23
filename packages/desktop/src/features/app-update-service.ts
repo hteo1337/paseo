@@ -77,6 +77,8 @@ export interface AppUpdateService {
 export interface AppUpdateServiceDeps {
   runtime: AppUpdateRuntime;
   isPackaged(): boolean;
+  // A locally patched build must not be replaced by the vanilla release.
+  isLocalBuild?(): boolean;
   now(): number;
   bucket(): Promise<number>;
   reportCheckError?(error: unknown): void;
@@ -130,6 +132,9 @@ function getErrorMessage(error: unknown): string {
   }
   return String(error);
 }
+
+export const LOCAL_BUILD_INSTALL_MESSAGE =
+  "This is a locally patched build. Update it with paseo-patched-update.";
 
 function buildDeferredInstallResult(currentVersion: string): AppUpdateInstallResult {
   return {
@@ -333,6 +338,9 @@ export function createAppUpdateService(deps: AppUpdateServiceDeps): AppUpdateSer
     },
     onBeforeQuit?: () => Promise<void>,
   ): Promise<AppUpdateInstallResult> {
+    if (deps.isLocalBuild?.()) {
+      return { installed: false, version: currentVersion, message: LOCAL_BUILD_INSTALL_MESSAGE };
+    }
     if (!deps.isPackaged()) {
       return {
         installed: false,
@@ -473,7 +481,7 @@ export function createAppUpdateService(deps: AppUpdateServiceDeps): AppUpdateSer
     releaseChannel: AppReleaseChannel;
     signal: AbortSignal;
   }): Promise<boolean> {
-    if (!deps.isPackaged() || !downloadedUpdateVersion) {
+    if (!deps.isPackaged() || deps.isLocalBuild?.() || !downloadedUpdateVersion) {
       return false;
     }
 
