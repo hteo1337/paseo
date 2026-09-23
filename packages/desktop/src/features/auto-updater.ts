@@ -1,4 +1,5 @@
 import { randomBytes } from "node:crypto";
+import { existsSync } from "node:fs";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { app } from "electron";
@@ -225,6 +226,7 @@ class ElectronAppUpdateRuntime implements AppUpdateRuntime {
 const appUpdateService = createAppUpdateService({
   runtime: new ElectronAppUpdateRuntime(),
   isPackaged: () => app.isPackaged,
+  isLocalBuild: () => existsSync(path.join(process.resourcesPath, "local-build.json")),
   now: () => Date.now(),
   bucket: async () => bucketFromStagingUserId(await getStagingUserId()),
   reportCheckError: (error) => {
