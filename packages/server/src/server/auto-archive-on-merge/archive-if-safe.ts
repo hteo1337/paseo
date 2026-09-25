@@ -1,6 +1,8 @@
+import { realpathSync } from "node:fs";
+import path from "node:path";
 import type { Logger } from "pino";
 
-import type { AgentManager } from "../agent/agent-manager.js";
+import type { AgentManager, ManagedAgent } from "../agent/agent-manager.js";
 import type { AgentStorage } from "../agent/agent-storage.js";
 import type { DaemonConfigStore } from "../daemon-config-store.js";
 import {
@@ -47,26 +49,28 @@ const defaultDependencies: ArchiveIfSafeDependencies = {
   killTerminalsForWorkspace,
 };
 
+export type ArchiveIfSafeOutcome = "archived" | "deferred" | "skipped";
+
 export async function archiveIfSafe(input: {
   workspaceId: string;
   snapshot: WorkspaceGitRuntimeSnapshot;
   options: AutoArchiveArchiveOptions;
   log: Logger;
   deps?: ArchiveIfSafeDependencies;
-}): Promise<void> {
+}): Promise<ArchiveIfSafeOutcome> {
   const { workspaceId, snapshot, options, log } = input;
   const deps = input.deps ?? defaultDependencies;
   const cwd = snapshot.cwd;
   const pullRequest = snapshot.forge.pullRequest;
 
   if (!pullRequest?.isMerged) {
-    return;
+    return "skipped";
   }
   if (snapshot.git.isDirty === true) {
-    return;
+    return "skipped";
   }
   if (typeof snapshot.git.aheadOfOrigin === "number" && snapshot.git.aheadOfOrigin > 0) {
-    return;
+    return "skipped";
   }
 
   const ownership = await deps.isPaseoOwnedWorktreeCwd(cwd, {
@@ -74,13 +78,24 @@ export async function archiveIfSafe(input: {
     worktreesRoot: options.paseoWorktreesBaseRoot,
   });
   if (!ownership.allowed) {
-    return;
+    return "skipped";
   }
 
   try {
     const autoArchivedChangeRequestUrl = await options.getAutoArchivedChangeRequestUrl(workspaceId);
     if (autoArchivedChangeRequestUrl === pullRequest.url) {
-      return;
+      return "skipped";
+    }
+
+    // No await between this check and archiveByScope, so a turn cannot start in between.
+    const deletedRoot = ownership.worktreePath ?? cwd;
+    const busyAgentIds = listBusyAgentIds(options.agentManager, workspaceId, deletedRoot);
+    if (busyAgentIds.length > 0) {
+      log.info(
+        { workspaceId, cwd, agentIds: busyAgentIds },
+        "Deferred auto-archive after PR merge: agent still working",
+      );
+      return "deferred";
     }
 
     await deps.archiveByScope(
@@ -119,7 +134,39 @@ export async function archiveIfSafe(input: {
       { workspaceId, cwd, branch: pullRequest.headRefName, pullRequestUrl: pullRequest.url },
       "Auto-archived worktree after PR merge",
     );
+    return "archived";
   } catch (error) {
     log.warn({ err: error, cwd }, "Auto-archive after merge failed");
+    return "skipped";
+  }
+}
+
+export function isAgentWorking(agentManager: AgentManager, agent: ManagedAgent): boolean {
+  return agent.lifecycle === "initializing" || agentManager.hasInFlightRun(agent.id);
+}
+
+// A deferral is retried by index.ts when an agent stops working.
+function listBusyAgentIds(agentManager: AgentManager, workspaceId: string, root: string): string[] {
+  const canonicalRoot = canonicalPath(root);
+  return agentManager
+    .listAgents()
+    .filter((agent) => isAgentWorking(agentManager, agent))
+    .filter((agent) => {
+      const agentCwd = canonicalPath(agent.cwd);
+      return (
+        agent.workspaceId === workspaceId ||
+        agentCwd === canonicalRoot ||
+        agentCwd.startsWith(canonicalRoot + path.sep)
+      );
+    })
+    .map((agent) => agent.id);
+}
+
+// Filesystem identity: resolves symlinks (/tmp vs /private/tmp) and on-disk case.
+function canonicalPath(target: string): string {
+  try {
+    return realpathSync.native(target);
+  } catch {
+    return path.resolve(target);
   }
 }

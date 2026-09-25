@@ -2,7 +2,11 @@ import { resolve } from "node:path";
 import { LRUCache } from "lru-cache";
 import type { Logger } from "pino";
 
-import { archiveIfSafe, type AutoArchiveArchiveOptions } from "./archive-if-safe.js";
+import {
+  archiveIfSafe,
+  isAgentWorking,
+  type AutoArchiveArchiveOptions,
+} from "./archive-if-safe.js";
 import type {
   WorkspaceGitRuntimeSnapshot,
   WorkspaceGitSubscription,
@@ -33,9 +37,15 @@ export function setupAutoArchiveOnMerge(
   const openPullRequestUrlsByCwd = new LRUCache<string, string>({
     max: OPEN_PULL_REQUEST_LATCH_MAX,
   });
+  // Merged snapshots whose archive waited on a working agent; git emits nothing when it stops.
+  const deferredSnapshotsByCwd = new Map<string, WorkspaceGitRuntimeSnapshot>();
+  const retryAfterFlightCwds = new Set<string>();
 
-  return options.workspaceGitService.onSnapshotUpdated((snapshot) => {
+  const handleSnapshot = (snapshot: WorkspaceGitRuntimeSnapshot, isRetry = false): void => {
     const snapshotCwd = deps.resolvePath(snapshot.cwd);
+    if (!inFlightCwds.has(snapshotCwd)) {
+      deferredSnapshotsByCwd.delete(snapshotCwd);
+    }
     if (options.daemonConfigStore.get().autoArchiveAfterMerge !== true) {
       openPullRequestUrlsByCwd.delete(snapshotCwd);
       return;
@@ -55,6 +65,7 @@ export function setupAutoArchiveOnMerge(
       return;
     }
     if (inFlightCwds.has(snapshotCwd)) {
+      if (isRetry) retryAfterFlightCwds.add(snapshotCwd);
       return;
     }
     inFlightCwds.add(snapshotCwd);
@@ -88,12 +99,15 @@ export function setupAutoArchiveOnMerge(
         (workspace) => deps.resolvePath(workspace.cwd) === snapshotCwd,
       );
       for (const workspace of attachedWorkspaces) {
-        await deps.archiveIfSafe({
+        const outcome = await deps.archiveIfSafe({
           workspaceId: workspace.workspaceId,
           snapshot: freshSnapshot,
           options,
           log,
         });
+        if (outcome === "deferred") {
+          deferredSnapshotsByCwd.set(snapshotCwd, freshSnapshot);
+        }
       }
     })()
       .catch((error) => {
@@ -101,6 +115,36 @@ export function setupAutoArchiveOnMerge(
       })
       .finally(() => {
         inFlightCwds.delete(snapshotCwd);
+        const deferred = deferredSnapshotsByCwd.get(snapshotCwd);
+        if (retryAfterFlightCwds.delete(snapshotCwd) && deferred) {
+          handleSnapshot(deferred, true);
+        }
       });
-  });
+  };
+
+  const snapshotSubscription = options.workspaceGitService.onSnapshotUpdated((snapshot) =>
+    handleSnapshot(snapshot),
+  );
+  const unsubscribeAgents = options.agentManager.subscribe(
+    (event) => {
+      if (event.type !== "agent_state" || isAgentWorking(options.agentManager, event.agent)) {
+        return;
+      }
+      // A flight may still be about to defer; have it re-run once it ends.
+      for (const cwd of inFlightCwds) {
+        retryAfterFlightCwds.add(cwd);
+      }
+      for (const snapshot of [...deferredSnapshotsByCwd.values()]) {
+        handleSnapshot(snapshot, true);
+      }
+    },
+    { replayState: false },
+  );
+
+  return {
+    unsubscribe: () => {
+      snapshotSubscription.unsubscribe();
+      unsubscribeAgents();
+    },
+  };
 }

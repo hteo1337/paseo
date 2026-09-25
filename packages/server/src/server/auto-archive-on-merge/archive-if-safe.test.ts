@@ -1,5 +1,5 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Logger } from "pino";
@@ -83,6 +83,7 @@ function createHarness(overrides?: {
   snapshot?: WorkspaceGitRuntimeSnapshot;
   isPaseoOwnedWorktreeCwd?: ArchiveIfSafeDependencies["isPaseoOwnedWorktreeCwd"];
   archiveByScope?: ArchiveIfSafeDependencies["archiveByScope"];
+  agents?: Array<{ id: string; cwd: string; workspaceId?: string; lifecycle: string }>;
 }) {
   const getSnapshot = vi.fn(async () =>
     createSnapshot(),
@@ -97,7 +98,12 @@ function createHarness(overrides?: {
     } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
     workspaceGitService,
     github: {} as AutoArchiveArchiveOptions["github"],
-    agentManager: {} as AutoArchiveArchiveOptions["agentManager"],
+    agentManager: {
+      listAgents: () => overrides?.agents ?? [],
+      hasInFlightRun: (agentId: string) =>
+        overrides?.agents?.some((agent) => agent.id === agentId && agent.lifecycle === "running") ??
+        false,
+    } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {} as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {} as AutoArchiveArchiveOptions["terminalManager"],
     findWorkspaceIdForCwd: vi.fn(async () => "ws-auto-archive"),
@@ -294,6 +300,7 @@ function createRealOutcomeHarness(input: {
     github: createGitHubServiceStub(),
     agentManager: {
       listAgents: () => [],
+      hasInFlightRun: () => false,
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
       archiveSnapshot: vi.fn(async () => {
         throw new Error("not expected without stored agents");
@@ -444,6 +451,101 @@ describe("archiveIfSafe", () => {
       },
       "Auto-archived worktree after PR merge",
     );
+  });
+
+  test.each(["running", "initializing"])(
+    "defers while an agent of the workspace is %s",
+    async (lifecycle) => {
+      const harness = createHarness({
+        agents: [{ id: "a1", cwd: "/elsewhere", workspaceId: "ws-auto-archive", lifecycle }],
+      });
+
+      await runArchiveIfSafe(harness);
+
+      expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+      expect(harness.log.info).toHaveBeenCalledWith(
+        { workspaceId: "ws-auto-archive", cwd: CWD, agentIds: ["a1"] },
+        "Deferred auto-archive after PR merge: agent still working",
+      );
+    },
+  );
+
+  test("defers while an agent of another workspace runs inside the worktree", async () => {
+    const harness = createHarness({
+      agents: [
+        { id: "a2", cwd: `${CWD}/packages/app`, workspaceId: "ws-other", lifecycle: "running" },
+      ],
+    });
+
+    await runArchiveIfSafe(harness);
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("archives once the agent is idle, and ignores agents elsewhere", async () => {
+    const agents = [
+      { id: "a1", cwd: CWD, workspaceId: "ws-auto-archive", lifecycle: "running" },
+      { id: "a3", cwd: `${CWD}-sibling`, workspaceId: "ws-other", lifecycle: "running" },
+    ];
+    const harness = createHarness({ agents });
+
+    await runArchiveIfSafe(harness);
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+
+    agents[0]!.lifecycle = "idle";
+    await runArchiveIfSafe(harness);
+    expect(harness.deps.archiveByScope).toHaveBeenCalledTimes(1);
+  });
+
+  test("guards the whole worktree, not only the workspace cwd", async () => {
+    const harness = createHarness({
+      agents: [{ id: "a4", cwd: `${CWD}/pkg-b`, workspaceId: "ws-other", lifecycle: "running" }],
+    });
+
+    await runArchiveIfSafe(harness, { snapshot: { ...createSnapshot(), cwd: `${CWD}/pkg-a` } });
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("matches an agent that reaches the worktree through a symlink", async () => {
+    const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "archive-if-safe-link-")));
+    cleanupPaths.push(tempDir);
+    const worktreePath = path.join(tempDir, "tree");
+    mkdirSync(worktreePath);
+    symlinkSync(worktreePath, path.join(tempDir, "alias"));
+    const harness = createHarness({
+      agents: [
+        {
+          id: "a5",
+          cwd: path.join(tempDir, "alias"),
+          workspaceId: "ws-other",
+          lifecycle: "running",
+        },
+      ],
+      isPaseoOwnedWorktreeCwd: async () => ({
+        allowed: true,
+        repoRoot: "/tmp/repo",
+        worktreeRoot: tempDir,
+        worktreePath,
+      }),
+    });
+
+    await runArchiveIfSafe(harness, { snapshot: { ...createSnapshot(), cwd: worktreePath } });
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("defers when a turn starts while the consumed-merge lookup is pending", async () => {
+    const agents = [{ id: "a6", cwd: CWD, workspaceId: "ws-auto-archive", lifecycle: "idle" }];
+    const harness = createHarness({ agents });
+    harness.options.getAutoArchivedChangeRequestUrl = async () => {
+      agents[0]!.lifecycle = "running";
+      return null;
+    };
+
+    await runArchiveIfSafe(harness);
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
   });
 
   test("does not archive a merge event already consumed by this workspace", async () => {
