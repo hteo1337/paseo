@@ -69,11 +69,14 @@ export interface ArchiveResult {
   archivedAgentIds: string[];
   archivedWorkspaceIds: string[];
   removedDirectory: boolean;
+  deferredByAgentIds?: string[];
 }
 
 export interface ArchiveByScopeRequest {
   scope: ArchiveScope;
   requestId: string;
+  abortIf?: () => string[] | null;
+  holdNewRuns?: () => () => void;
 }
 
 export async function requireActiveWorkspaceForArchive(
@@ -136,13 +139,23 @@ async function archiveByScopeWithPriority(
 
   await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
 
-  if (targetWorkspaceIds.length > 0) {
-    dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
+  const deferredByAgentIds = request.abortIf?.();
+  if (deferredByAgentIds?.length) {
+    return {
+      archivedAgentIds: [],
+      archivedWorkspaceIds: [],
+      removedDirectory: false,
+      deferredByAgentIds,
+    };
   }
 
+  const releaseRunHold = request.holdNewRuns?.();
   let removedDirectory = false;
 
   try {
+    if (targetWorkspaceIds.length > 0) {
+      dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
+    }
     if (targetWorkspaceIds.length > 0) {
       await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
     }
@@ -182,9 +195,13 @@ async function archiveByScopeWithPriority(
       removedDirectory,
     };
   } finally {
-    if (targetWorkspaceIds.length > 0) {
-      dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
-      await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+    try {
+      if (targetWorkspaceIds.length > 0) {
+        dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
+        await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+      }
+    } finally {
+      releaseRunHold?.();
     }
   }
 }

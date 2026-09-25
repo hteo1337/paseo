@@ -87,7 +87,6 @@ export async function archiveIfSafe(input: {
       return "skipped";
     }
 
-    // No await between this check and archiveByScope, so a turn cannot start in between.
     const deletedRoot = ownership.worktreePath ?? cwd;
     const busyAgentIds = listBusyAgentIds(options.agentManager, workspaceId, deletedRoot);
     if (busyAgentIds.length > 0) {
@@ -98,7 +97,7 @@ export async function archiveIfSafe(input: {
       return "deferred";
     }
 
-    await deps.archiveByScope(
+    const result = await deps.archiveByScope(
       {
         paseoHome: options.paseoHome,
         paseoWorktreesBaseRoot: options.paseoWorktreesBaseRoot,
@@ -128,8 +127,17 @@ export async function archiveIfSafe(input: {
       {
         scope: { kind: "workspace", workspaceId },
         requestId: "auto-archive-on-merge",
+        abortIf: () => listBusyAgentIds(options.agentManager, workspaceId, deletedRoot),
+        holdNewRuns: () => options.agentManager.holdNewRunsForArchive(workspaceId, deletedRoot),
       },
     );
+    if (result.deferredByAgentIds?.length) {
+      log.info(
+        { workspaceId, cwd, agentIds: result.deferredByAgentIds },
+        "Deferred auto-archive after PR merge: agent still working",
+      );
+      return "deferred";
+    }
     log.info(
       { workspaceId, cwd, branch: pullRequest.headRefName, pullRequestUrl: pullRequest.url },
       "Auto-archived worktree after PR merge",

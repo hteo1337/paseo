@@ -189,6 +189,67 @@ function assertArchiveResult(
 }
 
 describe("archiveByScope", () => {
+  test("guard preserves a worktree when an agent starts during target resolution", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "late-running-agent");
+    const workspaceId = "ws-late-running";
+    let running = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    const listActiveWorkspaces = deps.listActiveWorkspaces;
+    deps.listActiveWorkspaces = async () => {
+      const workspaces = await listActiveWorkspaces();
+      running = true;
+      return workspaces;
+    };
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => (running ? ["agent-late"] : null),
+    });
+
+    expect(result.deferredByAgentIds).toEqual(["agent-late"]);
+    expect(result.archivedWorkspaceIds).toEqual([]);
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(deps.markWorkspaceArchiving).not.toHaveBeenCalled();
+  });
+
+  test("auto archive holds run admission through workspace teardown", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "archive-run-hold");
+    const workspaceId = "ws-run-hold";
+    let blocked = false;
+    let runStarted = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.emitWorkspaceUpdatesForWorkspaceIds = async () => {
+      if (!blocked) runStarted = true;
+    };
+
+    await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => null,
+      holdNewRuns: () => {
+        blocked = true;
+        return () => {
+          blocked = false;
+        };
+      },
+    });
+
+    expect(runStarted).toBe(false);
+    expect(blocked).toBe(false);
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
+
   test("workspace scope archives the record and removes the directory on last reference", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const paseoHome = path.join(tempDir, ".paseo");

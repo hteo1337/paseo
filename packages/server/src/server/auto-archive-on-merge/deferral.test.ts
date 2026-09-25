@@ -56,6 +56,7 @@ function createJourney(outcomes: Array<() => Promise<ArchiveIfSafeOutcome>>) {
   let onSnapshotUpdated: ((snapshot: WorkspaceGitRuntimeSnapshot) => void) | null = null;
   let onAgentEvent: ((event: AgentManagerEvent) => void) | null = null;
   let lastLifecycle: ManagedAgent["lifecycle"] = "idle";
+  let inFlightRun = false;
   const getSnapshot = vi.fn(async () => createSnapshot("merged"));
   const options = {
     logger: { child: () => ({ warn: vi.fn(), info: vi.fn() }) } as unknown as Logger,
@@ -70,7 +71,7 @@ function createJourney(outcomes: Array<() => Promise<ArchiveIfSafeOutcome>>) {
           onAgentEvent = null;
         };
       },
-      hasInFlightRun: () => lastLifecycle === "running",
+      hasInFlightRun: () => inFlightRun || lastLifecycle === "running",
     },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
@@ -91,8 +92,110 @@ function createJourney(outcomes: Array<() => Promise<ArchiveIfSafeOutcome>>) {
     emitSnapshot: (snapshot: WorkspaceGitRuntimeSnapshot) => onSnapshotUpdated?.(snapshot),
     emitAgent: (event: AgentManagerEvent) => onAgentEvent?.(event),
     hasAgentListener: () => onAgentEvent !== null,
+    setInFlightRun: (value: boolean) => {
+      inFlightRun = value;
+    },
   };
 }
+
+test("idle state replays after the terminal run settles", async () => {
+  const journey = createJourney([async () => "deferred", async () => "archived"]);
+  journey.emitSnapshot(createSnapshot("open"));
+  journey.emitSnapshot(createSnapshot("merged"));
+  await vi.waitFor(() => expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1));
+  journey.setInFlightRun(true);
+  journey.emitAgent(agentState("idle"));
+  journey.setInFlightRun(false);
+  await vi.waitFor(() => expect(journey.archiveIfSafe).toHaveBeenCalledTimes(2));
+  journey.subscription.unsubscribe();
+});
+
+test("a deferred idle agent gets a bounded timer retry without another event", async () => {
+  vi.useFakeTimers();
+  try {
+    const journey = createJourney([async () => "deferred", async () => "archived"]);
+    journey.emitSnapshot(createSnapshot("open"));
+    journey.emitSnapshot(createSnapshot("merged"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1);
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(2);
+    journey.subscription.unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("timer retries stop after five attempts", async () => {
+  vi.useFakeTimers();
+  try {
+    const journey = createJourney(Array.from({ length: 7 }, () => async () => "deferred" as const));
+    journey.emitSnapshot(createSnapshot("open"));
+    journey.emitSnapshot(createSnapshot("merged"));
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(155_000);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(6);
+    journey.subscription.unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
+
+test("a failed fresh read retains the deferred archive", async () => {
+  const journey = createJourney([async () => "deferred", async () => "archived"]);
+  journey.emitSnapshot(createSnapshot("open"));
+  journey.emitSnapshot(createSnapshot("merged"));
+  await vi.waitFor(() => expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1));
+  journey.getSnapshot.mockRejectedValueOnce(new Error("read failed"));
+  journey.emitAgent(agentState("idle"));
+  await vi.waitFor(() => expect(journey.getSnapshot).toHaveBeenCalledTimes(2));
+  journey.emitAgent(agentState("idle"));
+  await vi.waitFor(() => expect(journey.archiveIfSafe).toHaveBeenCalledTimes(2));
+  journey.subscription.unsubscribe();
+});
+
+test("unsubscribe cancels a queued idle replay", async () => {
+  const journey = createJourney([async () => "deferred", async () => "archived"]);
+  journey.emitSnapshot(createSnapshot("open"));
+  journey.emitSnapshot(createSnapshot("merged"));
+  await vi.waitFor(() => expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1));
+  journey.emitAgent(agentState("idle"));
+  journey.subscription.unsubscribe();
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
+  expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1);
+});
+
+test("unsubscribe stops an attempt awaiting a fresh snapshot", async () => {
+  let release: (snapshot: WorkspaceGitRuntimeSnapshot) => void = () => {};
+  const pending = new Promise<WorkspaceGitRuntimeSnapshot>((resolvePromise) => {
+    release = resolvePromise;
+  });
+  const journey = createJourney([async () => "archived"]);
+  journey.getSnapshot.mockImplementationOnce(() => pending);
+  journey.emitSnapshot(createSnapshot("open"));
+  journey.emitSnapshot(createSnapshot("merged"));
+  await vi.waitFor(() => expect(journey.getSnapshot).toHaveBeenCalledTimes(1));
+  journey.subscription.unsubscribe();
+  release(createSnapshot("merged"));
+  await new Promise((resolvePromise) => setImmediate(resolvePromise));
+  expect(journey.archiveIfSafe).not.toHaveBeenCalled();
+});
+
+test("unsubscribe cancels a deferred timer retry", async () => {
+  vi.useFakeTimers();
+  try {
+    const journey = createJourney([async () => "deferred", async () => "archived"]);
+    journey.emitSnapshot(createSnapshot("open"));
+    journey.emitSnapshot(createSnapshot("merged"));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1);
+    journey.subscription.unsubscribe();
+    await vi.advanceTimersByTimeAsync(5_000);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(1);
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("retries a deferred archive when an agent stops working, with no new snapshot", async () => {
   const journey = createJourney([async () => "deferred", async () => "archived"]);

@@ -103,6 +103,7 @@ function createHarness(overrides?: {
       hasInFlightRun: (agentId: string) =>
         overrides?.agents?.some((agent) => agent.id === agentId && agent.lifecycle === "running") ??
         false,
+      holdNewRunsForArchive: () => () => {},
     } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {} as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {} as AutoArchiveArchiveOptions["terminalManager"],
@@ -301,6 +302,7 @@ function createRealOutcomeHarness(input: {
     agentManager: {
       listAgents: () => [],
       hasInFlightRun: () => false,
+      holdNewRunsForArchive: () => () => {},
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
       archiveSnapshot: vi.fn(async () => {
         throw new Error("not expected without stored agents");
@@ -440,6 +442,8 @@ describe("archiveIfSafe", () => {
       {
         scope: { kind: "workspace", workspaceId: "ws-auto-archive" },
         requestId: "auto-archive-on-merge",
+        abortIf: expect.any(Function),
+        holdNewRuns: expect.any(Function),
       },
     );
     expect(harness.log.info).toHaveBeenCalledWith(
@@ -451,6 +455,27 @@ describe("archiveIfSafe", () => {
       },
       "Auto-archived worktree after PR merge",
     );
+  });
+
+  test("maps a late busy agent from archiveByScope to deferred", async () => {
+    const harness = createHarness({
+      archiveByScope: async () => ({
+        archivedAgentIds: [],
+        archivedWorkspaceIds: [],
+        removedDirectory: false,
+        deferredByAgentIds: ["agent-late"],
+      }),
+    });
+
+    const outcome = await archiveIfSafe({
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+    });
+
+    expect(outcome).toBe("deferred");
   });
 
   test.each(["running", "initializing"])(

@@ -21,6 +21,7 @@ import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -756,6 +757,7 @@ export class AgentManager {
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
   private acceptingAgentRegistrations = true;
+  private readonly runAdmissionHolds = new Set<(agent: ManagedAgent) => boolean>();
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
@@ -2464,12 +2466,24 @@ export class AgentManager {
     }
   }
 
+  holdNewRunsForArchive(workspaceId: string, root: string): () => void {
+    const canonicalRoot = normalizePathForIdentity(root);
+    const matches = (agent: ManagedAgent): boolean =>
+      agent.workspaceId === workspaceId ||
+      isPathInsideRoot(canonicalRoot, normalizePathForIdentity(agent.cwd));
+    this.runAdmissionHolds.add(matches);
+    return () => this.runAdmissionHolds.delete(matches);
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
     const existingAgent = this.requireSessionAgent(agentId);
+    if (Array.from(this.runAdmissionHolds).some((matches) => matches(existingAgent))) {
+      throw new Error(`Agent ${agentId} workspace is being archived`);
+    }
     this.logger.trace(
       {
         agentId,

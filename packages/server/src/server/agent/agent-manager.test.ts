@@ -54,6 +54,22 @@ import type { ProviderDefinition } from "./provider-registry.js";
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
 
+test("archive hold rejects new runs until released", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-archive-hold-"));
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const release = manager.holdNewRunsForArchive("workspace-a", workdir);
+    expect(() => manager.streamAgent(agent.id, "prompt")).toThrow("workspace is being archived");
+    release();
+    expect(() => manager.streamAgent(agent.id, "prompt")).not.toThrow();
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 interface Deferred<T> {
   promise: Promise<T>;
   resolve: (value: T) => void;
