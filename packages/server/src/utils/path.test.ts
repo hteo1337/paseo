@@ -30,7 +30,9 @@ describe("path equivalence", () => {
 
   test("checks POSIX root containment without prefix false positives", () => {
     expect(isPathInsideRoot("/opt/paseo", "/opt/paseo/node_modules/@getpaseo/server")).toBe(true);
+    expect(isPathInsideRoot("/opt/paseo", "/opt/paseo/..cache")).toBe(true);
     expect(isPathInsideRoot("/opt/paseo", "/opt/paseo-other")).toBe(false);
+    expect(isPathInsideRoot("/opt/paseo", "/opt/paseo/../other")).toBe(false);
   });
 
   test("checks Windows root containment case-insensitively", () => {

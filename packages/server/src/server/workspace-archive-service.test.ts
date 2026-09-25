@@ -189,6 +189,258 @@ function assertArchiveResult(
 }
 
 describe("archiveByScope", () => {
+  test("guard preserves a worktree when an agent starts during target resolution", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "late-running-agent");
+    const workspaceId = "ws-late-running";
+    let running = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    const listActiveWorkspaces = deps.listActiveWorkspaces;
+    deps.listActiveWorkspaces = async () => {
+      const workspaces = await listActiveWorkspaces();
+      running = true;
+      return workspaces;
+    };
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => (running ? ["agent-late"] : null),
+    });
+
+    expect(result.deferredByAgentIds).toEqual(["agent-late"]);
+    expect(result.archivedWorkspaceIds).toEqual([]);
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(deps.markWorkspaceArchiving).not.toHaveBeenCalled();
+  });
+
+  test("auto archive holds run admission through workspace teardown", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "archive-run-hold");
+    const workspaceId = "ws-run-hold";
+    let blocked = false;
+    let runStarted = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.emitWorkspaceUpdatesForWorkspaceIds = async () => {
+      if (!blocked) runStarted = true;
+    };
+
+    await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => null,
+      holdNewRuns: () => {
+        blocked = true;
+        return () => {
+          blocked = false;
+        };
+      },
+    });
+
+    expect(runStarted).toBe(false);
+    expect(blocked).toBe(false);
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
+
+  test("auto archive defers when a provider starts a turn after the run hold", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "autonomous-after-hold");
+    const workspaceId = "ws-autonomous-after-hold";
+    let busy = false;
+    let checks = 0;
+    let releases = 0;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
+    deps.emitWorkspaceUpdatesForWorkspaceIds = vi.fn(async () => {
+      busy = true;
+    });
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => {
+        checks += 1;
+        return busy ? ["provider-agent"] : null;
+      },
+      holdNewRuns: () => () => {
+        releases += 1;
+      },
+    });
+
+    expect(checks).toBe(2);
+    expect(result.deferredByAgentIds).toEqual(["provider-agent"]);
+    expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(releases).toBe(1);
+  });
+
+  test("auto archive checks again after stored-agent lookup", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "turn-during-agent-list");
+    const workspaceId = "ws-turn-during-agent-list";
+    let busy = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.agentStorage.listByWorkspace = async () => {
+      busy = true;
+      return [];
+    };
+    const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => (busy ? ["agent-started-during-list"] : null),
+      holdNewRuns: () => () => {},
+    });
+
+    expect(result.deferredByAgentIds).toEqual(["agent-started-during-list"]);
+    expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  test("a foreign agent appearing in a child directory during teardown preserves the worktree", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "foreign-during-teardown");
+    const workspaceId = "ws-foreign-during-teardown";
+    const child = path.join(worktree.worktreePath, "child");
+    mkdirSync(child);
+    let foreignAgent: ManagedAgent | null = null;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.agentManager.listAgents = () => (foreignAgent ? [foreignAgent] : []);
+    deps.killTerminalsForWorkspace = async () => {
+      foreignAgent = {
+        id: "foreign-agent",
+        workspaceId: "other-workspace",
+        cwd: child,
+        lifecycle: "running",
+      } as ManagedAgent;
+    };
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => null,
+      holdNewRuns: () => () => {},
+    });
+
+    expect(result.deferredByAgentIds).toEqual(["foreign-agent"]);
+    expect(result.removedDirectory).toBe(false);
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  test("a target agent that fails to close prevents record archive and deletion", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "target-close-fails");
+    const workspaceId = "ws-target-close-fails";
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    const agent = {
+      id: "target-agent",
+      workspaceId,
+      cwd: worktree.worktreePath,
+      lifecycle: "idle",
+    } as ManagedAgent;
+    deps.agentManager.listAgents = () => [agent];
+    deps.agentManager.getAgent = () => agent;
+    deps.agentManager.archiveAgent = vi.fn(async () => {
+      throw new Error("provider did not close");
+    });
+    const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => null,
+      holdNewRuns: () => () => {},
+    });
+
+    expect(result.deferredByAgentIds).toEqual(["target-agent"]);
+    expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  test("cancellation after teardown begins commits the archive", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "cancel-after-teardown");
+    const workspaceId = "ws-cancel-after-teardown";
+    let cancelled = false;
+    let checks = 0;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.killTerminalsForWorkspace = async () => {
+      cancelled = true;
+    };
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => {
+        checks += 1;
+        return cancelled ? "cancelled" : null;
+      },
+      holdNewRuns: () => () => {},
+    });
+
+    expect(checks).toBe(2);
+    expect(result.cancelled).toBeUndefined();
+    expect(result.archivedWorkspaceIds).toEqual([workspaceId]);
+    expect(result.removedDirectory).toBe(true);
+    expect(existsSync(worktree.worktreePath)).toBe(false);
+  });
+
+  test("cancellation after the hold aborts before workspace teardown", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "cancel-after-hold");
+    const workspaceId = "ws-cancel-after-hold";
+    let cancelled = false;
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" }],
+    });
+    deps.emitWorkspaceUpdatesForWorkspaceIds = vi.fn(async () => {
+      cancelled = true;
+    });
+    const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
+
+    const result = await archiveByScope(deps, {
+      scope: { kind: "workspace", workspaceId },
+      requestId: "auto-archive-on-merge",
+      abortIf: () => (cancelled ? "cancelled" : null),
+      holdNewRuns: () => () => {},
+    });
+
+    expect(result.cancelled).toBe(true);
+    expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
   test("workspace scope archives the record and removes the directory on last reference", async () => {
     const { tempDir, repoDir } = createGitRepo();
     const paseoHome = path.join(tempDir, ".paseo");
@@ -740,12 +992,19 @@ describe("archiveByScope", () => {
         { workspaceId: targetWorkspaceId, cwd: worktree.worktreePath, kind: "worktree" },
       ],
     });
+    let live = true;
+    const liveAgent = {
+      id: liveAgentId,
+      workspaceId: targetWorkspaceId,
+      cwd: worktree.worktreePath,
+      lifecycle: "idle",
+    } as ManagedAgent;
     deps.agentManager = {
-      listAgents: () => [{ id: liveAgentId, workspaceId: targetWorkspaceId }] as ManagedAgent[],
-      getAgent: (agentId: string) =>
-        agentId === liveAgentId ? ({ id: liveAgentId } as ManagedAgent) : null,
+      listAgents: () => (live ? [liveAgent] : []),
+      getAgent: (agentId: string) => (live && agentId === liveAgentId ? liveAgent : null),
       archiveAgent: vi.fn(async (agentId: string) => {
         deps.archivedAgentIds.push(agentId);
+        live = false;
         return { archivedAt: new Date().toISOString() };
       }),
       archiveSnapshot: vi.fn(async (agentId: string, _archivedAt: string) => {

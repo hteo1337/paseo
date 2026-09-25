@@ -21,6 +21,7 @@ import type { ProviderOptions, ToolPolicy } from "@getpaseo/protocol/agent-types
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -756,6 +757,10 @@ export class AgentManager {
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
   private acceptingAgentRegistrations = true;
+  private readonly runAdmissionHolds = new Set<
+    (agent: Pick<ManagedAgent, "workspaceId" | "cwd">) => boolean
+  >();
+  private readonly pendingProviderTurnStarts = new Map<string, number>();
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
@@ -941,6 +946,7 @@ export class AgentManager {
     return (
       agent.lifecycle === "running" ||
       Boolean(agent.activeForegroundTurnId) ||
+      (this.pendingProviderTurnStarts.get(agentId) ?? 0) > 0 ||
       this.runs.hasRun(agentId)
     );
   }
@@ -1250,6 +1256,7 @@ export class AgentManager {
       config = { ...request.config, internal: config.internal };
       options = { ...options, env: request.env };
     }
+    this.assertArchiveAdmission(resolvedAgentId, options.workspaceId, config.cwd);
     await this.deleteAgentState(resolvedAgentId);
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
       config,
@@ -1356,6 +1363,7 @@ export class AgentManager {
       ...overrides,
       provider: handle.provider,
     } as AgentSessionConfig;
+    this.assertArchiveAdmission(resolvedAgentId, options?.workspaceId, mergedConfig.cwd);
     // Decide residency from durable state inside the lifecycle lane. A loader may
     // have read the record before a queued archive or restore completed. Residency is
     // settled before the config is prepared, because a history load reads an archived
@@ -2464,12 +2472,32 @@ export class AgentManager {
     }
   }
 
+  holdNewRunsForArchive(workspaceId: string, root: string): () => void {
+    const canonicalRoot = normalizePathForIdentity(root);
+    const matches = (agent: Pick<ManagedAgent, "workspaceId" | "cwd">): boolean =>
+      agent.workspaceId === workspaceId ||
+      isPathInsideRoot(canonicalRoot, normalizePathForIdentity(agent.cwd));
+    this.runAdmissionHolds.add(matches);
+    return () => this.runAdmissionHolds.delete(matches);
+  }
+
+  private assertArchiveAdmission(
+    agentId: string,
+    workspaceId: string | undefined,
+    cwd: string,
+  ): void {
+    if (Array.from(this.runAdmissionHolds).some((matches) => matches({ workspaceId, cwd }))) {
+      throw new Error(`Agent ${agentId} workspace is being archived`);
+    }
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
     const existingAgent = this.requireSessionAgent(agentId);
+    this.assertArchiveAdmission(agentId, existingAgent.workspaceId, existingAgent.cwd);
     this.logger.trace(
       {
         agentId,
@@ -3489,6 +3517,7 @@ export class AgentManager {
       });
 
       this.assertAcceptingAgentRegistrations();
+      this.assertArchiveAdmission(resolvedAgentId, managed.workspaceId, managed.cwd);
       this.agents.set(resolvedAgentId, managed);
       registered = true;
       // Initialize previousStatus to track transitions
@@ -3747,6 +3776,12 @@ export class AgentManager {
       pendingRun.stagedEvents.push(event);
       return;
     }
+    if (event.type === "turn_started") {
+      this.pendingProviderTurnStarts.set(
+        agentId,
+        (this.pendingProviderTurnStarts.get(agentId) ?? 0) + 1,
+      );
+    }
     const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -3781,6 +3816,11 @@ export class AgentManager {
     this.sessionEventTails.set(agentId, next);
     this.trackBackgroundTask(next);
     void next.finally(() => {
+      if (event.type === "turn_started") {
+        const pending = this.pendingProviderTurnStarts.get(agentId) ?? 1;
+        if (pending <= 1) this.pendingProviderTurnStarts.delete(agentId);
+        else this.pendingProviderTurnStarts.set(agentId, pending - 1);
+      }
       if (this.sessionEventTails.get(agentId) === next) {
         this.sessionEventTails.delete(agentId);
       }
