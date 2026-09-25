@@ -2,11 +2,7 @@ import { resolve } from "node:path";
 import { LRUCache } from "lru-cache";
 import type { Logger } from "pino";
 
-import {
-  archiveIfSafe,
-  isAgentWorking,
-  type AutoArchiveArchiveOptions,
-} from "./archive-if-safe.js";
+import { archiveIfSafe, type AutoArchiveArchiveOptions } from "./archive-if-safe.js";
 import type {
   WorkspaceGitRuntimeSnapshot,
   WorkspaceGitSubscription,
@@ -40,14 +36,41 @@ export function setupAutoArchiveOnMerge(
   // Merged snapshots whose archive waited on a working agent; git emits nothing when it stops.
   const deferredSnapshotsByCwd = new Map<string, WorkspaceGitRuntimeSnapshot>();
   const retryAfterFlightCwds = new Set<string>();
+  const retryTimersByCwd = new Map<string, ReturnType<typeof setTimeout>>();
+  const retryAttemptsByCwd = new Map<string, number>();
+  let disposed = false;
+
+  const clearDeferral = (cwd: string): void => {
+    deferredSnapshotsByCwd.delete(cwd);
+    retryAttemptsByCwd.delete(cwd);
+    const timer = retryTimersByCwd.get(cwd);
+    if (timer) clearTimeout(timer);
+    retryTimersByCwd.delete(cwd);
+  };
+
+  const scheduleRetry = (cwd: string): void => {
+    if (disposed || !deferredSnapshotsByCwd.has(cwd) || retryTimersByCwd.has(cwd)) return;
+    const attempt = retryAttemptsByCwd.get(cwd) ?? 0;
+    if (attempt >= 5) return;
+    const timer = setTimeout(
+      () => {
+        retryTimersByCwd.delete(cwd);
+        const deferred = deferredSnapshotsByCwd.get(cwd);
+        if (deferred) handleSnapshot(deferred, true);
+      },
+      attempt === 0 ? 5_000 : 30_000,
+    );
+    timer.unref();
+    retryTimersByCwd.set(cwd, timer);
+    retryAttemptsByCwd.set(cwd, attempt + 1);
+  };
 
   const handleSnapshot = (snapshot: WorkspaceGitRuntimeSnapshot, isRetry = false): void => {
+    if (disposed) return;
     const snapshotCwd = deps.resolvePath(snapshot.cwd);
-    if (!inFlightCwds.has(snapshotCwd)) {
-      deferredSnapshotsByCwd.delete(snapshotCwd);
-    }
     if (options.daemonConfigStore.get().autoArchiveAfterMerge !== true) {
       openPullRequestUrlsByCwd.delete(snapshotCwd);
+      clearDeferral(snapshotCwd);
       return;
     }
 
@@ -58,10 +81,12 @@ export function setupAutoArchiveOnMerge(
       } else {
         openPullRequestUrlsByCwd.delete(snapshotCwd);
       }
+      clearDeferral(snapshotCwd);
       return;
     }
     if (openPullRequestUrlsByCwd.get(snapshotCwd) !== pullRequest.url) {
       openPullRequestUrlsByCwd.delete(snapshotCwd);
+      clearDeferral(snapshotCwd);
       return;
     }
     if (inFlightCwds.has(snapshotCwd)) {
@@ -83,6 +108,7 @@ export function setupAutoArchiveOnMerge(
         );
         return;
       }
+      if (disposed) return;
       const freshPullRequest = freshSnapshot?.forge.pullRequest;
       if (
         !freshPullRequest?.isMerged ||
@@ -92,23 +118,30 @@ export function setupAutoArchiveOnMerge(
         if (openPullRequestUrlsByCwd.get(snapshotCwd) === pullRequest.url) {
           openPullRequestUrlsByCwd.delete(snapshotCwd);
         }
+        clearDeferral(snapshotCwd);
         return;
       }
 
       const attachedWorkspaces = (await options.listActiveWorkspaces()).filter(
         (workspace) => deps.resolvePath(workspace.cwd) === snapshotCwd,
       );
+      if (disposed) return;
+      let deferred = false;
       for (const workspace of attachedWorkspaces) {
+        if (disposed) return;
         const outcome = await deps.archiveIfSafe({
           workspaceId: workspace.workspaceId,
           snapshot: freshSnapshot,
           options,
           log,
+          isCancelled: () => disposed,
         });
         if (outcome === "deferred") {
+          deferred = true;
           deferredSnapshotsByCwd.set(snapshotCwd, freshSnapshot);
         }
       }
+      if (!deferred) clearDeferral(snapshotCwd);
     })()
       .catch((error) => {
         log.warn({ err: error, cwd: snapshot.cwd }, "Failed to auto-archive attached workspaces");
@@ -116,8 +149,10 @@ export function setupAutoArchiveOnMerge(
       .finally(() => {
         inFlightCwds.delete(snapshotCwd);
         const deferred = deferredSnapshotsByCwd.get(snapshotCwd);
-        if (retryAfterFlightCwds.delete(snapshotCwd) && deferred) {
-          handleSnapshot(deferred, true);
+        if (retryAfterFlightCwds.delete(snapshotCwd) && deferred && !disposed) {
+          setImmediate(() => handleSnapshot(deferred, true));
+        } else {
+          scheduleRetry(snapshotCwd);
         }
       });
   };
@@ -127,22 +162,30 @@ export function setupAutoArchiveOnMerge(
   );
   const unsubscribeAgents = options.agentManager.subscribe(
     (event) => {
-      if (event.type !== "agent_state" || isAgentWorking(options.agentManager, event.agent)) {
+      if (
+        event.type !== "agent_state" ||
+        event.agent.lifecycle === "running" ||
+        event.agent.lifecycle === "initializing"
+      ) {
         return;
       }
-      // A flight may still be about to defer; have it re-run once it ends.
-      for (const cwd of inFlightCwds) {
-        retryAfterFlightCwds.add(cwd);
-      }
-      for (const snapshot of [...deferredSnapshotsByCwd.values()]) {
-        handleSnapshot(snapshot, true);
-      }
+      setImmediate(() => {
+        if (disposed) return;
+        for (const cwd of inFlightCwds) retryAfterFlightCwds.add(cwd);
+        for (const [cwd, snapshot] of Array.from(deferredSnapshotsByCwd.entries())) {
+          retryAttemptsByCwd.delete(cwd);
+          handleSnapshot(snapshot, true);
+        }
+      });
     },
     { replayState: false },
   );
 
   return {
     unsubscribe: () => {
+      disposed = true;
+      for (const timer of retryTimersByCwd.values()) clearTimeout(timer);
+      retryTimersByCwd.clear();
       snapshotSubscription.unsubscribe();
       unsubscribeAgents();
     },

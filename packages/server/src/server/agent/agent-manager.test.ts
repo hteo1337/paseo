@@ -1,6 +1,6 @@
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
@@ -53,6 +53,112 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+test("archive hold rejects new runs until released", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-archive-hold-"));
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const release = manager.holdNewRunsForArchive("workspace-a", workdir);
+    expect(() => manager.streamAgent(agent.id, "prompt")).toThrow("workspace is being archived");
+    release();
+    expect(() => manager.streamAgent(agent.id, "prompt")).not.toThrow();
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("archive hold covers a dot-dot-prefixed child of the deleted root", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-dotdot-"));
+  const child = join(root, "..cache");
+  mkdirSync(child);
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: child }, undefined, {
+      workspaceId: "other-workspace",
+    });
+    const release = manager.holdNewRunsForArchive("archived-workspace", root);
+    expect(() => manager.streamAgent(agent.id, "prompt")).toThrow("workspace is being archived");
+    release();
+    expect(() => manager.streamAgent(agent.id, "prompt")).not.toThrow();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider turn start becomes busy before its queued state update", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-autonomous-archive-"));
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const release = manager.holdNewRunsForArchive("workspace-a", root);
+    expect(() => manager.streamAgent(agent.id, "control")).toThrow("workspace is being archived");
+    client.sessions[0]?.pushEvent({
+      type: "turn_started",
+      provider: "codex",
+      turnId: "autonomous",
+    });
+    expect(manager.hasInFlightRun(agent.id)).toBe(true);
+    release();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.each(["create", "resume"] as const)(
+  "%s registration exposes synchronous provider replay as busy",
+  async (mode) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-registration-replay-"));
+    const agentId = randomUUID();
+    let manager: AgentManager;
+    let busyDuringSubscribe = false;
+    class ReplaySession extends TestAgentSession {
+      override subscribe(callback: (event: AgentStreamEvent) => void): () => void {
+        const unsubscribe = super.subscribe(callback);
+        callback({ type: "turn_started", provider: "codex", turnId: "replayed" });
+        busyDuringSubscribe = manager.hasInFlightRun(agentId);
+        return unsubscribe;
+      }
+    }
+    class ReplayClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new ReplaySession(config);
+      }
+      override async resumeSession(
+        _handle: AgentPersistenceHandle,
+        config?: Partial<AgentSessionConfig>,
+      ): Promise<AgentSession> {
+        return new ReplaySession({ provider: "codex", cwd: config?.cwd ?? root });
+      }
+    }
+    manager = new AgentManager({ clients: { codex: new ReplayClient() }, logger });
+    const release = manager.holdNewRunsForArchive("workspace-a", root);
+    try {
+      if (mode === "create") {
+        await manager.createAgent({ provider: "codex", cwd: root }, agentId, {
+          workspaceId: "workspace-a",
+        });
+      } else {
+        await manager.resumeAgentFromPersistence(
+          { provider: "codex", sessionId: "saved" },
+          { cwd: root },
+          agentId,
+          { workspaceId: "workspace-a" },
+        );
+      }
+      expect(busyDuringSubscribe).toBe(true);
+      expect(manager.hasInFlightRun(agentId)).toBe(true);
+    } finally {
+      release();
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 interface Deferred<T> {
   promise: Promise<T>;
