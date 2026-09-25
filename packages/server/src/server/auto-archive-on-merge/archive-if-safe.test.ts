@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Logger } from "pino";
@@ -103,6 +111,7 @@ function createHarness(overrides?: {
       hasInFlightRun: (agentId: string) =>
         overrides?.agents?.some((agent) => agent.id === agentId && agent.lifecycle === "running") ??
         false,
+      holdNewRunsForArchive: () => () => {},
     } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {} as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {} as AutoArchiveArchiveOptions["terminalManager"],
@@ -301,6 +310,7 @@ function createRealOutcomeHarness(input: {
     agentManager: {
       listAgents: () => [],
       hasInFlightRun: () => false,
+      holdNewRunsForArchive: () => () => {},
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
       archiveSnapshot: vi.fn(async () => {
         throw new Error("not expected without stored agents");
@@ -440,6 +450,9 @@ describe("archiveIfSafe", () => {
       {
         scope: { kind: "workspace", workspaceId: "ws-auto-archive" },
         requestId: "auto-archive-on-merge",
+        abortIf: expect.any(Function),
+        holdNewRuns: expect.any(Function),
+        keepDirectory: true,
       },
     );
     expect(harness.log.info).toHaveBeenCalledWith(
@@ -449,8 +462,90 @@ describe("archiveIfSafe", () => {
         branch: "feature",
         pullRequestUrl: "https://github.com/acme/repo/pull/123",
       },
-      "Auto-archived worktree after PR merge",
+      "Auto-archived workspace after PR merge",
     );
+  });
+
+  test("maps a late busy agent from archiveByScope to deferred", async () => {
+    const harness = createHarness({
+      archiveByScope: async () => ({
+        archivedAgentIds: [],
+        archivedWorkspaceIds: [],
+        removedDirectory: false,
+        deferredByAgentIds: ["agent-late"],
+      }),
+    });
+
+    const outcome = await archiveIfSafe({
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+    });
+
+    expect(outcome).toBe("deferred");
+  });
+
+  test("cancellation during ownership lookup prevents archive", async () => {
+    let releaseOwnership: () => void = () => {};
+    let enteredOwnership = false;
+    let cancelled = false;
+    const ownership = new Promise<void>((resolvePromise) => {
+      releaseOwnership = resolvePromise;
+    });
+    const harness = createHarness({
+      isPaseoOwnedWorktreeCwd: async () => {
+        enteredOwnership = true;
+        await ownership;
+        return { allowed: true, worktreePath: CWD };
+      },
+    });
+    const request = {
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+      isCancelled: () => cancelled,
+    };
+
+    const attempt = archiveIfSafe(request);
+    await vi.waitFor(() => expect(enteredOwnership).toBe(true));
+    cancelled = true;
+    releaseOwnership();
+
+    expect(await attempt).toBe("skipped");
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("cancellation during archive target resolution reaches the final guard", async () => {
+    let cancelled = false;
+    let guardResult: string[] | "cancelled" | null | undefined;
+    const harness = createHarness({
+      archiveByScope: async (_dependencies, request) => {
+        cancelled = true;
+        guardResult = request.abortIf?.();
+        return {
+          archivedAgentIds: [],
+          archivedWorkspaceIds: [],
+          removedDirectory: false,
+          cancelled: guardResult === "cancelled",
+        };
+      },
+    });
+    const request = {
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+      isCancelled: () => cancelled,
+    };
+
+    expect(guardResult).toBeUndefined();
+    expect(await archiveIfSafe(request)).toBe("skipped");
+    expect(guardResult).toBe("cancelled");
   });
 
   test.each(["running", "initializing"])(
@@ -479,6 +574,25 @@ describe("archiveIfSafe", () => {
 
     await runArchiveIfSafe(harness);
 
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("defers for an idle agent owned by another workspace inside the worktree", async () => {
+    const harness = createHarness({
+      agents: [
+        { id: "foreign-idle", cwd: `${CWD}/child`, workspaceId: "ws-other", lifecycle: "idle" },
+      ],
+    });
+
+    const outcome = await archiveIfSafe({
+      workspaceId: "ws-auto-archive",
+      snapshot: harness.snapshot,
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+    });
+
+    expect(outcome).toBe("deferred");
     expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
   });
 
@@ -636,8 +750,23 @@ describe("archiveIfSafe", () => {
     expect(existsSync(worktree.worktreePath)).toBe(true);
   });
 
-  test("real outcome: removes directory when no sibling workspace remains", async () => {
+  test("real outcome: keeps the worktree without running teardown after merge", async () => {
     const { tempDir, repoDir } = createGitRepo();
+    writeFileSync(
+      path.join(repoDir, "paseo.json"),
+      JSON.stringify({
+        worktree: {
+          teardown: [
+            "node -e \"require('fs').writeFileSync(process.env.PASEO_SOURCE_CHECKOUT_PATH + '/auto-teardown.log', 'ran')\"",
+          ],
+        },
+      }),
+    );
+    execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "add teardown"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
     const paseoHome = path.join(tempDir, ".paseo");
     const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "merged-last-ref");
     const workspaceA = "ws-merged-last-ref";
@@ -651,15 +780,21 @@ describe("archiveIfSafe", () => {
       archivedWorkspaceIds,
     });
 
-    await archiveIfSafe({
+    const outcome = await archiveIfSafe({
       workspaceId: workspaceA,
       snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
       options: harness.options,
       log: harness.log,
     });
 
+    expect(outcome).toBe("archived");
     expect(archivedWorkspaceIds.has(workspaceA)).toBe(true);
-    expect(existsSync(worktree.worktreePath)).toBe(false);
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(existsSync(path.join(repoDir, "auto-teardown.log"))).toBe(false);
+    expect(harness.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ path: expect.stringContaining("merged-last-ref") }),
+      expect.stringContaining("kept"),
+    );
   });
 
   test("real outcome: an unarchived workspace is not archived again for the same merged PR", async () => {

@@ -17,6 +17,7 @@ import type {
 import type { ForgeService } from "../../services/forge-service.js";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import { isPaseoOwnedWorktreeCwd } from "../../utils/worktree.js";
+import { isPathInsideRoot } from "../../utils/path.js";
 import type { WorkspaceArchiveContext } from "../workspace-registry.js";
 
 export interface AutoArchiveArchiveOptions {
@@ -57,6 +58,7 @@ export async function archiveIfSafe(input: {
   options: AutoArchiveArchiveOptions;
   log: Logger;
   deps?: ArchiveIfSafeDependencies;
+  isCancelled?: () => boolean;
 }): Promise<ArchiveIfSafeOutcome> {
   const { workspaceId, snapshot, options, log } = input;
   const deps = input.deps ?? defaultDependencies;
@@ -77,17 +79,18 @@ export async function archiveIfSafe(input: {
     paseoHome: options.paseoHome,
     worktreesRoot: options.paseoWorktreesBaseRoot,
   });
+  if (input.isCancelled?.()) return "skipped";
   if (!ownership.allowed) {
     return "skipped";
   }
 
   try {
     const autoArchivedChangeRequestUrl = await options.getAutoArchivedChangeRequestUrl(workspaceId);
+    if (input.isCancelled?.()) return "skipped";
     if (autoArchivedChangeRequestUrl === pullRequest.url) {
       return "skipped";
     }
 
-    // No await between this check and archiveByScope, so a turn cannot start in between.
     const deletedRoot = ownership.worktreePath ?? cwd;
     const busyAgentIds = listBusyAgentIds(options.agentManager, workspaceId, deletedRoot);
     if (busyAgentIds.length > 0) {
@@ -98,7 +101,7 @@ export async function archiveIfSafe(input: {
       return "deferred";
     }
 
-    await deps.archiveByScope(
+    const result = await deps.archiveByScope(
       {
         paseoHome: options.paseoHome,
         paseoWorktreesBaseRoot: options.paseoWorktreesBaseRoot,
@@ -128,11 +131,25 @@ export async function archiveIfSafe(input: {
       {
         scope: { kind: "workspace", workspaceId },
         requestId: "auto-archive-on-merge",
+        abortIf: () =>
+          input.isCancelled?.()
+            ? "cancelled"
+            : listBusyAgentIds(options.agentManager, workspaceId, deletedRoot),
+        holdNewRuns: () => options.agentManager.holdNewRunsForArchive(workspaceId, deletedRoot),
+        keepDirectory: true,
       },
     );
+    if (result.cancelled) return "skipped";
+    if (result.deferredByAgentIds?.length) {
+      log.info(
+        { workspaceId, cwd, agentIds: result.deferredByAgentIds },
+        "Deferred auto-archive after PR merge: agent still working",
+      );
+      return "deferred";
+    }
     log.info(
       { workspaceId, cwd, branch: pullRequest.headRefName, pullRequestUrl: pullRequest.url },
-      "Auto-archived worktree after PR merge",
+      "Auto-archived workspace after PR merge",
     );
     return "archived";
   } catch (error) {
@@ -150,15 +167,15 @@ function listBusyAgentIds(agentManager: AgentManager, workspaceId: string, root:
   const canonicalRoot = canonicalPath(root);
   return agentManager
     .listAgents()
-    .filter((agent) => isAgentWorking(agentManager, agent))
     .filter((agent) => {
       const agentCwd = canonicalPath(agent.cwd);
-      return (
-        agent.workspaceId === workspaceId ||
-        agentCwd === canonicalRoot ||
-        agentCwd.startsWith(canonicalRoot + path.sep)
-      );
+      return agent.workspaceId === workspaceId || isPathInsideRoot(canonicalRoot, agentCwd);
     })
+    .filter((agent) =>
+      agent.workspaceId === workspaceId
+        ? isAgentWorking(agentManager, agent)
+        : agent.lifecycle !== "closed",
+    )
     .map((agent) => agent.id);
 }
 
