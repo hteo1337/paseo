@@ -24,6 +24,8 @@ export type {
   PluginWorktreeCreateRequest,
   PluginHookAgent,
   PluginSessionOpenRequest,
+  PluginSessionOpenedRequest,
+  PluginSetModelRequest,
   PluginTurnOutcome,
   PluginLifecycleEvents,
   PluginBeforeRequests,
