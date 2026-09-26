@@ -592,6 +592,7 @@ export interface ImportedTimelineEntry {
 export interface ImportedProviderSession {
   session: AgentSession;
   config: AgentSessionConfig;
+  persistedModel?: string | null;
   persistence: AgentPersistenceHandle;
   timeline: ImportedTimelineEntry[];
   providerSubagentEvents?: Extract<AgentStreamEvent, { type: "provider_subagent" }>[];

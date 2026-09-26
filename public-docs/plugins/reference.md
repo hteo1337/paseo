@@ -559,11 +559,13 @@ type PluginTurnOutcome =
 
 ### Before hooks
 
-| Name                 | Request fields                                                          | Editable                                |
-| -------------------- | ----------------------------------------------------------------------- | --------------------------------------- |
-| `agent.create`       | `config`, optional `env`                                                | Public agent config except `cwd`; `env` |
-| `agent.session_open` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `env` | Only `env`                              |
-| `workspace.create`   | `source`, optional `title`, `firstAgentContext`                         | Entire explicit creation request        |
+| Name                   | Request fields                                                                                       | Editable                                |
+| ---------------------- | ---------------------------------------------------------------------------------------------------- | --------------------------------------- |
+| `agent.create`         | `config`, optional `env`                                                                             | Public agent config except `cwd`; `env` |
+| `agent.session_open`   | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `model`, `title`, `env`            | `env`                                   |
+| `agent.session_opened` | `agentId`, `workspaceId`, `provider`, `cwd`, `reason`, `purpose`, `model`, `requestedModel`, `title` | None; throw to refuse                   |
+| `agent.set_model`      | `agentId`, `provider`, `source`, `fromModel`, `toModel`, `title`, `cwd`                              | None; throw to refuse                   |
+| `workspace.create`     | `source`, optional `title`, `firstAgentContext`                                                      | Entire explicit creation request        |
 
 **`agent.create.config`** uses `AgentSessionConfig`:
 
@@ -587,6 +589,8 @@ type PluginTurnOutcome =
   "cwd": "/projects/shop",
   "reason": "resume",
   "purpose": "interactive",
+  "model": "gpt-5.4",
+  "title": "Update checkout flow",
   "env": { "COMPANY_ENV": "development" }
 }
 ```
@@ -595,6 +599,8 @@ type PluginTurnOutcome =
 | ------------- | ----------------------------------------------------------------------------------------------------------------------- |
 | `workspaceId` | String or `null`                                                                                                        |
 | `reason`      | `create`, `resume`, `refresh`, `import`                                                                                 |
+| `model`       | Requested or persisted model before opening, or `null`                                                                  |
+| `title`       | Agent title or `null`; on import, the resolved title appears in `agent.session_opened`                                  |
 | `purpose`     | `interactive`, `history`                                                                                                |
 | `env`         | Launch override map; excludes the daemon's inherited environment. Replace the map to add, replace, or remove overrides. |
 
@@ -605,9 +611,11 @@ Creation request
   → agent.create hooks (plugin-ID order; registration order within each plugin)
   → resolve defaults and validate provider configuration
   → derive launch configuration with Paseo runtime tools and daemon prompt
-  → agent.session_open hooks (same ordering; env only)
+  → agent.session_open hooks (env may change)
   → set PASEO_AGENT_ID and PASEO_AGENT_CWD
-  → open provider session and save agent configuration
+  → open provider session
+  → agent.session_opened hooks (read only)
+  → save agent configuration
 ```
 
 | Callback returns                                        | Next callback receives                              |
@@ -618,7 +626,26 @@ Creation request
 | Throws or returns invalid data                          | Operation fails; later callbacks do not run         |
 
 No automatic deep merge. Later callbacks can overwrite earlier values. Agent configuration is
-saved; environment overrides are not persisted with it.
+saved; environment overrides are not persisted with it. `agent.session_open` runs once before
+opening. Returned `model` and `title` may be omitted; when present they must match the input.
+`agent.session_opened` runs once after opening, before registration, persistence or prompts.
+It receives the effective provider model, or `null` when runtime information is unknown.
+`requestedModel` is the requested or persisted model; it is not evidence of the effective model.
+Your policy decides whether to allow an unknown model.
+Its fields are read-only and it has no env; throw to refuse. A refusal closes the provider session. On
+resume or refresh, the existing record remains closed or errored with the refusal message.
+
+`agent.set_model` uses `source: "client"` for client and MCP requests and `source: "provider"` for
+provider-reported changes, including reports of an unknown (`null`) model. A client refusal happens before the switch. A provider notification
+arrives after the switch: refusal detects it, cancels pending and active runs immediately, closes the session, and
+records the error. This is detect-and-stop; it cannot undo model use before the notification.
+
+Reload and managed source update wait for a new policy instance for up to 10 seconds. A failed
+restart, unexpected plugin exit, or startup failure after hook registration refuses the observed hook names until a
+successful service startup, including provider validation and publication, or deliberate disable or removal.
+Cancelling startup also invalidates its pending failure so it cannot restore a barrier after disable or removal. Calls approved by a policy before its reload
+begins may finish under that approval, even if a later policy in the chain is still running.
+A startup failure before any hook registration installs no barrier; the daemon has no observed policy names to protect.
 
 ### Context and cleanup
 

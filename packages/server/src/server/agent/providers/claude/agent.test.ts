@@ -3399,3 +3399,58 @@ describe("Claude question permission notifications", () => {
     expect(request.description).toBeUndefined();
   });
 });
+
+test("Claude same-ID init: real adapter emits provider model change and manager refuses", async () => {
+  const { AgentManager } = await import("../../agent-manager.js");
+  const logger = createTestLogger();
+  const client = new ClaudeAgentClient({ logger });
+  const config = { provider: "claude" as const, cwd: os.tmpdir(), model: "sonnet" };
+  const session = await client.createSession(config);
+  Object.assign(session, { claudeSessionId: "existing", lastOptionsModel: "sonnet" });
+  const adapter = session as unknown as TestClaudeSession & {
+    dispatchEvents(events: AgentStreamEvent[]): void;
+  };
+  const close = vi.spyOn(session, "close").mockResolvedValue();
+  vi.spyOn(session, "interrupt").mockResolvedValue();
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const requests: unknown[] = [];
+  const manager = new AgentManager({
+    clients: { claude: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.set_model") {
+          requests.push(request);
+          throw new Error("opus refused");
+        }
+        return request;
+      },
+    } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  const events = adapter.translateMessageToEvents({
+    type: "system",
+    subtype: "init",
+    session_id: "existing",
+    model: "claude-opus-4-6",
+    permissionMode: "default",
+  } as SDKMessage);
+  expect(events).toContainEqual(
+    expect.objectContaining({
+      type: "model_changed",
+      runtimeInfo: expect.objectContaining({ model: "claude-opus-4-6" }),
+    }),
+  );
+  expect(events.some((event) => event.type === "thread_started")).toBe(false);
+  adapter.dispatchEvents(events);
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(requests).toEqual([
+    expect.objectContaining({
+      source: "provider",
+      fromModel: "sonnet",
+      toModel: "claude-opus-4-6",
+    }),
+  ]);
+  expect(manager.getAgent(agent.id)).toBeNull();
+});

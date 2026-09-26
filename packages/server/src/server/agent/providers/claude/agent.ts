@@ -4273,7 +4273,20 @@ class ClaudeAgentSession implements AgentSession {
     events: AgentStreamEvent[],
   ): void {
     if (message.subtype === "init") {
+      const previousModel = this.lastOptionsModel;
       const sessionUpdate = this.handleSystemMessage(message);
+      if (this.lastOptionsModel !== previousModel) {
+        events.push({
+          type: "model_changed",
+          provider: "claude",
+          runtimeInfo: {
+            provider: "claude",
+            sessionId: this.claudeSessionId,
+            model: this.lastOptionsModel,
+            modeId: this.currentMode,
+          },
+        });
+      }
       if (sessionUpdate.notice) {
         events.push({
           type: "timeline",
