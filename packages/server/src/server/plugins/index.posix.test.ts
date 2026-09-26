@@ -4,7 +4,7 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import pino from "pino";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { DaemonConfigStore } from "../daemon-config-store.js";
 import { PluginService } from "./index.js";
 import { ManagedPluginSources } from "./managed-source.js";
@@ -325,6 +325,137 @@ describe("PluginService", () => {
     await expect(service.reloadPlugin("work-plugin")).resolves.toMatchObject({ status: "running" });
     await service.stopAllPlugins();
   }, 20_000);
+
+  it("barrier: disable clears a failed reload refusal", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const directory = await createPlugin(
+      "policy",
+      `export default function contribute(server) { server.before("workspace.create", ({ request }) => request); return () => {}; }`,
+    );
+    const service = createService(home, { policy: { source: "directory", path: directory } });
+    await service.start();
+    await writeFile(path.join(directory, "index.server.ts"), "export default broken syntax !!!");
+    await expect(service.reloadPlugin("policy")).rejects.toThrow();
+    const request = { source: { kind: "directory" as const, path: "/project" } };
+    await expect(service.before("workspace.create", request)).rejects.toThrow(
+      "policy plugin policy failed to restart:",
+    );
+    await service.disablePlugin("policy");
+    await expect(service.before("workspace.create", request)).resolves.toEqual(request);
+    await service.stopAllPlugins();
+  }, 20_000);
+
+  it("crash barrier: deliberate disable clears the refusal", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const directory = await createPlugin(
+      "policy",
+      `export default function contribute(server) { server.before("workspace.create", ({ request }) => request); setTimeout(() => process.exit(9), 500); return () => {}; }`,
+    );
+    const service = createService(home, { policy: { source: "directory", path: directory } });
+    await service.start();
+    await vi.waitFor(() => expect(service.catalog()).toEqual([]));
+    const request = { source: { kind: "directory" as const, path: "/project" } };
+    await expect(service.before("workspace.create", request)).rejects.toThrow(
+      "policy plugin policy exited",
+    );
+    await service.disablePlugin("policy");
+    await expect(service.before("workspace.create", request)).resolves.toEqual(request);
+    await service.stopAllPlugins();
+  }, 20_000);
+
+  it("managed update installs policy barrier before stopping the old plugin", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const original = await createPlugin(
+      "policy",
+      "export default function contribute() { return () => {}; }",
+    );
+    const replacement = await createPlugin(
+      "policy",
+      "export default function contribute() { return () => {}; }",
+    );
+    const events: string[] = [];
+    let running = true;
+    const runtime: TestPluginRuntime = {
+      ...createPausedRuntime().runtime,
+      catalog: () => (running ? [{ id: "policy", clientBundle: "bundle" }] : []),
+      validatePlugin: async () => undefined,
+      beginReload: () => {
+        events.push("begin");
+      },
+      stopPluginById: async () => {
+        events.push("stop");
+        running = false;
+        return true;
+      },
+      startPlugin: async () => {
+        events.push("start");
+        throw new Error("restart failed");
+      },
+      failReload: () => {
+        events.push("fail");
+      },
+    };
+    const candidate = {
+      build: undefined,
+      defaultId: "policy",
+      directory: replacement,
+      record: { kind: "npm" as const },
+      versionRoot: replacement,
+    };
+    const managedSources = {
+      prepareUpdate: async () => candidate,
+      place: async () => candidate,
+      verifyCandidate: async () => undefined,
+      assertCurrent: async () => undefined,
+      discard: async () => undefined,
+    } as unknown as ManagedPluginSources;
+    const service = createService(
+      home,
+      { policy: { source: "directory", path: original } },
+      {
+        runtime,
+        managedSources,
+      },
+    );
+    (service as unknown as { globalStartsBlocked: boolean }).globalStartsBlocked = false;
+    await expect(
+      (
+        service as unknown as { updateSource(input: { id: string }): Promise<unknown> }
+      ).updateSource({ id: "policy" }),
+    ).rejects.toThrow("restoring previous plugin also failed");
+    expect(events).toEqual(["begin", "stop", "start", "start", "fail"]);
+  });
+
+  it("crash barrier: startup exit during provider publication does not clear refusal", async () => {
+    const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
+    roots.push(home);
+    const running = new Set<string>();
+    const clearReload = vi.fn();
+    const runtime: TestPluginRuntime = {
+      ...createPausedRuntime().runtime,
+      catalog: () => [...running].map((id) => ({ id, clientBundle: "bundle" })),
+      startPlugin: async (id) => {
+        running.add(id);
+      },
+      stopPluginById: async (id) => running.delete(id),
+      clearReload,
+    };
+    const service = createService(home, {}, { runtime });
+    const internals = service as unknown as {
+      publishProviderRegistrations(id: string, sourcePath: string): Promise<void>;
+      startPlugin(id: string, sourcePath: string): Promise<void>;
+    };
+    internals.publishProviderRegistrations = async () => {
+      running.delete("policy");
+    };
+    await expect(internals.startPlugin("policy", home)).rejects.toThrow(
+      "Plugin exited during startup: policy",
+    );
+    expect(clearReload).not.toHaveBeenCalled();
+  });
 
   it("lists manifest descriptions for running and disabled plugins without hiding malformed entries", async () => {
     const home = await mkdtemp(path.join(tmpdir(), "paseo-plugin-home-"));
@@ -1348,3 +1479,141 @@ async function applyReviewedUpdate(service: PluginService, pluginId: string) {
   expect(preview?.outcome).toBe("update");
   return service.applyUpdates([preview!.proposal!]);
 }
+
+describe("policy startup transaction", () => {
+  const request = {
+    agentId: "a",
+    provider: "claude",
+    source: "client" as const,
+    fromModel: "sonnet",
+    toModel: "opus",
+    title: "Fix x",
+    cwd: "/project",
+  };
+  const healthy = `export default function(server) { server.before('agent.set_model', ({request}) => request); return () => {}; }`;
+
+  it.each(["builtin provider collision", "publication failure"])(
+    "%s retains the barrier until healthy full startup",
+    async (failure) => {
+      const directory = await createPlugin("policy", healthy);
+      const home = await mkdtemp(path.join(tmpdir(), "paseo-policy-"));
+      roots.push(home);
+      const service = createService(home, {
+        policy: {
+          source: "directory",
+          path: directory,
+          enabled: failure !== "publication failure",
+        },
+      });
+      try {
+        await service.start();
+        await expect(service.before("agent.set_model", request)).resolves.toEqual(request);
+        if (failure === "builtin provider collision") {
+          await writeFile(
+            path.join(directory, "index.server.ts"),
+            healthy.replace(
+              "return ()",
+              `server.registerProvider({id:'claude', label:'Collision', async connect(){throw new Error('unused');}}); return ()`,
+            ),
+          );
+        }
+        const publication =
+          failure === "publication failure"
+            ? vi
+                .spyOn(
+                  service as unknown as { publishProviderRegistrations(): Promise<void> },
+                  "publishProviderRegistrations",
+                )
+                .mockRejectedValueOnce(new Error("publication failed"))
+            : null;
+        await expect(
+          failure === "publication failure"
+            ? service.enablePlugin("policy")
+            : service.reloadPlugin("policy"),
+        ).rejects.toThrow(
+          failure === "publication failure"
+            ? "publication failed"
+            : "cannot register builtin provider ID",
+        );
+        await expect(service.before("agent.set_model", request)).rejects.toThrow(
+          "policy plugin policy failed to start:",
+        );
+        const runtime = (service as unknown as { runtime: { reloads: Map<string, unknown> } })
+          .runtime;
+        expect(runtime.reloads.size).toBe(1);
+        publication?.mockRestore();
+        await writeFile(path.join(directory, "index.server.ts"), healthy);
+        await service.reloadPlugin("policy");
+        expect(runtime.reloads.size).toBe(0);
+        await expect(service.before("agent.set_model", request)).resolves.toEqual(request);
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+  );
+
+  it.each(["disable", "remove", "global disable", "disable then enable", "no cancellation"])(
+    "%s during failing initialization owns no obsolete barrier",
+    async (action) => {
+      const directory = await createPlugin(
+        "policy",
+        `import {writeFileSync} from 'node:fs'; export default function(server) { server.before('agent.set_model', ({request}) => request); writeFileSync(${JSON.stringify("/PLACEHOLDER")}, 'ready'); Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1500); throw new Error('init failed'); }`,
+      );
+      const sourcePath = path.join(directory, "index.server.ts");
+      await writeFile(
+        sourcePath,
+        (await readFile(sourcePath, "utf8"))
+          .replace("/PLACEHOLDER", path.join(directory, "ready"))
+          .replace("/RELEASE", path.join(directory, "release")),
+      );
+      const home = await mkdtemp(path.join(tmpdir(), "paseo-policy-"));
+      roots.push(home);
+      const store = createStore(home, {
+        policy: { source: "directory", path: directory, enabled: false },
+      });
+      const service = bindTestSessionHost(
+        new PluginService(pino({ level: "silent" }), store, "0.4.0", {}),
+      );
+      try {
+        await service.start();
+        const starting = service.enablePlugin("policy").catch((error: unknown) => error);
+        await vi.waitFor(
+          async () => expect(await readFile(path.join(directory, "ready"), "utf8")).toBe("ready"),
+          { timeout: 10000 },
+        );
+        let cancelled: Promise<unknown> = Promise.resolve();
+        if (action === "disable") cancelled = service.disablePlugin("policy");
+        if (action === "remove") cancelled = service.removePlugin("policy");
+        if (action === "disable then enable") {
+          const runtime = (
+            service as unknown as { runtime: TestPluginRuntime & { reloads: Map<string, unknown> } }
+          ).runtime;
+          const start = runtime.startPlugin.bind(runtime);
+          vi.spyOn(runtime, "startPlugin").mockImplementationOnce(async (...args) => {
+            expect(runtime.reloads.size).toBe(0);
+            return start(...args);
+          });
+          const disabling = service.disablePlugin("policy");
+          await writeFile(sourcePath, healthy);
+          const enabling = service.enablePlugin("policy");
+          cancelled = Promise.all([disabling, enabling]);
+        }
+        if (action === "global disable") {
+          store.patch({ pluginsEnabled: false });
+          cancelled = (service as unknown as { lifecycle: Promise<void> }).lifecycle;
+        }
+        await Promise.all([starting, cancelled]);
+        if (action === "no cancellation")
+          await expect(service.before("agent.set_model", request)).rejects.toThrow(
+            "failed to start: init failed",
+          );
+        else await expect(service.before("agent.set_model", request)).resolves.toEqual(request);
+        const runtime = (service as unknown as { runtime: { reloads: Map<string, unknown> } })
+          .runtime;
+        expect(runtime.reloads.size).toBe(action === "no cancellation" ? 1 : 0);
+      } finally {
+        await service.stopAllPlugins();
+      }
+    },
+  );
+});
