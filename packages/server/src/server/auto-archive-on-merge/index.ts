@@ -178,7 +178,9 @@ export function setupAutoArchiveOnMerge(
         }
       });
     },
-    { replayState: false },
+    // An archive deferred by a busy internal agent must resume when that agent goes
+    // idle; internal agents are otherwise invisible to global subscribers.
+    { replayState: false, includeInternalAgentEvents: true },
   );
 
   return {

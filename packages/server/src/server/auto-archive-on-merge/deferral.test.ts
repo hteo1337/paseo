@@ -48,8 +48,19 @@ function createSnapshot(state: "open" | "merged"): WorkspaceGitRuntimeSnapshot {
   };
 }
 
-function agentState(lifecycle: ManagedAgent["lifecycle"]): AgentManagerEvent {
-  return { type: "agent_state", agent: { id: "agent-1", cwd: CWD, lifecycle } as ManagedAgent };
+function agentState(
+  lifecycle: ManagedAgent["lifecycle"],
+  options?: { internal?: boolean; id?: string },
+): AgentManagerEvent {
+  return {
+    type: "agent_state",
+    agent: {
+      id: options?.id ?? "agent-1",
+      cwd: CWD,
+      lifecycle,
+      internal: options?.internal ?? false,
+    } as ManagedAgent,
+  };
 }
 
 function createJourney(outcomes: Array<() => Promise<ArchiveIfSafeOutcome>>) {
@@ -62,9 +73,21 @@ function createJourney(outcomes: Array<() => Promise<ArchiveIfSafeOutcome>>) {
     logger: { child: () => ({ warn: vi.fn(), info: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
     agentManager: {
-      subscribe: (callback: (event: AgentManagerEvent) => void) => {
+      // Mirrors AgentManager.subscribe: a global (no agentId) subscriber only sees
+      // internal-agent events when it opted in via includeInternalAgentEvents.
+      subscribe: (
+        callback: (event: AgentManagerEvent) => void,
+        subscribeOptions?: { includeInternalAgentEvents?: boolean },
+      ) => {
         onAgentEvent = (event) => {
           if (event.type === "agent_state") lastLifecycle = event.agent.lifecycle;
+          if (
+            event.type === "agent_state" &&
+            event.agent.internal &&
+            !subscribeOptions?.includeInternalAgentEvents
+          ) {
+            return;
+          }
           callback(event);
         };
         return () => {
@@ -165,6 +188,25 @@ test.each(["error", "closed"] as const)(
     }
   },
 );
+
+test("an internal agent going idle replays after timer retries are exhausted", async () => {
+  vi.useFakeTimers();
+  try {
+    const outcomes = Array.from({ length: 6 }, () => async () => "deferred" as const);
+    const journey = createJourney([...outcomes, async () => "archived"]);
+    journey.emitSnapshot(createSnapshot("open"));
+    journey.emitSnapshot(createSnapshot("merged"));
+    await vi.advanceTimersByTimeAsync(155_000);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(6);
+
+    journey.emitAgent(agentState("idle", { internal: true, id: "internal-agent-1" }));
+    await vi.advanceTimersByTimeAsync(0);
+    expect(journey.archiveIfSafe).toHaveBeenCalledTimes(7);
+    journey.subscription.unsubscribe();
+  } finally {
+    vi.useRealTimers();
+  }
+});
 
 test("a failed terminal-event read re-arms exhausted retries", async () => {
   vi.useFakeTimers();

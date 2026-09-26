@@ -249,6 +249,9 @@ export type AgentSubscriber = (event: AgentManagerEvent) => void;
 export interface SubscribeOptions {
   agentId?: string;
   replayState?: boolean;
+  // Lets a global subscriber see internal-agent events without weakening the
+  // default internal-agent filter applied to every other global subscriber.
+  includeInternalAgentEvents?: boolean;
 }
 
 interface HydrateTimelineOptions {
@@ -579,6 +582,7 @@ function attachPersistenceCwd(
 interface SubscriptionRecord {
   callback: AgentSubscriber;
   agentId: string | null;
+  includeInternalAgentEvents: boolean;
 }
 
 interface SteerEventBarrier {
@@ -965,6 +969,7 @@ export class AgentManager {
     const record: SubscriptionRecord = {
       callback,
       agentId: targetAgentId,
+      includeInternalAgentEvents: options?.includeInternalAgentEvents === true,
     };
     this.subscribers.add(record);
 
@@ -1711,7 +1716,10 @@ export class AgentManager {
     return close;
   }
 
-  private async closeAgentRuntime(agentId: string): Promise<void> {
+  private async closeAgentRuntime(
+    agentId: string,
+    options?: { onBeforeClose?: () => void },
+  ): Promise<void> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -1726,6 +1734,9 @@ export class AgentManager {
       "agent.manager.close.start",
     );
     await this.drainSessionEvents(agentId);
+    // Runs synchronously, with no await between it and session.close(), so a
+    // requireIdle recheck here cannot race a turn that starts during the drain.
+    options?.onBeforeClose?.();
     // Retain ownership until shutdown succeeds. A failed close may still own a
     // native writer, so publishing a resumable closed snapshot would orphan it.
     await agent.session.close();
@@ -1800,8 +1811,25 @@ export class AgentManager {
     }
 
     const { archivedAt } = await this.markRecordArchived(stored, requestedArchivedAt);
+    try {
+      await this.closeAgentRuntime(agentId, {
+        // Same recheck as above, but immediately before session.close() so a turn
+        // that starts during markRecordArchived's awaits cannot slip through.
+        onBeforeClose: options?.requireIdle
+          ? () => {
+              if (this.hasInFlightRun(agentId)) {
+                throw new AgentBusyDuringArchiveError(agentId);
+              }
+            }
+          : undefined,
+      });
+    } catch (error) {
+      if (error instanceof AgentBusyDuringArchiveError) {
+        await this.requireRegistry().upsert(stored);
+      }
+      throw error;
+    }
     agent.updatedAt = new Date(archivedAt);
-    await this.closeAgentRuntime(agentId);
     await this.syncNativeArchiveState(stored.provider, stored.persistence, "archive");
     this.discardRetainedAgentState(agentId);
 
@@ -5080,8 +5108,13 @@ export class AgentManager {
       ) {
         continue;
       }
-      // Skip internal agents for global subscribers (those without a specific agentId)
-      if (!subscriber.agentId && this.eventBelongsToInternalAgent(event)) {
+      // Skip internal agents for global subscribers (those without a specific agentId),
+      // unless the subscriber opted into internal-agent events for itself.
+      if (
+        !subscriber.agentId &&
+        !subscriber.includeInternalAgentEvents &&
+        this.eventBelongsToInternalAgent(event)
+      ) {
         continue;
       }
       subscriber.callback(event);

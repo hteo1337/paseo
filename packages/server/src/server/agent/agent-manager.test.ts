@@ -318,6 +318,49 @@ test("archiveAgent without requireIdle still closes through the same race", asyn
   }
 });
 
+// Regression for round-7 P2: a turn starting during the archived-record write
+// must not slip past the atomic recheck immediately before session.close().
+test("archiveAgent with requireIdle defers a turn that starts during the archived-record write", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-post-check-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    let closed = false;
+    vi.spyOn(session, "close").mockImplementation(async () => {
+      closed = true;
+    });
+    const upsert = storage.upsert.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "upsert").mockImplementation(async (record) => {
+      if (armed && record.id === agent.id && record.archivedAt) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "post-check" });
+      }
+      return upsert(record);
+    });
+
+    await expect(manager.archiveAgent(agent.id, { requireIdle: true })).rejects.toThrow(
+      AgentBusyDuringArchiveError,
+    );
+
+    expect(armed).toBe(false);
+    expect(closed).toBe(false);
+    expect((await storage.get(agent.id))?.archivedAt).toBeFalsy();
+    expect(manager.getAgent(agent.id)?.lifecycle).not.toBe("closed");
+
+    session.pushEvent({ type: "turn_completed", provider: "codex", turnId: "post-check" });
+    await vi.waitFor(() => expect(manager.hasInFlightRun(agent.id)).toBe(false));
+    expect(() => manager.streamAgent(agent.id, "still-usable")).not.toThrow();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
 test.each(["create", "resume"] as const)(
   "%s registration exposes synchronous provider replay as busy",
   async (mode) => {
