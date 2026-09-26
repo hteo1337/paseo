@@ -33,7 +33,10 @@ export interface ArchiveDependencies {
   paseoWorktreesBaseRoot?: string;
   github: ForgeService;
   workspaceGitService: Pick<WorkspaceGitService, "getSnapshot">;
-  agentManager: Pick<AgentManager, "listAgents" | "getAgent" | "archiveAgent" | "archiveSnapshot">;
+  agentManager: Pick<
+    AgentManager,
+    "listAgents" | "listAgentsIncludingInternal" | "getAgent" | "archiveAgent" | "archiveSnapshot"
+  >;
   agentStorage: Pick<AgentStorage, "listByWorkspace">;
   // Resolves the worktree at a path to its workspaceId for archive-by-path. The
   // path uniquely identifies a worktree workspace; this is a directory lookup for
@@ -393,6 +396,7 @@ async function archiveTargetRecords(
         dependencies,
         workspaceId,
         storedRecordsByWorkspace?.get(workspaceId),
+        requireClosedAgents,
       );
       return { workspaceId, agents };
     }),
@@ -415,7 +419,7 @@ async function archiveTargetRecords(
 
   const deferredByAgentIds = requireClosedAgents
     ? dependencies.agentManager
-        .listAgents()
+        .listAgentsIncludingInternal()
         .filter(
           (agent) =>
             agent.lifecycle !== "closed" && targetWorkspaceIds.includes(agent.workspaceId ?? ""),
@@ -592,6 +596,7 @@ export async function archiveWorkspaceContents(
   dependencies: ArchiveWorkspaceContentsDependencies,
   workspaceId: string,
   storedRecords?: StoredAgentRecord[],
+  requireIdleClose = false,
 ): Promise<Set<string>> {
   const archivedAgents = new Set<string>();
 
@@ -616,7 +621,7 @@ export async function archiveWorkspaceContents(
   const archiveResults = await Promise.allSettled([
     ...[...agentIdsToArchive].map((agentId) =>
       dependencies.agentManager.getAgent(agentId)
-        ? dependencies.agentManager.archiveAgent(agentId)
+        ? dependencies.agentManager.archiveAgent(agentId, { requireIdle: requireIdleClose })
         : dependencies.agentManager.archiveSnapshot(agentId, archivedAt),
     ),
     dependencies.killTerminalsForWorkspace(workspaceId),

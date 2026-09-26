@@ -162,11 +162,12 @@ export function isAgentWorking(agentManager: AgentManager, agent: ManagedAgent):
   return agent.lifecycle === "initializing" || agentManager.hasInFlightRun(agent.id);
 }
 
-// A deferral is retried by index.ts when an agent stops working.
+// A deferral is retried by index.ts when an agent stops working. Internal agents
+// never show up in listAgents(), so a busy one must be checked separately here.
 function listBusyAgentIds(agentManager: AgentManager, workspaceId: string, root: string): string[] {
   const canonicalRoot = canonicalPath(root);
   return agentManager
-    .listAgents()
+    .listAgentsIncludingInternal()
     .filter((agent) => {
       const agentCwd = canonicalPath(agent.cwd);
       return agent.workspaceId === workspaceId || isPathInsideRoot(canonicalRoot, agentCwd);

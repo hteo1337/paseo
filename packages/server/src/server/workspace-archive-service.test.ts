@@ -143,6 +143,11 @@ function createArchiveDeps(input: ArchiveDepsInput): ArchiveTestDependencies {
     } as unknown as Pick<WorkspaceGitService, "getSnapshot">,
     agentManager: {
       listAgents: () => [],
+      // Delegates to the current listAgents so a test that overrides
+      // listAgents (e.g. to add a target agent) stays visible here too.
+      listAgentsIncludingInternal(this: { listAgents: () => ManagedAgent[] }) {
+        return this.listAgents();
+      },
       getAgent: () => null,
       archiveAgent: vi.fn(async (agentId: string) => {
         archivedAgentIds.push(agentId);

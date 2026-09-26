@@ -23,7 +23,14 @@ import type { ArchiveResult, ActiveWorkspaceRef } from "../workspace-archive-ser
 import type { WorkspaceGitRuntimeSnapshot } from "../workspace-git-service.js";
 import { createWorktree, type WorktreeConfig } from "../../utils/worktree.js";
 import type { ForgeService } from "../../../services/forge-service.js";
-import type { StoredAgentRecord } from "../agent/agent-storage.js";
+import { AgentManager } from "../agent/agent-manager.js";
+import { AgentStorage, type StoredAgentRecord } from "../agent/agent-storage.js";
+import type {
+  AgentClient,
+  AgentSession,
+  AgentSessionConfig,
+  AgentStreamEvent,
+} from "../agent/agent-sdk-types.js";
 
 const CWD = "/tmp/paseo/worktrees/repo/branch";
 const PASEO_HOME = "/tmp/paseo";
@@ -108,6 +115,7 @@ function createHarness(overrides?: {
     github: {} as AutoArchiveArchiveOptions["github"],
     agentManager: {
       listAgents: () => overrides?.agents ?? [],
+      listAgentsIncludingInternal: () => overrides?.agents ?? [],
       hasInFlightRun: (agentId: string) =>
         overrides?.agents?.some((agent) => agent.id === agentId && agent.lifecycle === "running") ??
         false,
@@ -260,6 +268,82 @@ function createGitHubServiceStub(): ForgeService {
   };
 }
 
+const RACE_CAPABILITIES = {
+  supportsStreaming: false,
+  supportsSessionPersistence: false,
+  supportsSessionListing: false,
+  supportsDynamicModes: false,
+  supportsMcpServers: false,
+  supportsReasoningStream: false,
+  supportsToolInvocations: false,
+} as const;
+
+// Minimal fake session/client so a test can push a provider event
+// (turn_started) synchronously, mirroring a real out-of-band provider turn.
+class RaceSession {
+  readonly provider = "codex" as const;
+  readonly capabilities = RACE_CAPABILITIES;
+  readonly id = `race-${Math.random().toString(36).slice(2)}`;
+  closed = false;
+  private subs = new Set<(event: AgentStreamEvent) => void>();
+  constructor(private readonly config: AgentSessionConfig) {}
+  async run() {
+    return { sessionId: this.id, finalText: "", timeline: [] };
+  }
+  async startTurn() {
+    return { turnId: "t" };
+  }
+  subscribe(callback: (event: AgentStreamEvent) => void) {
+    this.subs.add(callback);
+    return () => this.subs.delete(callback);
+  }
+  push(event: AgentStreamEvent) {
+    for (const callback of this.subs) callback(event);
+  }
+  async *streamHistory(): AsyncGenerator<AgentStreamEvent> {}
+  async getRuntimeInfo() {
+    return { provider: this.provider, sessionId: this.id, model: null, modeId: null };
+  }
+  async getAvailableModes() {
+    return [];
+  }
+  async getCurrentMode() {
+    return null;
+  }
+  async setMode() {}
+  getPendingPermissions() {
+    return [];
+  }
+  async respondToPermission() {}
+  describePersistence() {
+    return { provider: this.provider, sessionId: this.id };
+  }
+  async interrupt() {}
+  async close() {
+    this.closed = true;
+  }
+}
+
+class RaceClient {
+  readonly provider = "codex" as const;
+  readonly capabilities = RACE_CAPABILITIES;
+  sessions: RaceSession[] = [];
+  async isAvailable() {
+    return true;
+  }
+  async fetchCatalog() {
+    return { models: [{ provider: "codex", id: "m", label: "m", isDefault: true }], modes: [] };
+  }
+  async createSession(config: AgentSessionConfig) {
+    const session = new RaceSession(config);
+    this.sessions.push(session);
+    return session as unknown as AgentSession;
+  }
+  async resumeSession(_handle: unknown, config?: Partial<AgentSessionConfig>) {
+    return this.createSession({ provider: "codex", cwd: config?.cwd ?? "/" } as AgentSessionConfig);
+  }
+}
+
 function createRealOutcomeHarness(input: {
   paseoHome: string;
   repoDir: string;
@@ -309,6 +393,7 @@ function createRealOutcomeHarness(input: {
     github: createGitHubServiceStub(),
     agentManager: {
       listAgents: () => [],
+      listAgentsIncludingInternal: () => [],
       hasInFlightRun: () => false,
       holdNewRunsForArchive: () => () => {},
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
@@ -840,4 +925,76 @@ describe("archiveIfSafe", () => {
     expect(archivedWorkspaceIds.has(workspace.workspaceId)).toBe(false);
     expect(existsSync(worktree.worktreePath)).toBe(true);
   });
+
+  // Regression for round-6 P2 A2: an internal agent must be as visible to the
+  // busy check as a normal one, since listAgents() drops internal agents.
+  test.each([true, false])(
+    "regression: a working agent defers auto-archive regardless of internal flag (internal=%s)",
+    async (internal) => {
+      const { tempDir, repoDir } = createGitRepo();
+      const paseoHome = path.join(tempDir, ".paseo");
+      const worktree = await createPaseoOwnedWorktree(
+        repoDir,
+        paseoHome,
+        `race-internal-${internal}`,
+      );
+      const workspaceId = `ws-race-internal-${internal}`;
+      const archivedWorkspaceIds = new Set<string>();
+      const realLogger = pino({ level: "silent" });
+      const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+      const client = new RaceClient();
+      const manager = new AgentManager({
+        clients: { codex: client as unknown as AgentClient },
+        registry: storage,
+        logger: realLogger,
+      });
+      const agent = await manager.createAgent(
+        { provider: "codex", cwd: worktree.worktreePath, internal } as AgentSessionConfig,
+        undefined,
+        { workspaceId },
+      );
+      client.sessions[0]?.push({
+        type: "turn_started",
+        provider: "codex",
+        turnId: "working",
+      } as AgentStreamEvent);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(manager.hasInFlightRun(agent.id)).toBe(true);
+
+      const options = {
+        paseoHome,
+        daemonConfigStore: {
+          get: () => ({ autoArchiveAfterMerge: true }),
+        } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+        workspaceGitService: {
+          getSnapshot: async () => null,
+        } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+        github: createGitHubServiceStub(),
+        agentManager: manager,
+        agentStorage: storage,
+        terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+        findWorkspaceIdForCwd: async () => workspaceId,
+        listActiveWorkspaces: async () =>
+          archivedWorkspaceIds.has(workspaceId)
+            ? []
+            : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+        getAutoArchivedChangeRequestUrl: async () => null,
+        archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+        markWorkspaceArchiving: () => {},
+        clearWorkspaceArchiving: () => {},
+        emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+      } as unknown as AutoArchiveArchiveOptions;
+
+      const outcome = await archiveIfSafe({
+        workspaceId,
+        snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+        options,
+        log: createLogger(),
+      });
+
+      expect(outcome).toBe("deferred");
+      expect(client.sessions[0]?.closed).toBe(false);
+      expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
+    },
+  );
 });

@@ -136,6 +136,14 @@ export class AgentRunCancellationError extends Error {
   }
 }
 
+// Auto-archive teardown treats this as a deferral, not a failure.
+export class AgentBusyDuringArchiveError extends Error {
+  constructor(public readonly agentId: string) {
+    super(`Agent ${agentId} became busy during archive teardown`);
+    this.name = "AgentBusyDuringArchiveError";
+  }
+}
+
 export type AgentRunCancellationResult =
   | { status: "not_running" }
   | { status: "settled" }
@@ -998,6 +1006,11 @@ export class AgentManager {
       .map((agent) => Object.assign({}, agent));
   }
 
+  // Auto-archive busy checks must see internal agents; UI-facing listings must not.
+  listAgentsIncludingInternal(): ManagedAgent[] {
+    return Array.from(this.agents.values()).map((agent) => Object.assign({}, agent));
+  }
+
   async listImportableSessions(
     options?: ImportablePersistedAgentQueryOptions,
   ): Promise<ManagedImportableSessionsResult> {
@@ -1754,13 +1767,19 @@ export class AgentManager {
     }
   }
 
-  async archiveAgent(agentId: string): Promise<{ archivedAt: string }> {
-    return this.runLifecycleMutation(agentId, () => this.archiveAgentUnlocked(agentId));
+  async archiveAgent(
+    agentId: string,
+    options?: { requireIdle?: boolean },
+  ): Promise<{ archivedAt: string }> {
+    return this.runLifecycleMutation(agentId, () =>
+      this.archiveAgentUnlocked(agentId, undefined, options),
+    );
   }
 
   private async archiveAgentUnlocked(
     agentId: string,
     requestedArchivedAt?: string,
+    options?: { requireIdle?: boolean },
   ): Promise<{ archivedAt: string }> {
     const agent = this.requireAgent(agentId);
     if (!this.registry) {
@@ -1773,6 +1792,11 @@ export class AgentManager {
     const stored = await this.registry.get(agentId);
     if (!stored) {
       throw new Error(`Agent ${agentId} not found in storage after snapshot`);
+    }
+
+    // Only auto-archive teardown opts into this recheck; manual archive is unaffected.
+    if (options?.requireIdle && this.hasInFlightRun(agentId)) {
+      throw new AgentBusyDuringArchiveError(agentId);
     }
 
     const { archivedAt } = await this.markRecordArchived(stored, requestedArchivedAt);

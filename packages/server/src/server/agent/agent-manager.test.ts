@@ -7,6 +7,7 @@ import { randomUUID } from "node:crypto";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import {
+  AgentBusyDuringArchiveError,
   AgentManager,
   AgentManagerShuttingDownError,
   commandMayHaveChangedExternalState,
@@ -244,6 +245,74 @@ test("provider turn start becomes busy before its queued state update", async ()
     });
     expect(manager.hasInFlightRun(agent.id)).toBe(true);
     release();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression for round-6 P2 A1: a provider turn_started arriving inside
+// archiveAgent's own applySnapshot call must defer, not close mid-turn.
+test("archiveAgent with requireIdle defers when a provider turn starts during teardown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-requireidle-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    let closed = false;
+    vi.spyOn(session, "close").mockImplementation(async () => {
+      closed = true;
+    });
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+      }
+      return applySnapshot(...args);
+    });
+
+    await expect(manager.archiveAgent(agent.id, { requireIdle: true })).rejects.toThrow(
+      AgentBusyDuringArchiveError,
+    );
+
+    expect(closed).toBe(false);
+    expect((await storage.get(agent.id))?.archivedAt).toBeFalsy();
+    expect(manager.getAgent(agent.id)?.lifecycle).not.toBe("closed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Control for the same fix: manual archive (no requireIdle) stays unaffected
+// by the identical race, matching pre-fix behaviour byte-for-byte.
+test("archiveAgent without requireIdle still closes through the same race", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-manual-race-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+      }
+      return applySnapshot(...args);
+    });
+
+    await manager.archiveAgent(agent.id);
+
+    expect((await storage.get(agent.id))?.archivedAt).toBeTruthy();
   } finally {
     rmSync(root, { recursive: true, force: true });
   }
