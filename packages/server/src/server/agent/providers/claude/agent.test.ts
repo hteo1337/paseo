@@ -3544,3 +3544,71 @@ test("Claude effective model: streamed switch survives late init and ignores syn
     await session.close();
   }
 });
+
+test("Claude effective model: a resumed redelivery of an already-persisted Opus frame is not a switch", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
+  });
+  Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+  const adapter = session as unknown as TestClaudeSession & {
+    ingestPersistedHistory(content: string, replay: unknown): void;
+  };
+  try {
+    const historyLine = JSON.stringify({
+      type: "assistant",
+      uuid: "hist-assistant-uuid",
+      timestamp: "2026-09-25T12:00:00.000Z",
+      message: {
+        id: "msg_opus_hist",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "old output" }],
+      },
+    });
+    adapter.ingestPersistedHistory(historyLine, {
+      restoredIds: new Set(),
+      toolOwners: new Map(),
+    });
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+
+    const redelivered = {
+      type: "assistant",
+      session_id: "resume-turn",
+      uuid: "live-redelivery-uuid",
+      message: {
+        id: "msg_opus_hist",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "old output" }],
+      },
+    } as SDKMessage;
+    expect(
+      adapter
+        .translateMessageToEvents(redelivered)
+        .filter((event) => event.type === "model_changed"),
+    ).toEqual([]);
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+
+    const genuineOpusTurn = {
+      type: "assistant",
+      session_id: "resume-turn",
+      uuid: "live-genuine-uuid",
+      message: {
+        id: "msg_opus_genuine",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "new output" }],
+      },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(genuineOpusTurn)[0]).toMatchObject({
+      type: "model_changed",
+      runtimeInfo: { model: "claude-opus-5-5" },
+    });
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-opus-5-5" });
+  } finally {
+    await session.close();
+  }
+});

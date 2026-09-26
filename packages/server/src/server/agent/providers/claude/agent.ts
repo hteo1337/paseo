@@ -2105,6 +2105,8 @@ class ClaudeAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private lastOptionsModel: string | null = null;
   private lastRuntimeModel: string | null = null;
+  // API message ids already known from on-disk history; a redelivered one is old evidence, not a model switch.
+  private readonly historicalAssistantMessageIds = new Set<string>();
   private compacting = false;
   private compactionMarkerOpen = false;
   private queryPumpPromise: Promise<void> | null = null;
@@ -2971,6 +2973,7 @@ class ClaudeAgentSession implements AgentSession {
     this.userMessageIds = [];
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
+    this.historicalAssistantMessageIds.clear();
     this.taskState.reset();
     this.loadPersistedHistory(sessionId);
     if (oldSessionId && oldSessionId !== sessionId) {
@@ -3002,6 +3005,7 @@ class ClaudeAgentSession implements AgentSession {
     this.userMessageIds = [];
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
+    this.historicalAssistantMessageIds.clear();
     this.taskState.reset();
   }
 
@@ -3047,6 +3051,13 @@ class ClaudeAgentSession implements AgentSession {
       }
       anchor.assistantMessageId = assistantMessageId;
       return;
+    }
+  }
+
+  private rememberHistoricalAssistantMessageId(message: unknown): void {
+    const historicalMessageId = readTrimmedString(toObjectRecord(message)?.id);
+    if (historicalMessageId) {
+      this.historicalAssistantMessageIds.add(historicalMessageId);
     }
   }
 
@@ -4130,7 +4141,7 @@ class ClaudeAgentSession implements AgentSession {
         this.appendSidechainResultEvents(message, events);
         break;
       case "assistant": {
-        this.appendEffectiveModelEvent(message.message.model, events);
+        this.appendEffectiveModelEvent(message.message.model, message.message.id, events);
         const timelineItems = this.mapBlocksToTimeline(message.message.content, {
           suppressAssistantText: options?.suppressAssistantText ?? false,
           suppressReasoning: options?.suppressReasoning ?? false,
@@ -4457,9 +4468,14 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
-  private appendEffectiveModelEvent(runtimeModel: string, events: AgentStreamEvent[]): void {
+  private appendEffectiveModelEvent(
+    runtimeModel: string,
+    apiMessageId: string | null | undefined,
+    events: AgentStreamEvent[],
+  ): void {
     const model = resolveObservedClaudeModelId(runtimeModel);
     if (!model) return;
+    if (apiMessageId && this.historicalAssistantMessageIds.has(apiMessageId)) return;
     const previousModel = this.lastOptionsModel;
     this.lastOptionsModel = model;
     this.lastRuntimeModel = runtimeModel;
@@ -4484,7 +4500,7 @@ class ClaudeAgentSession implements AgentSession {
     options: { suppressAssistantText?: boolean; suppressReasoning?: boolean } | undefined,
   ): void {
     if (message.event.type === "message_start") {
-      this.appendEffectiveModelEvent(message.event.message.model, events);
+      this.appendEffectiveModelEvent(message.event.message.model, message.event.message.id, events);
     }
     const usageUpdatedEvent = this.contextUsage.buildStreamUsageEvent(message.event);
     if (usageUpdatedEvent) {
@@ -5050,6 +5066,7 @@ class ClaudeAgentSession implements AgentSession {
     }
     if (entry.type === "assistant" && typeof entry.uuid === "string") {
       this.rememberRewindAssistantAnchor(entry.uuid);
+      this.rememberHistoricalAssistantMessageId(entry.message);
     }
 
     if (items.length > 0) {
