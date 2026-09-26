@@ -44,7 +44,7 @@ import { isClaudeInterruptPlaceholderText } from "./interrupt-placeholder.js";
 import {
   getClaudeContextWindowMaxTokens,
   getClaudeModelsWithSettings,
-  normalizeClaudeRuntimeModelId,
+  resolveObservedClaudeModelId,
   resolveConfiguredClaudeModel,
 } from "./models.js";
 import {
@@ -2401,6 +2401,8 @@ class ClaudeAgentSession implements AgentSession {
   private cachedRuntimeInfo: AgentRuntimeInfo | null = null;
   private lastOptionsModel: string | null = null;
   private lastRuntimeModel: string | null = null;
+  // API message ids already known from on-disk history; a redelivered one is old evidence, not a model switch.
+  private readonly historicalAssistantMessageIds = new Set<string>();
   private compacting = false;
   private compactionMarkerOpen = false;
   private queryPumpPromise: Promise<void> | null = null;
@@ -2492,13 +2494,14 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
-    if (this.cachedRuntimeInfo) {
+    const model = this.lastOptionsModel;
+    if (this.cachedRuntimeInfo?.model === model) {
       return { ...this.cachedRuntimeInfo };
     }
     const info: AgentRuntimeInfo = {
       provider: "claude",
       sessionId: this.claudeSessionId,
-      model: this.lastOptionsModel ?? this.config.model ?? null,
+      model,
       modeId: this.currentMode ?? null,
       ...(this.lastRuntimeModel
         ? {
@@ -3398,6 +3401,7 @@ class ClaudeAgentSession implements AgentSession {
       this.userMessageIds = [];
       this.emittedUserMessageIds.clear();
       this.rewindTurnAnchors.length = 0;
+      this.historicalAssistantMessageIds.clear();
       this.taskState.reset();
       this.historySessionId = sessionId;
       await this.loadPersistedHistory(sessionId);
@@ -3438,6 +3442,7 @@ class ClaudeAgentSession implements AgentSession {
     this.userMessageIds = [];
     this.emittedUserMessageIds.clear();
     this.rewindTurnAnchors.length = 0;
+    this.historicalAssistantMessageIds.clear();
     this.taskState.reset();
   }
 
@@ -3483,6 +3488,13 @@ class ClaudeAgentSession implements AgentSession {
       }
       anchor.assistantMessageId = assistantMessageId;
       return;
+    }
+  }
+
+  private rememberHistoricalAssistantMessageId(message: unknown): void {
+    const historicalMessageId = readTrimmedString(toObjectRecord(message)?.id);
+    if (historicalMessageId) {
+      this.historicalAssistantMessageIds.add(historicalMessageId);
     }
   }
 
@@ -3835,7 +3847,11 @@ class ClaudeAgentSession implements AgentSession {
     if (this.config.model) {
       base.model = this.config.model;
     }
-    this.lastOptionsModel = base.model ?? null;
+    // Query recreation does not prove the effective model returned to its launch option.
+    if (!this.lastRuntimeModel) {
+      this.lastOptionsModel = base.model ?? null;
+    }
+    this.cachedRuntimeInfo = null;
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
     }
@@ -4751,6 +4767,7 @@ class ClaudeAgentSession implements AgentSession {
         this.appendSidechainResultEvents(message, events);
         break;
       case "assistant": {
+        this.appendAssistantEffectiveModelEvent(message, events);
         const timelineItems = await this.mapBlocksToTimeline(message.message.content, {
           suppressAssistantText: options?.suppressAssistantText ?? false,
           suppressReasoning: options?.suppressReasoning ?? false,
@@ -5098,11 +5115,54 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
+  private appendAssistantEffectiveModelEvent(
+    message: Extract<SDKMessage, { type: "assistant" }>,
+    events: AgentStreamEvent[],
+  ): void {
+    if (
+      message.error ||
+      ("isApiErrorMessage" in message && message.isApiErrorMessage === true) ||
+      ("isSynthetic" in message && message.isSynthetic === true)
+    ) {
+      return;
+    }
+    this.appendEffectiveModelEvent(message.message.model, message.message.id, events);
+  }
+
+  private appendEffectiveModelEvent(
+    runtimeModel: string,
+    apiMessageId: string | null | undefined,
+    events: AgentStreamEvent[],
+  ): void {
+    const model = resolveObservedClaudeModelId(runtimeModel);
+    if (!model) return;
+    if (apiMessageId && this.historicalAssistantMessageIds.has(apiMessageId)) return;
+    const previousModel = this.lastOptionsModel;
+    this.lastOptionsModel = model;
+    this.lastRuntimeModel = runtimeModel;
+    this.cachedRuntimeInfo = null;
+    this.persistence = null;
+    if (model === previousModel) return;
+    events.push({
+      type: "model_changed",
+      provider: "claude",
+      runtimeInfo: {
+        provider: "claude",
+        sessionId: this.claudeSessionId,
+        model,
+        modeId: this.currentMode,
+      },
+    });
+  }
+
   private async appendStreamEventEvents(
     message: Extract<SDKMessage, { type: "stream_event" }>,
     events: AgentStreamEvent[],
     options: { suppressAssistantText?: boolean; suppressReasoning?: boolean } | undefined,
   ): Promise<void> {
+    if (message.event.type === "message_start") {
+      this.appendEffectiveModelEvent(message.event.message.model, message.event.message.id, events);
+    }
     const usageUpdatedEvent = this.contextUsage.buildStreamUsageEvent(message.event);
     if (usageUpdatedEvent) {
       events.push(usageUpdatedEvent);
@@ -5279,24 +5339,13 @@ class ClaudeAgentSession implements AgentSession {
     this.persistence = null;
     if (message.model) {
       const runtimeContextWindowMaxTokens = getClaudeContextWindowMaxTokens(message.model);
-      // Seed usage before the first result, including settings-resolved aliases.
-      // A repeated init for the same model must retain the SDK's reported limit.
       if (message.model !== this.lastRuntimeModel && runtimeContextWindowMaxTokens !== undefined) {
         this.contextUsage.setInitialContextWindowMaxTokens(runtimeContextWindowMaxTokens);
       }
-      const normalizedRuntimeModel = normalizeClaudeRuntimeModelId(message.model);
-      this.logger.debug(
-        { runtimeModel: message.model, normalizedRuntimeModel },
-        "Captured runtime model from SDK init",
-      );
-      if (normalizedRuntimeModel) {
-        this.lastOptionsModel = normalizedRuntimeModel;
-      } else if (!this.lastOptionsModel) {
-        this.lastOptionsModel = this.config.model ?? null;
-      }
-      this.lastRuntimeModel = message.model;
-      this.cachedRuntimeInfo = null;
     }
+    // Init can report the profile default before the requested model takes effect.
+    // Only assistant frames establish the effective inference model.
+    this.cachedRuntimeInfo = null;
     return { threadStartedSessionId, notice };
   }
 
@@ -5727,6 +5776,7 @@ class ClaudeAgentSession implements AgentSession {
     }
     if (entry.type === "assistant" && typeof entry.uuid === "string") {
       this.rememberRewindAssistantAnchor(entry.uuid);
+      this.rememberHistoricalAssistantMessageId(entry.message);
     }
 
     if (items.length > 0) {
