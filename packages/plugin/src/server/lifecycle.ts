@@ -40,8 +40,23 @@ export interface PluginSessionOpenRequest {
   readonly title: string | null;
   readonly labels: Readonly<Record<string, string>>;
   tools: AgentToolDefinition[];
+  model: string | null;
   env: Record<string, string>;
   mcpServers: NonNullable<AgentSessionConfig["mcpServers"]>;
+}
+
+export type PluginSessionOpenedRequest = Omit<PluginSessionOpenRequest, "env"> & {
+  requestedModel: string | null;
+};
+
+export interface PluginSetModelRequest {
+  agentId: string;
+  provider: string;
+  source: "client" | "provider";
+  fromModel: string | null;
+  toModel: string | null;
+  title: string | null;
+  cwd: string;
 }
 
 export type PluginTurnOutcome =
@@ -76,9 +91,17 @@ export interface PluginLifecycleEvents {
 
 export interface PluginBeforeRequests {
   "agent.create": { config: AgentSessionConfig; env?: Record<string, string> };
+  "agent.set_model": PluginSetModelRequest;
   "agent.session_open": PluginSessionOpenRequest;
+  "agent.session_opened": PluginSessionOpenedRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }
+
+export type PluginBeforeResult<Name extends keyof PluginBeforeRequests> =
+  Name extends "agent.session_open"
+    ? Omit<PluginSessionOpenRequest, "model" | "title"> &
+        Partial<Pick<PluginSessionOpenRequest, "model" | "title">>
+    : PluginBeforeRequests[Name];
 
 export interface PluginLifecycleRegistration {
   on<Name extends keyof PluginLifecycleEvents>(
@@ -93,6 +116,6 @@ export interface PluginLifecycleRegistration {
     handler: (
       input: { request: PluginBeforeRequests[Name] },
       context: PluginHookContext,
-    ) => PluginBeforeRequests[Name] | void | Promise<PluginBeforeRequests[Name] | void>,
+    ) => PluginBeforeResult<Name> | void | Promise<PluginBeforeResult<Name> | void>,
   ): () => void;
 }

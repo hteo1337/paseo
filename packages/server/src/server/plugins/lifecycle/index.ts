@@ -43,10 +43,27 @@ export const lifecycleEventNames = [
   "workspace.created",
   "workspace.archived",
 ] as const;
-export const beforeHookNames = ["agent.create", "agent.session_open", "workspace.create"] as const;
+export const beforeHookNames = [
+  "agent.create",
+  "agent.set_model",
+  "agent.session_open",
+  "agent.session_opened",
+  "workspace.create",
+] as const;
 
 const beforeSchemas = {
   "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true }).strict(),
+  "agent.set_model": z
+    .object({
+      agentId: z.string(),
+      provider: z.string(),
+      source: z.enum(["client", "provider"]),
+      fromModel: z.string().nullable(),
+      toModel: z.string().nullable(),
+      title: z.string().nullable(),
+      cwd: z.string(),
+    })
+    .strict(),
   "agent.session_open": z
     .object({
       agentId: z.string(),
@@ -58,14 +75,31 @@ const beforeSchemas = {
       title: z.string().nullable(),
       labels: z.record(z.string(), z.string()),
       tools: z.array(agentToolMetadataSchema),
+      model: z.string().nullable(),
       env: z.record(z.string(), z.string()),
       mcpServers: CreateAgentRequestMessageSchema.shape.config.shape.mcpServers.unwrap(),
+    })
+    .strict(),
+  "agent.session_opened": z
+    .object({
+      agentId: z.string(),
+      workspaceId: z.string().nullable(),
+      provider: z.string(),
+      cwd: z.string(),
+      reason: z.enum(["create", "resume", "refresh", "import"]),
+      purpose: z.enum(["interactive", "history"]),
+      requestedModel: z.string().nullable(),
+      model: z.string().nullable(),
+      title: z.string().nullable(),
     })
     .strict(),
   "workspace.create": WorkspaceCreateRequestSchema.omit({ type: true, requestId: true }).strict(),
 };
 
 const sessionOpenLocalResultSchema = beforeSchemas["agent.session_open"].extend({
+  // Let validateBeforeResult restore metadata omitted by older plugins.
+  model: beforeSchemas["agent.session_open"].shape.model.optional(),
+  title: beforeSchemas["agent.session_open"].shape.title.optional(),
   tools: z.array(
     z.custom<AgentToolDefinition>(
       (tool) =>
@@ -168,7 +202,27 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
   input: PluginWireBeforeRequests[Name],
   output: unknown,
 ): PluginWireBeforeRequests[Name] {
+  if (
+    name === "agent.session_open" &&
+    output &&
+    typeof output === "object" &&
+    !Array.isArray(output)
+  ) {
+    const request = input as PluginBeforeRequests["agent.session_open"];
+    output = { model: request.model, title: request.title, ...output };
+  }
   const result = validateBeforeRequest(name, output);
+  if (name === "agent.set_model" || name === "agent.session_opened") {
+    const previous = beforeSchemas[name].parse(input);
+    const next = beforeSchemas[name].parse(result);
+    if (
+      Object.keys(previous).some(
+        (key) => previous[key as keyof typeof previous] !== next[key as keyof typeof next],
+      )
+    ) {
+      throw new Error(`${name} hooks cannot change the request`);
+    }
+  }
   if (name === "agent.session_open") {
     const previous = beforeSchemas["agent.session_open"].parse(input);
     const next = beforeSchemas["agent.session_open"].parse(result);
@@ -180,11 +234,13 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
       previous.reason !== next.reason ||
       previous.purpose !== next.purpose ||
       previous.title !== next.title ||
-      !isDeepStrictEqual(previous.labels, next.labels)
+      !isDeepStrictEqual(previous.labels, next.labels) ||
+      previous.model !== next.model
     ) {
       throw new Error("agent.session_open hooks can only change env, tools, and mcpServers");
     }
   }
+
   if (name === "agent.create") {
     const previous = beforeSchemas["agent.create"].parse(input);
     const next = beforeSchemas["agent.create"].parse(result);
