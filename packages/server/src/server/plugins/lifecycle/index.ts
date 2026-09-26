@@ -87,6 +87,32 @@ const worktreeRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 const beforeSchemas = {
+  "agent.session_opened": z
+    .object({
+      agentId: z.string(),
+      workspaceId: z.string().nullable(),
+      provider: z.string(),
+      cwd: z.string(),
+      reason: z.enum(["create", "resume", "refresh", "import"]),
+      purpose: z.enum(["interactive", "history"]),
+      requestedModel: z.string().nullable(),
+      model: z.string().nullable(),
+      title: z.string().nullable(),
+    })
+    .strict(),
+
+  "agent.set_model": z
+    .object({
+      agentId: z.string(),
+      provider: z.string(),
+      source: z.enum(["client", "provider"]),
+      fromModel: z.string().nullable(),
+      toModel: z.string().nullable(),
+      title: z.string().nullable(),
+      cwd: z.string(),
+    })
+    .strict(),
+
   "worktree.create.before": worktreeRequestSchema,
   "agent.create.before": CreateAgentRequestMessageSchema.pick({
     config: true,
@@ -103,6 +129,7 @@ const beforeSchemas = {
       title: z.string().nullable(),
       labels: z.record(z.string(), z.string()),
       tools: z.array(agentToolMetadataSchema),
+      model: z.string().nullable(),
       env: z.record(z.string(), z.string()),
       mcpServers: CreateAgentRequestMessageSchema.shape.config.shape.mcpServers.unwrap(),
     })
@@ -114,6 +141,8 @@ const beforeSchemas = {
 };
 
 const sessionOpenLocalResultSchema = beforeSchemas["agent.open.before"].extend({
+  model: beforeSchemas["agent.open.before"].shape.model.optional(),
+  title: beforeSchemas["agent.open.before"].shape.title.optional(),
   tools: z.array(
     z.custom<AgentToolDefinition>(
       (tool) =>
@@ -217,7 +246,21 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
   input: PluginWireBeforeRequests[Name],
   output: unknown,
 ): Promise<PluginWireBeforeRequests[Name]> {
+  if (
+    name === "agent.open.before" &&
+    output &&
+    typeof output === "object" &&
+    !Array.isArray(output)
+  ) {
+    const request = input as PluginWireBeforeRequests["agent.open.before"];
+    output = { model: request.model, title: request.title, ...output };
+  }
   const result = validateBeforeRequest(name, output);
+  if (name === "agent.set_model" || name === "agent.session_opened") {
+    if (!isDeepStrictEqual(beforeSchemas[name].parse(input), beforeSchemas[name].parse(result))) {
+      throw new Error(`${name} hooks cannot change the request`);
+    }
+  }
   if (name === "agent.open.before") {
     const previous = beforeSchemas["agent.open.before"].parse(input);
     const next = beforeSchemas["agent.open.before"].parse(result);
@@ -229,7 +272,8 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
       previous.reason !== next.reason ||
       previous.purpose !== next.purpose ||
       previous.title !== next.title ||
-      !isDeepStrictEqual(previous.labels, next.labels)
+      !isDeepStrictEqual(previous.labels, next.labels) ||
+      previous.model !== next.model
     ) {
       throw new Error("agent.open.before hooks can only change env, tools, and mcpServers");
     }
