@@ -54,6 +54,7 @@ test("fans one fresh observation out to every workspace attached to its exact cw
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         onSnapshotUpdated = listener;
@@ -107,6 +108,7 @@ test("serializes the complete fan-out for duplicate merge events on one cwd", as
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         onSnapshotUpdated = listener;
@@ -164,6 +166,7 @@ test("does not fan out a stale merged event when the fresh observation has no PR
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         onSnapshotUpdated = listener;
@@ -193,6 +196,7 @@ test("logs and skips when the fresh observation cannot be read", async () => {
   const options = {
     logger: { child: () => ({ warn }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         onSnapshotUpdated = listener;
@@ -226,6 +230,7 @@ test("does not read an observation when auto-archive is disabled", async () => {
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: false }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (listener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         onSnapshotUpdated = listener;
