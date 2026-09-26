@@ -286,6 +286,17 @@ async function resolveEntryPaths(directory: string): Promise<{
 
 export class PluginRuntime {
   private readonly plugins = new Map<string, LoadedPlugin>();
+  private readonly reloads = new Map<
+    string,
+    {
+      names: ReadonlySet<string>;
+      pending: Promise<void>;
+      resolve: () => void;
+      failure: string | null;
+      exited: boolean;
+      starting?: boolean;
+    }
+  >();
   private readonly logTails = new Map<string, PluginLogTail>();
   private readonly logger: pino.Logger;
   private readonly spawnChild: () => PluginChild;
@@ -313,6 +324,94 @@ export class PluginRuntime {
     return () => this.listeners.delete(listener);
   }
 
+  beginReload(pluginId: string): void {
+    const names = this.plugins.get(pluginId)?.hooks.before ?? this.reloads.get(pluginId)?.names;
+    if (!names || (Array.isArray(names) ? names.length === 0 : names.size === 0)) return;
+    let resolve!: () => void;
+    const pending = new Promise<void>((done) => {
+      resolve = done;
+    });
+    this.reloads.set(pluginId, {
+      names: new Set(names),
+      pending,
+      resolve,
+      failure: null,
+      exited: false,
+    });
+  }
+
+  failReload(pluginId: string, error: unknown): void {
+    const reload = this.reloads.get(pluginId);
+    if (!reload) return;
+    if (reload.exited) return;
+    reload.failure = describeError(error);
+    reload.resolve();
+  }
+
+  failStart(pluginId: string, error: unknown): void {
+    const previous = this.reloads.get(pluginId);
+    const loaded = this.plugins.get(pluginId);
+    const names = new Set([...(previous?.names ?? []), ...(loaded?.hooks.before ?? [])]);
+    if (names.size === 0 || (!loaded && previous?.exited)) return;
+    const failed = {
+      names,
+      pending: previous?.pending ?? Promise.resolve(),
+      resolve: previous?.resolve ?? (() => {}),
+      failure: describeError(error),
+      exited: false,
+      starting: true,
+    };
+    this.reloads.set(pluginId, previous ? Object.assign(previous, failed) : failed);
+    failed.resolve();
+  }
+
+  private failPluginExit(loaded: LoadedPlugin): void {
+    this.beginReload(loaded.id);
+    const reload = this.reloads.get(loaded.id);
+    if (!reload) return;
+    reload.failure = "exited";
+    reload.exited = true;
+    reload.resolve();
+  }
+
+  clearReload(pluginId: string): void {
+    const reload = this.reloads.get(pluginId);
+    this.reloads.delete(pluginId);
+    reload?.resolve();
+  }
+
+  private async waitForReload(pluginId: string, name: string): Promise<void> {
+    const reload = this.reloads.get(pluginId);
+    if (!reload?.names.has(name)) return;
+    if (reload.failure) throw this.reloadError(pluginId, reload);
+    let timeout!: ReturnType<typeof setTimeout>;
+    try {
+      await Promise.race([
+        reload.pending,
+        new Promise<never>((_, reject) => {
+          timeout = setTimeout(
+            () => reject(new Error(`policy plugin ${pluginId} is reloading`)),
+            10_000,
+          );
+        }),
+      ]);
+    } finally {
+      clearTimeout(timeout);
+    }
+    if (reload.failure) throw this.reloadError(pluginId, reload);
+  }
+
+  private reloadError(
+    pluginId: string,
+    reload: { failure: string | null; exited: boolean; starting?: boolean },
+  ): Error {
+    return new Error(
+      reload.exited
+        ? `policy plugin ${pluginId} exited`
+        : `policy plugin ${pluginId} failed to ${reload.starting ? "start" : "restart"}: ${reload.failure}`,
+    );
+  }
+
   async startPlugin(
     pluginId: string,
     configuredPath: string,
@@ -320,10 +419,16 @@ export class PluginRuntime {
   ): Promise<void> {
     if (this.plugins.has(pluginId)) throw new Error(`Plugin is already running: ${pluginId}`);
     this.appendLog(pluginId, "stdout", "[paseo] Loading plugin");
-    const loaded = await this.loadDirectoryPlugin(pluginId, configuredPath).catch((error) => {
-      this.appendLog(pluginId, "stderr", `[paseo] Plugin failed to load: ${describeError(error)}`);
-      throw error;
-    });
+    const loaded = await this.loadDirectoryPlugin(pluginId, configuredPath, canPublish).catch(
+      (error) => {
+        this.appendLog(
+          pluginId,
+          "stderr",
+          `[paseo] Plugin failed to load: ${describeError(error)}`,
+        );
+        throw error;
+      },
+    );
     if (!canPublish()) {
       await this.stopPlugin(loaded);
       throw new Error(`Plugin start cancelled: ${pluginId}`);
@@ -471,10 +576,11 @@ export class PluginRuntime {
     input: PluginBeforeRequests[Name],
   ): Promise<PluginBeforeRequests[Name]> {
     let request = validateBeforeRequest(name, input);
-    const plugins = [...this.plugins.values()].sort((left, right) => {
-      return left.id.localeCompare(right.id);
-    });
-    for (const loaded of plugins) {
+    const ids = new Set([...this.plugins.keys(), ...this.reloads.keys()]);
+    for (const id of Array.from(ids).sort()) {
+      if (this.reloads.get(id)?.names.has(name)) await this.waitForReload(id, name);
+      const loaded = this.plugins.get(id);
+      if (!loaded) continue;
       if (!loaded.hooks.before.includes(name)) {
         continue;
       }
@@ -486,7 +592,8 @@ export class PluginRuntime {
           name,
           input: request,
         });
-        request = validateBeforeResult(name, request, output);
+        const validated = validateBeforeResult(name, request, output);
+        request = validated;
       } catch (error) {
         throw new Error(`Plugin ${loaded.id} before ${name} failed: ${describeError(error)}`, {
           cause: error,
@@ -540,6 +647,7 @@ export class PluginRuntime {
   }
 
   async stopAll(): Promise<void> {
+    for (const id of this.reloads.keys()) this.clearReload(id);
     const loaded = [...this.plugins.values()];
     this.plugins.clear();
     for (const plugin of loaded) {
@@ -551,6 +659,7 @@ export class PluginRuntime {
   private async loadDirectoryPlugin(
     pluginId: string,
     configuredPath: string,
+    canPublish: () => boolean,
   ): Promise<LoadedPlugin> {
     const directory = path.resolve(configuredPath);
     const manifest = await readPluginManifest(directory);
@@ -594,6 +703,7 @@ export class PluginRuntime {
         throw error;
       });
     let loaded: LoadedPlugin | null = null;
+    const initializingBefore = new Set<string>();
     let ready: Extract<PluginProcessMessage, { type: "ready" }>;
     try {
       ready = await new Promise<Extract<PluginProcessMessage, { type: "ready" }>>(
@@ -631,6 +741,9 @@ export class PluginRuntime {
               });
             } else if (message.type === "paseo_close") {
               session.socket.peerClosed();
+            } else if (message.type === "hooks.changed") {
+              for (const name of message.hooks.before) initializingBefore.add(name);
+              if (loaded) this.handleChildMessage(loaded, message);
             } else if (message.type === "ready") {
               if (settled) return;
               settled = true;
@@ -662,6 +775,19 @@ export class PluginRuntime {
         },
       );
     } catch (error) {
+      if (initializingBefore.size > 0 && canPublish()) {
+        const previous = this.reloads.get(pluginId);
+        const failed = {
+          names: new Set([...(previous?.names ?? []), ...initializingBefore]),
+          pending: previous?.pending ?? Promise.resolve(),
+          resolve: previous?.resolve ?? (() => {}),
+          failure: describeError(error),
+          exited: false,
+          starting: true,
+        };
+        this.reloads.set(pluginId, previous ? Object.assign(previous, failed) : failed);
+        failed.resolve();
+      }
       session.socket.close();
       await sessionAttachment.closed;
       terminatePluginChild(child);
@@ -1064,6 +1190,7 @@ export class PluginRuntime {
     loaded.sessionSocket?.peerClosed();
     const wasPublished = this.plugins.get(loaded.id) === loaded;
     if (wasPublished) {
+      this.failPluginExit(loaded);
       this.plugins.delete(loaded.id);
     }
     this.rejectPending(loaded, `Plugin process exited: ${loaded.id}`);

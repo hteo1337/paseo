@@ -51,6 +51,8 @@ import type {
 } from "./agent-sdk-types.js";
 import type { PaseoToolCatalog } from "./tools/types.js";
 import type { ProviderDefinition } from "./provider-registry.js";
+import { importSessionFromPersistence } from "./provider-session-import.js";
+import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
@@ -4430,6 +4432,222 @@ test("createAgent passes explicit model strings through to the provider", async 
   expect(client.lastConfig?.model).toBe("not-a-real-model");
 });
 
+test("session_open: model and title are present for create, resume and refresh", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-session-open-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const openings: unknown[] = [];
+  const pluginLifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.session_open" || name === "agent.session_opened")
+        openings.push({ ...(request as object), hook: name });
+      return request;
+    },
+  } as PluginLifecycle;
+  let nextId = 200;
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    logger,
+    registry: storage,
+    pluginLifecycle,
+    idFactory: () => `00000000-0000-4000-8000-${String(nextId++).padStart(12, "0")}`,
+  });
+  const created = await manager.createAgent(
+    { provider: "codex", cwd: workdir, model: "create-model", title: "Create title" },
+    undefined,
+    {},
+  );
+  await manager.setTitle(created.id, "Renamed title");
+  await manager.reloadAgentSession(created.id, { model: "refresh-model", title: "Refresh title" });
+  await manager.reloadAgentSession(created.id);
+  await manager.resumeAgentFromPersistence({
+    provider: "codex",
+    sessionId: "persisted",
+    metadata: { provider: "codex", cwd: workdir, model: "resume-model", title: "Resume title" },
+  });
+  expect(openings).toMatchObject([
+    { reason: "create", hook: "agent.session_open", model: "create-model", title: "Create title" },
+    {
+      reason: "create",
+      hook: "agent.session_opened",
+      model: "create-model",
+      requestedModel: "create-model",
+      title: "Create title",
+    },
+    {
+      reason: "refresh",
+      hook: "agent.session_open",
+      model: "refresh-model",
+      title: "Refresh title",
+    },
+    {
+      reason: "refresh",
+      hook: "agent.session_opened",
+      model: null,
+      requestedModel: "refresh-model",
+      title: "Refresh title",
+    },
+    {
+      reason: "refresh",
+      hook: "agent.session_open",
+      model: "refresh-model",
+      title: "Renamed title",
+    },
+    {
+      reason: "refresh",
+      hook: "agent.session_opened",
+      model: null,
+      requestedModel: "refresh-model",
+      title: "Renamed title",
+    },
+    { reason: "resume", hook: "agent.session_open", model: "resume-model", title: "Resume title" },
+    {
+      reason: "resume",
+      hook: "agent.session_opened",
+      model: null,
+      requestedModel: "resume-model",
+      title: "Resume title",
+    },
+  ]);
+});
+
+test("session_opened: ACP retains opus on sonnet resume and refuses it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-acp-resume-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let resumedSession: CloseRecordingTestAgentSession | undefined;
+  class ACPFallbackClient extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      resumedSession = new (class extends CloseRecordingTestAgentSession {
+        override async getRuntimeInfo() {
+          return { ...(await super.getRuntimeInfo()), model: "opus" };
+        }
+      })({ provider: "codex", cwd: config?.cwd ?? workdir, model: "sonnet" });
+      return resumedSession;
+    }
+  }
+  const phases: Array<{ hook: string; model: string | null }> = [];
+  const manager = new AgentManager({
+    clients: { codex: new ACPFallbackClient() },
+    logger,
+    registry: storage,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { model?: string | null }) => {
+        if (name === "agent.session_open" || name === "agent.session_opened") {
+          phases.push({ hook: name, model: request.model ?? null });
+          if (name === "agent.session_opened" && request.model === "opus") {
+            throw new Error("opus refused for Fix x");
+          }
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const created = await manager.createAgent(
+    { provider: "codex", cwd: workdir, model: "sonnet", title: "Fix x" },
+    undefined,
+    {},
+  );
+  await manager.closeAgent(created.id);
+  await expect(
+    manager.resumeAgentFromPersistence(
+      { provider: "codex", sessionId: "acp-thread", metadata: { cwd: workdir, model: "sonnet" } },
+      undefined,
+      created.id,
+    ),
+  ).rejects.toThrow("opus refused for Fix x");
+  expect(phases.slice(-2)).toEqual([
+    { hook: "agent.session_open", model: "sonnet" },
+    { hook: "agent.session_opened", model: "opus" },
+  ]);
+  expect(resumedSession?.closed).toBe(true);
+  expect(manager.getAgent(created.id)).toBeNull();
+  expect(await storage.get(created.id)).toMatchObject({
+    lastStatus: "error",
+    lastError: "opus refused for Fix x",
+  });
+});
+
+test("session_opened: refusal on create leaves no agent record", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-open-refused-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const agentId = "00000000-0000-4000-8000-000000000224";
+  const session = new CloseRecordingTestAgentSession({ provider: "codex", cwd: workdir });
+  class OpenClient extends TestAgentClient {
+    override async createSession(): Promise<AgentSession> {
+      return session;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new OpenClient() },
+    logger,
+    registry: storage,
+    idFactory: () => agentId,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.session_opened") {
+          throw new Error("opened refused");
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  await expect(
+    manager.createAgent({ provider: "codex", cwd: workdir, title: "Fix x" }, undefined, {}),
+  ).rejects.toThrow("opened refused");
+  expect(session.closed).toBe(true);
+  expect(manager.getAgent(agentId)).toBeNull();
+  expect(await storage.get(agentId)).toBeNull();
+});
+
+test("session_opened: refusal on refresh keeps closed record with error", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-refresh-refused-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  let refreshedSession: CloseRecordingTestAgentSession | undefined;
+  class RefreshClient extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      refreshedSession = new CloseRecordingTestAgentSession({
+        provider: "codex",
+        cwd: config?.cwd ?? workdir,
+      });
+      return refreshedSession;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new RefreshClient() },
+    logger,
+    registry: storage,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { reason?: string }) => {
+        if (name === "agent.session_opened" && request.reason === "refresh") {
+          throw new Error("refresh refused");
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const created = await manager.createAgent(
+    { provider: "codex", cwd: workdir, title: "Fix x" },
+    undefined,
+    {},
+  );
+  await expect(manager.reloadAgentSession(created.id)).rejects.toThrow("refresh refused");
+  expect(refreshedSession?.closed).toBe(true);
+  expect(manager.getAgent(created.id)).toBeNull();
+  expect(await storage.get(created.id)).toMatchObject({
+    lastStatus: "closed",
+    lastError: "refresh refused",
+  });
+});
+
 test("resumeAgentFromPersistence keeps metadata config, applies overrides, and passes launch env", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-resume-"));
   const storagePath = join(workdir, "agents");
@@ -4558,6 +4776,7 @@ test("importProviderSession imports the selected session without listing and pub
   const storage = new AgentStorage(storagePath, logger);
   const session = new TestAgentSession({ provider: "codex", cwd: workdir });
   const events: AgentManagerEvent[] = [];
+  const openings: unknown[] = [];
 
   class ImportClient extends TestAgentClient {
     listCalls = 0;
@@ -4574,7 +4793,8 @@ test("importProviderSession imports the selected session without listing and pub
       this.importLaunchContext = context.launchContext;
       return {
         session,
-        config: { provider: "codex" as const, cwd: workdir },
+        config: { provider: "codex" as const, cwd: workdir, model: "imported-model" },
+        persistedModel: "imported-model",
         persistence: {
           provider: "codex" as const,
           sessionId: input.providerHandleId,
@@ -4639,6 +4859,14 @@ test("importProviderSession imports the selected session without listing and pub
     },
     registry: storage,
     logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.session_open" || name === "agent.session_opened")
+          openings.push({ ...(request as object), hook: name });
+        return request;
+      },
+    } as PluginLifecycle,
   });
   manager.subscribe((event) => events.push(event), { replayState: false });
 
@@ -4648,6 +4876,17 @@ test("importProviderSession imports the selected session without listing and pub
     cwd: workdir,
     workspaceId: "ws-imported",
   });
+
+  expect(openings).toMatchObject([
+    { reason: "import", hook: "agent.session_open", model: null, title: null },
+    {
+      reason: "import",
+      hook: "agent.session_opened",
+      model: null,
+      requestedModel: "imported-model",
+      title: "Trace provider imports",
+    },
+  ]);
 
   expect(client.listCalls).toBe(0);
   expect(client.importInput).toEqual({ providerHandleId: "thread-selected", cwd: workdir });
@@ -4693,6 +4932,149 @@ test("importProviderSession imports the selected session without listing and pub
     },
   });
   expect((await storage.get(imported.id))?.title).toBe("Trace provider imports");
+});
+
+test("session_open: import reports effective model when persisted model is unknown", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-import-unknown-model-"));
+  const openings: unknown[] = [];
+  class ImportClient extends TestAgentClient {
+    async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+      const config = {
+        ...context.storedConfig,
+        provider: "codex" as const,
+        cwd: workdir,
+        model: "current-default",
+      };
+      return {
+        session: new TestAgentSession(config),
+        config,
+        persistence: { provider: "codex" as const, sessionId: input.providerHandleId },
+        timeline: [],
+      };
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ImportClient() },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.session_open" || name === "agent.session_opened")
+          openings.push({ ...(request as object), hook: name });
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  await manager.importProviderSession({
+    provider: "codex",
+    providerHandleId: "unknown",
+    cwd: workdir,
+    workspaceId: "workspace",
+  });
+  expect(openings).toMatchObject([
+    { reason: "import", hook: "agent.session_open", model: null, title: null },
+    { reason: "import", hook: "agent.session_opened", model: "current-default", title: null },
+  ]);
+});
+
+test("session_open: account routing runs exactly once per import", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-import-env-"));
+  let launchEnv: Record<string, string> | undefined;
+  let calls = 0;
+  class ImportClient extends TestAgentClient {
+    async importSession(input: ImportProviderSessionInput, context: ImportProviderSessionContext) {
+      launchEnv = context.launchContext.env;
+      return {
+        session: new TestAgentSession({ provider: "codex", cwd: workdir }),
+        config: { provider: "codex" as const, cwd: workdir },
+        persistence: { provider: "codex" as const, sessionId: input.providerHandleId },
+        timeline: [],
+      };
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new ImportClient() },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { env?: Record<string, string> }) => {
+        if (name !== "agent.session_open") return request;
+        calls += 1;
+        return { ...request, env: { ...request.env, X: `${request.env?.X ?? ""}1` } };
+      },
+    } as PluginLifecycle,
+  });
+  const imported = await manager.importProviderSession({
+    provider: "codex",
+    providerHandleId: "native-session",
+    cwd: workdir,
+    workspaceId: "workspace",
+  });
+  expect(imported.lifecycle).toBe("idle");
+  expect(launchEnv?.X).toBe("1");
+  expect(calls).toBe(1);
+});
+
+test("session_opened: refusal closes session and leaves no agent record", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-import-refused-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const agentId = "00000000-0000-4000-8000-000000000221";
+  const session = new CloseRecordingTestAgentSession({ provider: "codex", cwd: workdir });
+  class ImportClient extends TestAgentClient {
+    async importSession(input: ImportProviderSessionInput) {
+      return {
+        session,
+        config: { provider: "codex" as const, cwd: workdir, model: "persisted-model" },
+        persistedModel: "persisted-model",
+        persistence: { provider: "codex" as const, sessionId: input.providerHandleId },
+        timeline: [],
+      };
+    }
+  }
+  const events: AgentManagerEvent[] = [];
+  const manager = new AgentManager({
+    clients: { codex: new ImportClient() },
+    registry: storage,
+    logger,
+    idFactory: () => agentId,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.session_opened") {
+          throw new Error("import refused");
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  manager.subscribe((event) => events.push(event), { replayState: false });
+  await expect(
+    manager.importProviderSession({
+      provider: "codex",
+      providerHandleId: "native-session",
+      cwd: workdir,
+      workspaceId: "workspace",
+    }),
+  ).rejects.toThrow("import refused");
+  expect(session.closed).toBe(true);
+  expect(manager.getAgent(agentId)).toBeNull();
+  expect(await storage.get(agentId)).toBeNull();
+  expect(events).toEqual([]);
+});
+
+test.each([
+  { persistedConfig: undefined, expected: null },
+  { persistedConfig: { model: "persisted-model" }, expected: "persisted-model" },
+])("import helper preserves model provenance: $expected", async ({ persistedConfig, expected }) => {
+  const config = { provider: "codex" as const, cwd: process.cwd(), model: "current-default" };
+  const imported = await importSessionFromPersistence({
+    provider: "codex",
+    request: { providerHandleId: "native-session", cwd: config.cwd },
+    context: { config, storedConfig: config, launchContext: { agentId: "agent", env: {} } },
+    resumeSession: async () => new TestAgentSession(config),
+    config: persistedConfig,
+  });
+  expect(imported.persistedModel).toBe(expected);
 });
 
 test("reloadAgentSession passes daemon launch env through the provider launch context", async () => {
@@ -5208,6 +5590,320 @@ test("persists live mode, model, and thinking changes without an external snapsh
   expect(persisted?.config?.thinkingOptionId).toBe("high");
   expect(persisted?.runtimeInfo?.modeId).toBe("build");
   expect(persisted?.runtimeInfo?.model).toBe("gpt-5.4");
+});
+
+test("set_model: a throw refuses and leaves state unchanged", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-model-policy-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const setModel = vi.fn();
+  class ModelSession extends TestAgentSession {
+    async setModel(modelId: string | null): Promise<void> {
+      setModel(modelId);
+    }
+  }
+  class ModelClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      return new ModelSession(config);
+    }
+  }
+  const requests: unknown[] = [];
+  const pluginLifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.set_model") {
+        requests.push(request);
+        throw new Error("model refused");
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new ModelClient() },
+    logger,
+    registry: storage,
+    pluginLifecycle,
+    idFactory: () => "00000000-0000-4000-8000-000000000135",
+  });
+  const agent = await manager.createAgent(
+    {
+      provider: "codex",
+      cwd: workdir,
+      model: "old",
+      title: "Fix x",
+    },
+    undefined,
+    {},
+  );
+  await manager.setTitle(agent.id, "Fix renamed");
+  const before = manager.getAgent(agent.id);
+  await expect(manager.setAgentModel(agent.id, "opus")).rejects.toThrow("model refused");
+  expect(requests).toEqual([
+    {
+      agentId: agent.id,
+      provider: "codex",
+      source: "client",
+      fromModel: "old",
+      toModel: "opus",
+      title: "Fix renamed",
+      cwd: workdir,
+    },
+  ]);
+  expect(setModel).not.toHaveBeenCalled();
+  expect(manager.getAgent(agent.id)?.config.model).toBe(before?.config.model);
+  expect(manager.getAgent(agent.id)?.runtimeInfo).toEqual(before?.runtimeInfo);
+});
+
+test.each([false, true])(
+  "set_model: provider refusal during client change blocks the agent when close fails=%s",
+  async (closeFails) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-manager-client-model-race-"));
+    const storage = new AgentStorage(join(workdir, "agents"), logger);
+    let closed = false;
+    let steerCalls = 0;
+    let outOfBandCalls = 0;
+    class SwitchingSession extends TestAgentSession {
+      tryHandleOutOfBand(): null {
+        outOfBandCalls += 1;
+        return null;
+      }
+      async steerActiveTurn(): Promise<{ status: "accepted" }> {
+        steerCalls += 1;
+        return { status: "accepted" };
+      }
+      async setModel(): Promise<void> {
+        this.pushEvent({
+          type: "model_changed",
+          provider: "codex",
+          runtimeInfo: { ...(await this.getRuntimeInfo()), model: "opus" },
+        });
+      }
+      override async close(): Promise<void> {
+        closed = true;
+        if (closeFails) throw new Error("close failed");
+      }
+    }
+    class SwitchingClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new SwitchingSession(config);
+      }
+    }
+    const manager = new AgentManager({
+      clients: { codex: new SwitchingClient() },
+      logger,
+      registry: storage,
+      idFactory: () => "00000000-0000-4000-8000-000000000236",
+      pluginLifecycle: {
+        emit: () => {},
+        before: async (name: string, request: unknown) => {
+          if (
+            name === "agent.set_model" &&
+            (request as { source?: string }).source === "provider"
+          ) {
+            throw new Error("effective opus refused");
+          }
+          return request;
+        },
+      } as PluginLifecycle,
+    });
+    const created = await manager.createAgent(
+      { provider: "codex", cwd: workdir, model: "sonnet" },
+      undefined,
+      {},
+    );
+    await expect(manager.setAgentModel(created.id, "alias")).rejects.toThrow(
+      "effective opus refused",
+    );
+    expect(closed).toBe(true);
+    if (closeFails) {
+      expect(manager.getAgent(created.id)).toMatchObject({ lifecycle: "error" });
+      expect(() => manager.streamAgent(created.id, "hello")).toThrow("effective opus refused");
+      await expect(manager.setAgentModel(created.id, "alias")).rejects.toThrow(
+        "effective opus refused",
+      );
+      const internals = manager as unknown as {
+        agents: Map<string, { activeTurnId: string | null }>;
+      };
+      internals.agents.get(created.id)!.activeTurnId = "active-turn";
+      await expect(manager.steerAgentRun(created.id, "hello")).rejects.toThrow(
+        "effective opus refused",
+      );
+      expect(steerCalls).toBe(0);
+      expect(() => manager.tryRunOutOfBand(created.id, "/steer")).toThrow("effective opus refused");
+      expect(outOfBandCalls).toBe(0);
+    } else {
+      expect(manager.getAgent(created.id)).toBeNull();
+    }
+    expect(await storage.get(created.id)).toMatchObject({
+      lastStatus: closeFails ? "error" : "closed",
+      lastError: "effective opus refused",
+      config: { model: "sonnet" },
+    });
+  },
+);
+
+test("provider model refusal does not remove a replacement session during interrupt", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-model-replace-race-"));
+  const interruptStarted = deferred<void>();
+  const releaseInterrupt = deferred<void>();
+  class SlowSession extends CloseRecordingTestAgentSession {
+    override async interrupt(): Promise<void> {
+      interruptStarted.resolve();
+      await releaseInterrupt.promise;
+    }
+  }
+  let session!: SlowSession;
+  class SlowClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new SlowSession(config);
+      return session;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new SlowClient() },
+    logger,
+    idFactory: () => "00000000-0000-4000-8000-000000000237",
+  });
+  const created = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+  const internals = manager as unknown as {
+    agents: Map<string, Record<string, unknown>>;
+    stopRefusedProviderModel(agent: Record<string, unknown>, refusal: Error): Promise<void>;
+  };
+  const original = internals.agents.get(created.id)!;
+  const stopping = internals.stopRefusedProviderModel(original, new Error("opus refused"));
+  await interruptStarted.promise;
+  const replacement = {
+    ...original,
+    session: new TestAgentSession({ provider: "codex", cwd: workdir }),
+  };
+  internals.agents.set(created.id, replacement);
+  releaseInterrupt.resolve();
+  await stopping;
+  expect(session.closed).toBe(true);
+  expect(internals.agents.get(created.id)).toBe(replacement);
+});
+
+test.each([
+  { allowed: false, outcome: "refusing hook stops the agent" },
+  { allowed: true, outcome: "allowing hook adopts opus" },
+])("ACP config_option_update to opus: $outcome", async ({ allowed }) => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-acp-model-update-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  class ACPUpdateSession extends CloseRecordingTestAgentSession {
+    model = "sonnet";
+    interrupted = false;
+
+    override async getRuntimeInfo() {
+      return { ...(await super.getRuntimeInfo()), model: this.model };
+    }
+
+    override async interrupt(): Promise<void> {
+      this.interrupted = true;
+      await super.interrupt();
+    }
+  }
+  const session = new ACPUpdateSession({ provider: "codex", cwd: workdir, model: "sonnet" });
+  class ACPUpdateClient extends TestAgentClient {
+    override async createSession(): Promise<AgentSession> {
+      return session;
+    }
+  }
+  const requests: unknown[] = [];
+  const manager = new AgentManager({
+    clients: { codex: new ACPUpdateClient() },
+    logger,
+    registry: storage,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { source?: string; toModel?: string | null }) => {
+        if (name === "agent.set_model") {
+          requests.push(request);
+          if (!allowed && request.source === "provider" && request.toModel === "opus") {
+            throw new Error("opus refused");
+          }
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe((event) => events.push(event), { replayState: false });
+  const created = await manager.createAgent(
+    { provider: "codex", cwd: workdir, model: "sonnet", title: "Fix x" },
+    undefined,
+    {},
+  );
+  session.model = "opus";
+  session.pushEvent({
+    type: "model_changed",
+    provider: "codex",
+    runtimeInfo: await session.getRuntimeInfo(),
+  });
+  if (allowed) {
+    await vi.waitFor(() => expect(manager.getAgent(created.id)?.runtimeInfo?.model).toBe("opus"));
+    expect(session.closed).toBe(false);
+  } else {
+    await vi.waitFor(() => expect(session.closed).toBe(true));
+    expect(session.interrupted).toBe(true);
+    expect(manager.getAgent(created.id)).toBeNull();
+    expect(await storage.get(created.id)).toMatchObject({ lastError: "opus refused" });
+    expect(events).toContainEqual(
+      expect.objectContaining({
+        type: "agent_state",
+        agent: expect.objectContaining({ lifecycle: "error", lastError: "opus refused" }),
+      }),
+    );
+  }
+  expect(requests).toContainEqual({
+    agentId: created.id,
+    provider: "codex",
+    source: "provider",
+    fromModel: "sonnet",
+    toModel: "opus",
+    title: "Fix x",
+    cwd: workdir,
+  });
+});
+
+test("Claude SDK init runtime model refresh refuses opus and stops the agent", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-manager-claude-model-refresh-"));
+  class RuntimeModelSession extends CloseRecordingTestAgentSession {
+    model = "sonnet";
+    override async getRuntimeInfo() {
+      return { ...(await super.getRuntimeInfo()), model: this.model };
+    }
+  }
+  const session = new RuntimeModelSession({ provider: "codex", cwd: workdir, model: "sonnet" });
+  class RuntimeModelClient extends TestAgentClient {
+    override async createSession(): Promise<AgentSession> {
+      return session;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new RuntimeModelClient() },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { source?: string; toModel?: string | null }) => {
+        if (
+          name === "agent.set_model" &&
+          request.source === "provider" &&
+          request.toModel === "opus"
+        ) {
+          throw new Error("runtime opus refused");
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const created = await manager.createAgent(
+    { provider: "codex", cwd: workdir, model: "sonnet", title: "Fix x" },
+    undefined,
+    {},
+  );
+  session.model = "opus";
+  session.pushEvent({ type: "turn_completed", provider: "codex" });
+  await vi.waitFor(() => expect(session.closed).toBe(true));
+  expect(manager.getAgent(created.id)).toBeNull();
 });
 
 test("later explicit config mutations win over events emitted by earlier mutations", async () => {
@@ -11602,4 +12298,157 @@ test("concurrent native restores run once before resuming the same agent", async
     await storage.flush();
     rmSync(workdir, { recursive: true, force: true });
   }
+});
+
+test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
+  const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
+  const session = new TestAgentSession(config);
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  const start = vi.spyOn(session, "startTurn");
+  vi.spyOn(session, "interrupt").mockImplementation(async () => {
+    entered.resolve();
+    await release.promise;
+  });
+  const client = new TestAgentClient();
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const manager = new AgentManager({
+    clients: { codex: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.set_model") throw new Error("opus refused");
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  const stream = manager.streamAgent(agent.id, "hello");
+  session.pushEvent({
+    type: "model_changed",
+    provider: "codex",
+    runtimeInfo: { provider: "codex", model: "opus" },
+  });
+  await entered.promise;
+  expect(manager.hasInFlightRun(agent.id)).toBe(false);
+  await expect(stream.next()).rejects.toThrow("opus refused");
+  expect(start).not.toHaveBeenCalled();
+  release.resolve();
+  await vi.waitFor(() => expect(manager.getAgent(agent.id)).toBeNull());
+});
+
+test("provider refusal: PENDING_START close failure keeps error and no live run", async () => {
+  const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
+  const session = new TestAgentSession(config);
+  const entered = deferred<void>();
+  const release = deferred<void>();
+  vi.spyOn(session, "startTurn").mockImplementation(async () => {
+    entered.resolve();
+    await release.promise;
+    return { turnId: "pending" };
+  });
+  const interrupt = vi.spyOn(session, "interrupt").mockResolvedValue();
+  vi.spyOn(session, "close").mockRejectedValue(new Error("close failed"));
+  const client = new TestAgentClient();
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const manager = new AgentManager({
+    clients: { codex: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.set_model") throw new Error("opus refused");
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  const stream = manager.streamAgent(agent.id, "hello");
+  const next = stream.next();
+  const rejected = expect(next).rejects.toThrow("opus refused");
+  await entered.promise;
+  session.pushEvent({
+    type: "model_changed",
+    provider: "codex",
+    runtimeInfo: { provider: "codex", model: "opus" },
+  });
+  await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("error"));
+  expect(manager.hasInFlightRun(agent.id)).toBe(false);
+  release.resolve();
+  await rejected;
+  expect(interrupt).toHaveBeenCalledTimes(2);
+  expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+  expect(manager.hasInFlightRun(agent.id)).toBe(false);
+});
+
+test.each(["null", "throws"])(
+  "session_opened: unknown runtime %s refuses without registration",
+  async (report) => {
+    const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
+    const session = new TestAgentSession(config);
+    vi.spyOn(session, "getRuntimeInfo").mockImplementation(async () => {
+      if (report === "throws") throw new Error("unavailable");
+      return { provider: "codex", sessionId: session.id, model: null, modeId: null };
+    });
+    const close = vi.spyOn(session, "close");
+    const client = new TestAgentClient();
+    vi.spyOn(client, "createSession").mockResolvedValue(session);
+    const storage = new AgentStorage(mkdtempSync(join(tmpdir(), "unknown-policy-")), logger);
+    const opened: unknown[] = [];
+    const manager = new AgentManager({
+      clients: { codex: client },
+      logger,
+      registry: storage,
+      pluginLifecycle: {
+        emit: () => {},
+        before: async (name: string, request: { model?: string | null }) => {
+          if (name === "agent.session_opened") {
+            opened.push(request);
+            if (request.model === null) throw new Error("unknown refused");
+          }
+          return request;
+        },
+      } as PluginLifecycle,
+    });
+    await expect(manager.createAgent(config, undefined, {})).rejects.toThrow("unknown refused");
+    expect(opened).toEqual([expect.objectContaining({ model: null, requestedModel: "sonnet" })]);
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.listAgents()).toEqual([]);
+    expect(await storage.list()).toEqual([]);
+  },
+);
+
+test("set_model: null provider report invokes policy once and stops when refused", async () => {
+  const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
+  const session = new TestAgentSession(config);
+  const close = vi.spyOn(session, "close");
+  const client = new TestAgentClient();
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const requests: unknown[] = [];
+  const manager = new AgentManager({
+    clients: { codex: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.set_model") {
+          requests.push(request);
+          throw new Error("unknown refused");
+        }
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  session.pushEvent({
+    type: "model_changed",
+    provider: "codex",
+    runtimeInfo: { provider: "codex", model: null },
+  });
+  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+  expect(requests).toEqual([
+    expect.objectContaining({ source: "provider", fromModel: "sonnet", toModel: null }),
+  ]);
+  expect(manager.getAgent(agent.id)).toBeNull();
 });
