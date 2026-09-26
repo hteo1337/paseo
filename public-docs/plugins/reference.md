@@ -634,6 +634,17 @@ Cleanup can be async. Release timers, watchers, sockets, and other resources cre
 
 Register async handlers with `server.addHook(name, handler)`. See [Hooks](/docs/plugins/hooks) for names, payloads, ordering, errors, and complete examples.
 
+### Model policy hooks
+
+Register `agent.set_model` and `agent.session_opened` with `addHook` or legacy `before`.
+Both are awaited, read-only policy gates; throw to refuse the operation.
+`agent.set_model` receives agentId, provider, source (`client` or `provider`), fromModel,
+toModel, title and cwd. `agent.session_opened` receives the resolved model, requestedModel,
+agent identity, title, reason and purpose after opening and before registration or persistence.
+It is distinct from upstream `agent.open.before` (legacy `agent.session_open`), which changes
+launch-only env, tools and MCP servers before opening. Missing model/title in legacy open-hook
+results preserve the input values. Model policy hooks stay fail-closed while their plugin reloads.
+
 ## Screens and sidebar items
 
 A screen is a full page of plugin UI. A sidebar item is a component Paseo renders in the sidebar
