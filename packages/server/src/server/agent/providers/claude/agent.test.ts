@@ -3421,3 +3421,390 @@ describe("Claude question permission notifications", () => {
     expect(request.description).toBeUndefined();
   });
 });
+
+test.each(["claude-sonnet-5", "claude-opus-5-5"])(
+  "Claude effective model: settings default cannot report a switch before %s runs",
+  async (effectiveModel) => {
+    const { AgentManager } = await import("../../agent-manager.js");
+    const logger = createTestLogger();
+    const client = new ClaudeAgentClient({ logger });
+    const config = {
+      provider: "claude" as const,
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    };
+    const session = await client.createSession(config);
+    Object.assign(session, { claudeSessionId: "existing", lastOptionsModel: config.model });
+    const adapter = session as unknown as TestClaudeSession & {
+      dispatchEvents(events: AgentStreamEvent[]): void;
+    };
+    const close = vi.spyOn(session, "close").mockResolvedValue();
+    vi.spyOn(session, "interrupt").mockResolvedValue();
+    vi.spyOn(client, "createSession").mockResolvedValue(session);
+    const requests: unknown[] = [];
+    const manager = new AgentManager({
+      clients: { claude: client },
+      logger,
+      pluginLifecycle: {
+        emit: () => {},
+        before: async (name: string, request: unknown) => {
+          if (name === "agent.set_model") {
+            requests.push(request);
+            throw new Error("opus refused");
+          }
+          return request;
+        },
+      } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+    });
+    const agent = await manager.createAgent(config, undefined, {});
+    try {
+      const init = adapter.translateMessageToEvents({
+        type: "system",
+        subtype: "init",
+        session_id: "existing",
+        model: effectiveModel === config.model ? "claude-opus-5-5" : config.model,
+        permissionMode: "default",
+      } as SDKMessage);
+      adapter.dispatchEvents(init);
+      expect(init.some((event) => event.type === "thread_started")).toBe(false);
+      expect(init.filter((event) => event.type === "model_changed")).toEqual([]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model: config.model });
+      expect(requests).toEqual([]);
+
+      const assistant = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "existing",
+        message: {
+          role: "assistant",
+          model: effectiveModel,
+          content: [{ type: "text", text: "hi" }],
+        },
+      } as SDKMessage);
+      adapter.dispatchEvents(assistant);
+      if (effectiveModel === config.model) {
+        expect(assistant.filter((event) => event.type === "model_changed")).toEqual([]);
+        expect(await session.getRuntimeInfo()).toMatchObject({ model: config.model });
+        expect(requests).toEqual([]);
+        expect(close).not.toHaveBeenCalled();
+        expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
+      } else {
+        expect(assistant[0]).toMatchObject({
+          type: "model_changed",
+          runtimeInfo: { model: effectiveModel },
+        });
+        await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+        expect(requests).toEqual([
+          expect.objectContaining({
+            source: "provider",
+            fromModel: config.model,
+            toModel: effectiveModel,
+          }),
+        ]);
+        expect(manager.getAgent(agent.id)).toBeNull();
+      }
+    } finally {
+      await manager.closeAgent(agent.id);
+    }
+  },
+);
+
+test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider model switch", async () => {
+  const { AgentManager } = await import("../../agent-manager.js");
+  const logger = createTestLogger();
+  const client = new ClaudeAgentClient({ logger });
+  const config = { provider: "claude" as const, cwd: os.tmpdir(), model: "claude-sonnet-5" };
+  const session = await client.createSession(config);
+  Object.assign(session, { claudeSessionId: "limit-session" });
+  await session.getRuntimeInfo();
+  const adapter = session as unknown as TestClaudeSession & {
+    dispatchEvents(events: AgentStreamEvent[]): void;
+  };
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const requests: Array<{ source?: string; fromModel?: string | null; toModel?: string | null }> =
+    [];
+  const opened: unknown[] = [];
+  const manager = new AgentManager({
+    clients: { claude: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { source?: string; toModel?: string | null }) => {
+        if (name === "agent.session_opened") opened.push(request);
+        if (name === "agent.set_model") {
+          requests.push(request);
+          if (request.toModel !== "claude-opus-5-5") throw new Error("unexpected model refused");
+        }
+        return request;
+      },
+    } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  try {
+    expect(opened).toEqual([
+      expect.objectContaining({ model: null, requestedModel: config.model }),
+    ]);
+    const notice = adapter.translateMessageToEvents({
+      type: "assistant",
+      session_id: "limit-session",
+      error: "rate_limit",
+      isApiErrorMessage: true,
+      apiErrorStatus: 429,
+      message: {
+        id: "limit-notice",
+        model: "<synthetic>",
+        role: "assistant",
+        content: [{ type: "text", text: "You have hit your weekly limit" }],
+      },
+    } as SDKMessage);
+    adapter.dispatchEvents(notice);
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(notice.filter((event) => event.type === "model_changed")).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(manager.getAgent(agent.id)?.runtimeInfo?.model).toBe(config.model);
+  } finally {
+    await manager.closeAgent(agent.id);
+  }
+});
+
+test("Claude runtime info refreshes a cached unknown model after options select Sonnet", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
+  });
+  const adapter = session as unknown as TestClaudeSession & {
+    buildOptions(): Promise<unknown>;
+    resolveBinary(): Promise<string>;
+  };
+  vi.spyOn(adapter, "resolveBinary").mockResolvedValue("/tmp/claude");
+  try {
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: null });
+    await adapter.buildOptions();
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+  } finally {
+    await session.close();
+  }
+});
+
+test("Claude effective model: streamed switch survives late init and ignores synthetic/child frames", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
+  });
+  Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+  const adapter = session as unknown as TestClaudeSession & {
+    buildOptions(): Promise<unknown>;
+    resolveBinary(): Promise<string>;
+  };
+  vi.spyOn(adapter, "resolveBinary").mockResolvedValue("/tmp/claude");
+  try {
+    const init = {
+      type: "system",
+      subtype: "init",
+      session_id: "streamed",
+      model: "claude-opus-5-5",
+      permissionMode: "default",
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(init).map((event) => event.type)).toEqual([
+      "thread_started",
+    ]);
+    const start = {
+      type: "stream_event",
+      session_id: "streamed",
+      event: {
+        type: "message_start",
+        message: { model: "claude-opus-5-5", usage: { input_tokens: 1, output_tokens: 0 } },
+      },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(start)[0]).toMatchObject({
+      type: "model_changed",
+      runtimeInfo: { model: "claude-opus-5-5" },
+    });
+    const assistant = {
+      type: "assistant",
+      session_id: "streamed",
+      message: { model: "claude-opus-5-5", role: "assistant", content: [] },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(assistant)).toEqual([]);
+    expect(
+      adapter.translateMessageToEvents({ ...init, model: "claude-sonnet-5" } as SDKMessage),
+    ).toEqual([]);
+    adapter.translateMessageToEvents({
+      ...assistant,
+      message: { model: "<synthetic>", role: "assistant", content: [] },
+    } as SDKMessage);
+    adapter.translateMessageToEvents({
+      ...assistant,
+      parent_tool_use_id: "child-tool",
+      message: { model: "claude-sonnet-5", role: "assistant", content: [] },
+    } as SDKMessage);
+    expect(await session.getRuntimeInfo()).toMatchObject({
+      model: "claude-opus-5-5",
+      extra: { runtimeModel: "claude-opus-5-5" },
+    });
+    await adapter.buildOptions();
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-opus-5-5" });
+  } finally {
+    await session.close();
+  }
+});
+
+test.each([
+  { name: "synthetic limit notice", model: "<synthetic>", error: undefined, flags: {} },
+  {
+    name: "rate-limit error with CLI default",
+    model: "claude-opus-5-5",
+    error: "rate_limit",
+    flags: {},
+  },
+  {
+    name: "API-error frame with CLI default",
+    model: "claude-opus-5-5",
+    error: undefined,
+    flags: { isApiErrorMessage: true },
+  },
+  {
+    name: "synthetic frame with CLI default",
+    model: "claude-opus-5-5",
+    error: undefined,
+    flags: { isSynthetic: true },
+  },
+])(
+  "Claude effective model: $name does not replace a Sonnet request",
+  async ({ model, error, flags }) => {
+    const client = new ClaudeAgentClient({ logger: createTestLogger() });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    });
+    Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+    const adapter = session as unknown as TestClaudeSession;
+    try {
+      const events = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "limit-turn",
+        error,
+        ...flags,
+        message: {
+          id: "limit-notice",
+          model,
+          role: "assistant",
+          content: [{ type: "text", text: "You have hit your weekly limit" }],
+        },
+      } as SDKMessage);
+      expect(events.filter((event) => event.type === "model_changed")).toEqual([]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test.each([
+  { model: "claude-sonnet-5", previousModel: null },
+  { model: "claude-opus-5-5", previousModel: "claude-sonnet-5" },
+])(
+  "Claude effective model: real $model assistant frame reports inference",
+  async ({ model, previousModel }) => {
+    const client = new ClaudeAgentClient({ logger: createTestLogger() });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    });
+    Object.assign(session, { lastOptionsModel: previousModel });
+    const adapter = session as unknown as TestClaudeSession;
+    try {
+      const events = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "inference-turn",
+        message: {
+          id: "real-inference",
+          model,
+          role: "assistant",
+          content: [{ type: "text", text: "Real response" }],
+        },
+      } as SDKMessage);
+      expect(events.filter((event) => event.type === "model_changed")).toMatchObject([
+        { type: "model_changed", runtimeInfo: { model } },
+      ]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model });
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test("Claude effective model: a resumed redelivery of an already-persisted Opus frame is not a switch", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
+  });
+  Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+  const adapter = session as unknown as TestClaudeSession & {
+    ingestPersistedHistory(content: string, replay: unknown): void;
+  };
+  try {
+    const historyLine = JSON.stringify({
+      type: "assistant",
+      uuid: "hist-assistant-uuid",
+      timestamp: "2026-09-25T12:00:00.000Z",
+      message: {
+        id: "msg_opus_hist",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "old output" }],
+      },
+    });
+    adapter.ingestPersistedHistory(historyLine, {
+      restoredIds: new Set(),
+      toolOwners: new Map(),
+    });
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+
+    const redelivered = {
+      type: "assistant",
+      session_id: "resume-turn",
+      uuid: "live-redelivery-uuid",
+      message: {
+        id: "msg_opus_hist",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "old output" }],
+      },
+    } as SDKMessage;
+    expect(
+      adapter
+        .translateMessageToEvents(redelivered)
+        .filter((event) => event.type === "model_changed"),
+    ).toEqual([]);
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+
+    const genuineOpusTurn = {
+      type: "assistant",
+      session_id: "resume-turn",
+      uuid: "live-genuine-uuid",
+      message: {
+        id: "msg_opus_genuine",
+        model: "claude-opus-5-5",
+        role: "assistant",
+        content: [{ type: "text", text: "new output" }],
+      },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(genuineOpusTurn)[0]).toMatchObject({
+      type: "model_changed",
+      runtimeInfo: { model: "claude-opus-5-5" },
+    });
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-opus-5-5" });
+  } finally {
+    await session.close();
+  }
+});
