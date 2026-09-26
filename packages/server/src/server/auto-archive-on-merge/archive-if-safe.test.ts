@@ -1,5 +1,13 @@
 import { execFileSync } from "node:child_process";
-import { existsSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import {
+  existsSync,
+  mkdirSync,
+  mkdtempSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import type { Logger } from "pino";
@@ -15,7 +23,14 @@ import type { ArchiveResult, ActiveWorkspaceRef } from "../workspace-archive-ser
 import type { WorkspaceGitRuntimeSnapshot } from "../workspace-git-service.js";
 import { createWorktree, type WorktreeConfig } from "../../utils/worktree.js";
 import type { ForgeService } from "../../../services/forge-service.js";
-import type { StoredAgentRecord } from "../agent/agent-storage.js";
+import { AgentManager } from "../agent/agent-manager.js";
+import { AgentStorage, type StoredAgentRecord } from "../agent/agent-storage.js";
+import type {
+  AgentClient,
+  AgentSession,
+  AgentSessionConfig,
+  AgentStreamEvent,
+} from "../agent/agent-sdk-types.js";
 
 const CWD = "/tmp/paseo/worktrees/repo/branch";
 const PASEO_HOME = "/tmp/paseo";
@@ -83,6 +98,7 @@ function createHarness(overrides?: {
   snapshot?: WorkspaceGitRuntimeSnapshot;
   isPaseoOwnedWorktreeCwd?: ArchiveIfSafeDependencies["isPaseoOwnedWorktreeCwd"];
   archiveByScope?: ArchiveIfSafeDependencies["archiveByScope"];
+  agents?: Array<{ id: string; cwd: string; workspaceId?: string; lifecycle: string }>;
 }) {
   const getSnapshot = vi.fn(async () =>
     createSnapshot(),
@@ -97,7 +113,14 @@ function createHarness(overrides?: {
     } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
     workspaceGitService,
     github: {} as AutoArchiveArchiveOptions["github"],
-    agentManager: {} as AutoArchiveArchiveOptions["agentManager"],
+    agentManager: {
+      listAgents: () => overrides?.agents ?? [],
+      listAgentsIncludingInternal: () => overrides?.agents ?? [],
+      hasInFlightRun: (agentId: string) =>
+        overrides?.agents?.some((agent) => agent.id === agentId && agent.lifecycle === "running") ??
+        false,
+      holdNewRunsForArchive: () => () => {},
+    } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {} as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {} as AutoArchiveArchiveOptions["terminalManager"],
     findWorkspaceIdForCwd: vi.fn(async () => "ws-auto-archive"),
@@ -245,6 +268,82 @@ function createGitHubServiceStub(): ForgeService {
   };
 }
 
+const RACE_CAPABILITIES = {
+  supportsStreaming: false,
+  supportsSessionPersistence: false,
+  supportsSessionListing: false,
+  supportsDynamicModes: false,
+  supportsMcpServers: false,
+  supportsReasoningStream: false,
+  supportsToolInvocations: false,
+} as const;
+
+// Minimal fake session/client so a test can push a provider event
+// (turn_started) synchronously, mirroring a real out-of-band provider turn.
+class RaceSession {
+  readonly provider = "codex" as const;
+  readonly capabilities = RACE_CAPABILITIES;
+  readonly id = `race-${Math.random().toString(36).slice(2)}`;
+  closed = false;
+  private subs = new Set<(event: AgentStreamEvent) => void>();
+  constructor(private readonly config: AgentSessionConfig) {}
+  async run() {
+    return { sessionId: this.id, finalText: "", timeline: [] };
+  }
+  async startTurn() {
+    return { turnId: "t" };
+  }
+  subscribe(callback: (event: AgentStreamEvent) => void) {
+    this.subs.add(callback);
+    return () => this.subs.delete(callback);
+  }
+  push(event: AgentStreamEvent) {
+    for (const callback of this.subs) callback(event);
+  }
+  async *streamHistory(): AsyncGenerator<AgentStreamEvent> {}
+  async getRuntimeInfo() {
+    return { provider: this.provider, sessionId: this.id, model: null, modeId: null };
+  }
+  async getAvailableModes() {
+    return [];
+  }
+  async getCurrentMode() {
+    return null;
+  }
+  async setMode() {}
+  getPendingPermissions() {
+    return [];
+  }
+  async respondToPermission() {}
+  describePersistence() {
+    return { provider: this.provider, sessionId: this.id };
+  }
+  async interrupt() {}
+  async close() {
+    this.closed = true;
+  }
+}
+
+class RaceClient {
+  readonly provider = "codex" as const;
+  readonly capabilities = RACE_CAPABILITIES;
+  sessions: RaceSession[] = [];
+  async isAvailable() {
+    return true;
+  }
+  async fetchCatalog() {
+    return { models: [{ provider: "codex", id: "m", label: "m", isDefault: true }], modes: [] };
+  }
+  async createSession(config: AgentSessionConfig) {
+    const session = new RaceSession(config);
+    this.sessions.push(session);
+    return session as unknown as AgentSession;
+  }
+  async resumeSession(_handle: unknown, config?: Partial<AgentSessionConfig>) {
+    return this.createSession({ provider: "codex", cwd: config?.cwd ?? "/" } as AgentSessionConfig);
+  }
+}
+
 function createRealOutcomeHarness(input: {
   paseoHome: string;
   repoDir: string;
@@ -294,6 +393,9 @@ function createRealOutcomeHarness(input: {
     github: createGitHubServiceStub(),
     agentManager: {
       listAgents: () => [],
+      listAgentsIncludingInternal: () => [],
+      hasInFlightRun: () => false,
+      holdNewRunsForArchive: () => () => {},
       archiveAgent: vi.fn(async () => ({ archivedAt: new Date().toISOString() })),
       archiveSnapshot: vi.fn(async () => {
         throw new Error("not expected without stored agents");
@@ -433,6 +535,9 @@ describe("archiveIfSafe", () => {
       {
         scope: { kind: "workspace", workspaceId: "ws-auto-archive" },
         requestId: "auto-archive-on-merge",
+        abortIf: expect.any(Function),
+        holdNewRuns: expect.any(Function),
+        keepDirectory: true,
       },
     );
     expect(harness.log.info).toHaveBeenCalledWith(
@@ -442,8 +547,204 @@ describe("archiveIfSafe", () => {
         branch: "feature",
         pullRequestUrl: "https://github.com/acme/repo/pull/123",
       },
-      "Auto-archived worktree after PR merge",
+      "Auto-archived workspace after PR merge",
     );
+  });
+
+  test("maps a late busy agent from archiveByScope to deferred", async () => {
+    const harness = createHarness({
+      archiveByScope: async () => ({
+        archivedAgentIds: [],
+        archivedWorkspaceIds: [],
+        removedDirectory: false,
+        deferredByAgentIds: ["agent-late"],
+      }),
+    });
+
+    const outcome = await archiveIfSafe({
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+    });
+
+    expect(outcome).toBe("deferred");
+  });
+
+  test("cancellation during ownership lookup prevents archive", async () => {
+    let releaseOwnership: () => void = () => {};
+    let enteredOwnership = false;
+    let cancelled = false;
+    const ownership = new Promise<void>((resolvePromise) => {
+      releaseOwnership = resolvePromise;
+    });
+    const harness = createHarness({
+      isPaseoOwnedWorktreeCwd: async () => {
+        enteredOwnership = true;
+        await ownership;
+        return { allowed: true, worktreePath: CWD };
+      },
+    });
+    const request = {
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+      isCancelled: () => cancelled,
+    };
+
+    const attempt = archiveIfSafe(request);
+    await vi.waitFor(() => expect(enteredOwnership).toBe(true));
+    cancelled = true;
+    releaseOwnership();
+
+    expect(await attempt).toBe("skipped");
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("cancellation during archive target resolution reaches the final guard", async () => {
+    let cancelled = false;
+    let guardResult: string[] | "cancelled" | null | undefined;
+    const harness = createHarness({
+      archiveByScope: async (_dependencies, request) => {
+        cancelled = true;
+        guardResult = request.abortIf?.();
+        return {
+          archivedAgentIds: [],
+          archivedWorkspaceIds: [],
+          removedDirectory: false,
+          cancelled: guardResult === "cancelled",
+        };
+      },
+    });
+    const request = {
+      workspaceId: "ws-auto-archive",
+      snapshot: createSnapshot(),
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+      isCancelled: () => cancelled,
+    };
+
+    expect(guardResult).toBeUndefined();
+    expect(await archiveIfSafe(request)).toBe("skipped");
+    expect(guardResult).toBe("cancelled");
+  });
+
+  test.each(["running", "initializing"])(
+    "defers while an agent of the workspace is %s",
+    async (lifecycle) => {
+      const harness = createHarness({
+        agents: [{ id: "a1", cwd: "/elsewhere", workspaceId: "ws-auto-archive", lifecycle }],
+      });
+
+      await runArchiveIfSafe(harness);
+
+      expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+      expect(harness.log.info).toHaveBeenCalledWith(
+        { workspaceId: "ws-auto-archive", cwd: CWD, agentIds: ["a1"] },
+        "Deferred auto-archive after PR merge: agent still working",
+      );
+    },
+  );
+
+  test("defers while an agent of another workspace runs inside the worktree", async () => {
+    const harness = createHarness({
+      agents: [
+        { id: "a2", cwd: `${CWD}/packages/app`, workspaceId: "ws-other", lifecycle: "running" },
+      ],
+    });
+
+    await runArchiveIfSafe(harness);
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("defers for an idle agent owned by another workspace inside the worktree", async () => {
+    const harness = createHarness({
+      agents: [
+        { id: "foreign-idle", cwd: `${CWD}/child`, workspaceId: "ws-other", lifecycle: "idle" },
+      ],
+    });
+
+    const outcome = await archiveIfSafe({
+      workspaceId: "ws-auto-archive",
+      snapshot: harness.snapshot,
+      options: harness.options,
+      log: harness.log,
+      deps: harness.deps,
+    });
+
+    expect(outcome).toBe("deferred");
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("archives once the agent is idle, and ignores agents elsewhere", async () => {
+    const agents = [
+      { id: "a1", cwd: CWD, workspaceId: "ws-auto-archive", lifecycle: "running" },
+      { id: "a3", cwd: `${CWD}-sibling`, workspaceId: "ws-other", lifecycle: "running" },
+    ];
+    const harness = createHarness({ agents });
+
+    await runArchiveIfSafe(harness);
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+
+    agents[0]!.lifecycle = "idle";
+    await runArchiveIfSafe(harness);
+    expect(harness.deps.archiveByScope).toHaveBeenCalledTimes(1);
+  });
+
+  test("guards the whole worktree, not only the workspace cwd", async () => {
+    const harness = createHarness({
+      agents: [{ id: "a4", cwd: `${CWD}/pkg-b`, workspaceId: "ws-other", lifecycle: "running" }],
+    });
+
+    await runArchiveIfSafe(harness, { snapshot: { ...createSnapshot(), cwd: `${CWD}/pkg-a` } });
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("matches an agent that reaches the worktree through a symlink", async () => {
+    const tempDir = realpathSync(mkdtempSync(path.join(tmpdir(), "archive-if-safe-link-")));
+    cleanupPaths.push(tempDir);
+    const worktreePath = path.join(tempDir, "tree");
+    mkdirSync(worktreePath);
+    symlinkSync(worktreePath, path.join(tempDir, "alias"));
+    const harness = createHarness({
+      agents: [
+        {
+          id: "a5",
+          cwd: path.join(tempDir, "alias"),
+          workspaceId: "ws-other",
+          lifecycle: "running",
+        },
+      ],
+      isPaseoOwnedWorktreeCwd: async () => ({
+        allowed: true,
+        repoRoot: "/tmp/repo",
+        worktreeRoot: tempDir,
+        worktreePath,
+      }),
+    });
+
+    await runArchiveIfSafe(harness, { snapshot: { ...createSnapshot(), cwd: worktreePath } });
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
+  });
+
+  test("defers when a turn starts while the consumed-merge lookup is pending", async () => {
+    const agents = [{ id: "a6", cwd: CWD, workspaceId: "ws-auto-archive", lifecycle: "idle" }];
+    const harness = createHarness({ agents });
+    harness.options.getAutoArchivedChangeRequestUrl = async () => {
+      agents[0]!.lifecycle = "running";
+      return null;
+    };
+
+    await runArchiveIfSafe(harness);
+
+    expect(harness.deps.archiveByScope).not.toHaveBeenCalled();
   });
 
   test("does not archive a merge event already consumed by this workspace", async () => {
@@ -534,8 +835,23 @@ describe("archiveIfSafe", () => {
     expect(existsSync(worktree.worktreePath)).toBe(true);
   });
 
-  test("real outcome: removes directory when no sibling workspace remains", async () => {
+  test("real outcome: keeps the worktree without running teardown after merge", async () => {
     const { tempDir, repoDir } = createGitRepo();
+    writeFileSync(
+      path.join(repoDir, "paseo.json"),
+      JSON.stringify({
+        worktree: {
+          teardown: [
+            "node -e \"require('fs').writeFileSync(process.env.PASEO_SOURCE_CHECKOUT_PATH + '/auto-teardown.log', 'ran')\"",
+          ],
+        },
+      }),
+    );
+    execFileSync("git", ["add", "."], { cwd: repoDir, stdio: "pipe" });
+    execFileSync("git", ["-c", "commit.gpgsign=false", "commit", "-m", "add teardown"], {
+      cwd: repoDir,
+      stdio: "pipe",
+    });
     const paseoHome = path.join(tempDir, ".paseo");
     const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "merged-last-ref");
     const workspaceA = "ws-merged-last-ref";
@@ -549,15 +865,21 @@ describe("archiveIfSafe", () => {
       archivedWorkspaceIds,
     });
 
-    await archiveIfSafe({
+    const outcome = await archiveIfSafe({
       workspaceId: workspaceA,
       snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
       options: harness.options,
       log: harness.log,
     });
 
+    expect(outcome).toBe("archived");
     expect(archivedWorkspaceIds.has(workspaceA)).toBe(true);
-    expect(existsSync(worktree.worktreePath)).toBe(false);
+    expect(existsSync(worktree.worktreePath)).toBe(true);
+    expect(existsSync(path.join(repoDir, "auto-teardown.log"))).toBe(false);
+    expect(harness.log.info).toHaveBeenCalledWith(
+      expect.objectContaining({ path: expect.stringContaining("merged-last-ref") }),
+      expect.stringContaining("kept"),
+    );
   });
 
   test("real outcome: an unarchived workspace is not archived again for the same merged PR", async () => {
@@ -602,5 +924,207 @@ describe("archiveIfSafe", () => {
 
     expect(archivedWorkspaceIds.has(workspace.workspaceId)).toBe(false);
     expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  // Regression for round-6 P2 A2: an internal agent must be as visible to the
+  // busy check as a normal one, since listAgents() drops internal agents.
+  test.each([true, false])(
+    "regression: a working agent defers auto-archive regardless of internal flag (internal=%s)",
+    async (internal) => {
+      const { tempDir, repoDir } = createGitRepo();
+      const paseoHome = path.join(tempDir, ".paseo");
+      const worktree = await createPaseoOwnedWorktree(
+        repoDir,
+        paseoHome,
+        `race-internal-${internal}`,
+      );
+      const workspaceId = `ws-race-internal-${internal}`;
+      const archivedWorkspaceIds = new Set<string>();
+      const realLogger = pino({ level: "silent" });
+      const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+      const client = new RaceClient();
+      const manager = new AgentManager({
+        clients: { codex: client as unknown as AgentClient },
+        registry: storage,
+        logger: realLogger,
+      });
+      const agent = await manager.createAgent(
+        { provider: "codex", cwd: worktree.worktreePath, internal } as AgentSessionConfig,
+        undefined,
+        { workspaceId },
+      );
+      client.sessions[0]?.push({
+        type: "turn_started",
+        provider: "codex",
+        turnId: "working",
+      } as AgentStreamEvent);
+      await new Promise((resolve) => setTimeout(resolve, 20));
+      expect(manager.hasInFlightRun(agent.id)).toBe(true);
+
+      const options = {
+        paseoHome,
+        daemonConfigStore: {
+          get: () => ({ autoArchiveAfterMerge: true }),
+        } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+        workspaceGitService: {
+          getSnapshot: async () => null,
+        } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+        github: createGitHubServiceStub(),
+        agentManager: manager,
+        agentStorage: storage,
+        terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+        findWorkspaceIdForCwd: async () => workspaceId,
+        listActiveWorkspaces: async () =>
+          archivedWorkspaceIds.has(workspaceId)
+            ? []
+            : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+        getAutoArchivedChangeRequestUrl: async () => null,
+        archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+        markWorkspaceArchiving: () => {},
+        clearWorkspaceArchiving: () => {},
+        emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+      } as unknown as AutoArchiveArchiveOptions;
+
+      const outcome = await archiveIfSafe({
+        workspaceId,
+        snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+        options,
+        log: createLogger(),
+      });
+
+      expect(outcome).toBe("deferred");
+      expect(client.sessions[0]?.closed).toBe(false);
+      expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
+    },
+  );
+
+  // A turn starting mid-teardown must defer even for an internal agent.
+  test("regression: an internal agent that starts working during teardown defers archive", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "internal-busy-teardown");
+    const workspaceId = "ws-internal-busy-teardown";
+    const archivedWorkspaceIds = new Set<string>();
+    const realLogger = pino({ level: "silent" });
+    const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+    const client = new RaceClient();
+    const manager = new AgentManager({
+      clients: { codex: client as unknown as AgentClient },
+      registry: storage,
+      logger: realLogger,
+    });
+    await manager.createAgent(
+      { provider: "codex", cwd: worktree.worktreePath, internal: true } as AgentSessionConfig,
+      undefined,
+      { workspaceId },
+    );
+
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        client.sessions[0]?.push({
+          type: "turn_started",
+          provider: "codex",
+          turnId: "autonomous",
+        } as AgentStreamEvent);
+      }
+      return applySnapshot(...args);
+    });
+
+    const options = {
+      paseoHome,
+      daemonConfigStore: {
+        get: () => ({ autoArchiveAfterMerge: true }),
+      } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+      workspaceGitService: {
+        getSnapshot: async () => null,
+      } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+      github: createGitHubServiceStub(),
+      agentManager: manager,
+      agentStorage: storage,
+      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      findWorkspaceIdForCwd: async () => workspaceId,
+      listActiveWorkspaces: async () =>
+        archivedWorkspaceIds.has(workspaceId)
+          ? []
+          : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+      getAutoArchivedChangeRequestUrl: async () => null,
+      archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+      markWorkspaceArchiving: () => {},
+      clearWorkspaceArchiving: () => {},
+      emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+    } as unknown as AutoArchiveArchiveOptions;
+
+    const outcome = await archiveIfSafe({
+      workspaceId,
+      snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+      options,
+      log: createLogger(),
+    });
+
+    // The push only fires if teardown actually attempted to close this agent.
+    expect(armed).toBe(false);
+    expect(outcome).toBe("deferred");
+    expect(client.sessions[0]?.closed).toBe(false);
+    expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
+  });
+
+  // An idle internal agent must still be closed, or auto-archive defers forever.
+  test("closes an idle internal agent during teardown instead of deferring forever", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "internal-idle-teardown");
+    const workspaceId = "ws-internal-idle-teardown";
+    const archivedWorkspaceIds = new Set<string>();
+    const realLogger = pino({ level: "silent" });
+    const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+    const client = new RaceClient();
+    const manager = new AgentManager({
+      clients: { codex: client as unknown as AgentClient },
+      registry: storage,
+      logger: realLogger,
+    });
+    await manager.createAgent(
+      { provider: "codex", cwd: worktree.worktreePath, internal: true } as AgentSessionConfig,
+      undefined,
+      { workspaceId },
+    );
+
+    const options = {
+      paseoHome,
+      daemonConfigStore: {
+        get: () => ({ autoArchiveAfterMerge: true }),
+      } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+      workspaceGitService: {
+        getSnapshot: async () => null,
+      } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+      github: createGitHubServiceStub(),
+      agentManager: manager,
+      agentStorage: storage,
+      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      findWorkspaceIdForCwd: async () => workspaceId,
+      listActiveWorkspaces: async () =>
+        archivedWorkspaceIds.has(workspaceId)
+          ? []
+          : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+      getAutoArchivedChangeRequestUrl: async () => null,
+      archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+      markWorkspaceArchiving: () => {},
+      clearWorkspaceArchiving: () => {},
+      emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+    } as unknown as AutoArchiveArchiveOptions;
+
+    const outcome = await archiveIfSafe({
+      workspaceId,
+      snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+      options,
+      log: createLogger(),
+    });
+
+    expect(outcome).toBe("archived");
+    expect(client.sessions[0]?.closed).toBe(true);
+    expect(archivedWorkspaceIds.has(workspaceId)).toBe(true);
   });
 });

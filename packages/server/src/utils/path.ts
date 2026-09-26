@@ -116,7 +116,9 @@ function getRelativePathInsideRoot(root: string, candidate: string): string | nu
 
   if (
     comparableRelative !== "" &&
-    (comparableRelative.startsWith("..") || platformPath.isAbsolute(comparableRelative))
+    (comparableRelative === ".." ||
+      comparableRelative.startsWith(`..${platformPath.sep}`) ||
+      platformPath.isAbsolute(comparableRelative))
   ) {
     return null;
   }
