@@ -27,6 +27,7 @@ import type { ToolPolicy } from "@getpaseo/protocol/agent-types";
 import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-config";
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
+import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -155,6 +156,14 @@ export class AgentRunCancellationError extends Error {
       `Cannot ${action} agent ${agentId} because its active run cancellation was not acknowledged`,
     );
     this.name = "AgentRunCancellationError";
+  }
+}
+
+// Auto-archive teardown treats this as a deferral, not a failure.
+export class AgentBusyDuringArchiveError extends Error {
+  constructor(public readonly agentId: string) {
+    super(`Agent ${agentId} became busy during archive teardown`);
+    this.name = "AgentBusyDuringArchiveError";
   }
 }
 
@@ -883,6 +892,10 @@ export class AgentManager {
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
   private acceptingAgentRegistrations = true;
+  private readonly runAdmissionHolds = new Set<
+    (agent: Pick<ManagedAgent, "workspaceId" | "cwd">) => boolean
+  >();
+  private readonly pendingProviderTurnStarts = new Map<string, number>();
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
@@ -1126,6 +1139,7 @@ export class AgentManager {
     return (
       agent.lifecycle === "running" ||
       Boolean(agent.activeForegroundTurnId) ||
+      (this.pendingProviderTurnStarts.get(agentId) ?? 0) > 0 ||
       this.runs.hasRun(agentId)
     );
   }
@@ -1190,6 +1204,11 @@ export class AgentManager {
       retired.push({ record: entry.record, lastMessage: entry.lastMessage });
     }
     return retired;
+  }
+
+  // Auto-archive busy checks must see internal agents; UI-facing listings must not.
+  listAgentsIncludingInternal(): ManagedAgent[] {
+    return Array.from(this.agents.values()).map((agent) => Object.assign({}, agent));
   }
 
   async listImportableSessions(
@@ -1548,6 +1567,7 @@ export class AgentManager {
       };
       options = { ...options, env: request.env, metadata: request.metadata ?? options.metadata };
     }
+    this.assertArchiveAdmission(resolvedAgentId, options.workspaceId, config.cwd);
     await this.deleteAgentState(resolvedAgentId);
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
       config,
@@ -1671,6 +1691,7 @@ export class AgentManager {
       ...overrides,
       provider: handle.provider,
     } as AgentSessionConfig;
+    this.assertArchiveAdmission(resolvedAgentId, options?.workspaceId, mergedConfig.cwd);
     // Decide residency from durable state inside the lifecycle lane. A loader may
     // have read the record before a queued archive or restore completed. Residency is
     // settled before the config is prepared, because a history load reads an archived
@@ -2142,7 +2163,11 @@ export class AgentManager {
     return close;
   }
 
-  private async closeAgentRuntime(agentId: string, canClose?: () => boolean): Promise<boolean> {
+  private async closeAgentRuntime(
+    agentId: string,
+    canClose?: () => boolean,
+    options?: { onBeforeClose?: () => void },
+  ): Promise<boolean> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -2158,6 +2183,9 @@ export class AgentManager {
     );
     await this.drainSessionEvents(agentId);
     if (canClose && !canClose()) return false;
+    // Runs synchronously, with no await between it and session.close(), so a
+    // requireIdle recheck here cannot race a turn that starts during the drain.
+    options?.onBeforeClose?.();
     // Retain ownership until shutdown succeeds. A failed close may still own a
     // native writer, so publishing a resumable closed snapshot would orphan it.
     await agent.session.close();
@@ -2204,15 +2232,27 @@ export class AgentManager {
     }
   }
 
-  async archiveAgent(agentId: string, archivedAt?: string): Promise<{ archivedAt: string }> {
-    return this.runLifecycleMutation(agentId, () => this.archiveAgentUnlocked(agentId, archivedAt));
+  async archiveAgent(
+    agentId: string,
+    archivedAtOrOptions?: string | { requireIdle?: boolean },
+    options?: { requireIdle?: boolean },
+  ): Promise<{ archivedAt: string }> {
+    const archivedAt = typeof archivedAtOrOptions === "string" ? archivedAtOrOptions : undefined;
+    const archiveOptions = typeof archivedAtOrOptions === "object" ? archivedAtOrOptions : options;
+    return this.runLifecycleMutation(agentId, () =>
+      this.archiveAgentUnlocked(agentId, archivedAt, archiveOptions),
+    );
   }
 
   private async archiveAgentUnlocked(
     agentId: string,
     requestedArchivedAt?: string,
+    options?: { requireIdle?: boolean },
   ): Promise<{ archivedAt: string }> {
     const agent = this.requireAgent(agentId);
+    if (options?.requireIdle && this.hasInFlightRun(agentId)) {
+      throw new AgentBusyDuringArchiveError(agentId);
+    }
     if (agent.internal) {
       // Nothing about an internal agent is on disk, and archiving must not put
       // it there. Its final snapshot is kept in memory for a while (see
@@ -2224,7 +2264,13 @@ export class AgentManager {
         toStoredAgentRecord(agent, { title: agent.config.title ?? null, internal: true }),
         { archivedAt, updatedAt: archivedAt },
       );
-      await this.closeAgentRuntime(agentId);
+      await this.closeAgentRuntime(agentId, undefined, {
+        onBeforeClose: options?.requireIdle
+          ? () => {
+              if (this.hasInFlightRun(agentId)) throw new AgentBusyDuringArchiveError(agentId);
+            }
+          : undefined,
+      });
       await this.deleteAgentState(agentId);
       this.retireInternalAgent({ record, lastMessage });
       await this.cascadeArchiveChildren(record);
@@ -2242,10 +2288,32 @@ export class AgentManager {
       throw new Error(`Agent ${agentId} not found in storage after snapshot`);
     }
 
+    // Only auto-archive teardown opts into this recheck; manual archive is unaffected.
+    if (options?.requireIdle && this.hasInFlightRun(agentId)) {
+      throw new AgentBusyDuringArchiveError(agentId);
+    }
+
     const archivedRecord = await this.markRecordArchived(stored, requestedArchivedAt);
     const { archivedAt } = archivedRecord;
+    try {
+      await this.closeAgentRuntime(agentId, undefined, {
+        // Same recheck as above, but immediately before session.close() so a turn
+        // that starts during markRecordArchived's awaits cannot slip through.
+        onBeforeClose: options?.requireIdle
+          ? () => {
+              if (this.hasInFlightRun(agentId)) {
+                throw new AgentBusyDuringArchiveError(agentId);
+              }
+            }
+          : undefined,
+      });
+    } catch (error) {
+      if (error instanceof AgentBusyDuringArchiveError) {
+        await this.requireRegistry().upsert(stored);
+      }
+      throw error;
+    }
     agent.updatedAt = new Date(archivedRecord.updatedAt);
-    await this.closeAgentRuntime(agentId);
     await this.syncNativeArchiveState(stored.provider, stored.persistence, "archive");
     this.discardRetainedAgentState(agentId);
 
@@ -3213,6 +3281,25 @@ export class AgentManager {
     yield* this.streamAgent(agentId, prompt, options);
   }
 
+  holdNewRunsForArchive(workspaceId: string, root: string): () => void {
+    const canonicalRoot = normalizePathForIdentity(root);
+    const matches = (agent: Pick<ManagedAgent, "workspaceId" | "cwd">): boolean =>
+      agent.workspaceId === workspaceId ||
+      isPathInsideRoot(canonicalRoot, normalizePathForIdentity(agent.cwd));
+    this.runAdmissionHolds.add(matches);
+    return () => this.runAdmissionHolds.delete(matches);
+  }
+
+  private assertArchiveAdmission(
+    agentId: string,
+    workspaceId: string | undefined,
+    cwd: string,
+  ): void {
+    if (Array.from(this.runAdmissionHolds).some((matches) => matches({ workspaceId, cwd }))) {
+      throw new Error(`Agent ${agentId} workspace is being archived`);
+    }
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
@@ -3223,6 +3310,7 @@ export class AgentManager {
     const existingAgent = this.requireSessionAgent(agentId);
     if (this.historySessions.has(existingAgent.session))
       return this.streamAfterHistoryLoad(agentId, prompt, options);
+    this.assertArchiveAdmission(agentId, existingAgent.workspaceId, existingAgent.cwd);
     this.logger.trace(
       {
         agentId,
@@ -4352,6 +4440,7 @@ export class AgentManager {
       }
 
       this.assertAcceptingAgentRegistrations();
+      this.assertArchiveAdmission(resolvedAgentId, managed.workspaceId, managed.cwd);
       this.runtimeCleanupIdentities.set(session, Object.freeze({ openedAt: Date.now() }));
       this.agents.set(resolvedAgentId, managed);
       registered = true;
@@ -4654,6 +4743,12 @@ export class AgentManager {
       pendingRun.stagedEvents.push(event);
       return;
     }
+    if (event.type === "turn_started") {
+      this.pendingProviderTurnStarts.set(
+        agentId,
+        (this.pendingProviderTurnStarts.get(agentId) ?? 0) + 1,
+      );
+    }
     const previous = this.sessionEventTails.get(agentId) ?? Promise.resolve();
     const next = previous
       .catch(() => undefined)
@@ -4688,6 +4783,11 @@ export class AgentManager {
     this.sessionEventTails.set(agentId, next);
     this.trackBackgroundTask(next);
     void next.finally(() => {
+      if (event.type === "turn_started") {
+        const pending = this.pendingProviderTurnStarts.get(agentId) ?? 1;
+        if (pending <= 1) this.pendingProviderTurnStarts.delete(agentId);
+        else this.pendingProviderTurnStarts.set(agentId, pending - 1);
+      }
       if (this.sessionEventTails.get(agentId) === next) {
         this.sessionEventTails.delete(agentId);
       }
