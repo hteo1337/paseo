@@ -113,6 +113,7 @@ async function createWorkspaceJourney() {
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
+    agentManager: { subscribe: () => () => {} },
     workspaceGitService: {
       onSnapshotUpdated: (nextListener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         listener = nextListener;
