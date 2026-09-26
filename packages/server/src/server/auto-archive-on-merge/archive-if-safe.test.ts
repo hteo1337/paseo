@@ -997,4 +997,134 @@ describe("archiveIfSafe", () => {
       expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
     },
   );
+
+  // A turn starting mid-teardown must defer even for an internal agent.
+  test("regression: an internal agent that starts working during teardown defers archive", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "internal-busy-teardown");
+    const workspaceId = "ws-internal-busy-teardown";
+    const archivedWorkspaceIds = new Set<string>();
+    const realLogger = pino({ level: "silent" });
+    const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+    const client = new RaceClient();
+    const manager = new AgentManager({
+      clients: { codex: client as unknown as AgentClient },
+      registry: storage,
+      logger: realLogger,
+    });
+    await manager.createAgent(
+      { provider: "codex", cwd: worktree.worktreePath, internal: true } as AgentSessionConfig,
+      undefined,
+      { workspaceId },
+    );
+
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        client.sessions[0]?.push({
+          type: "turn_started",
+          provider: "codex",
+          turnId: "autonomous",
+        } as AgentStreamEvent);
+      }
+      return applySnapshot(...args);
+    });
+
+    const options = {
+      paseoHome,
+      daemonConfigStore: {
+        get: () => ({ autoArchiveAfterMerge: true }),
+      } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+      workspaceGitService: {
+        getSnapshot: async () => null,
+      } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+      github: createGitHubServiceStub(),
+      agentManager: manager,
+      agentStorage: storage,
+      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      findWorkspaceIdForCwd: async () => workspaceId,
+      listActiveWorkspaces: async () =>
+        archivedWorkspaceIds.has(workspaceId)
+          ? []
+          : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+      getAutoArchivedChangeRequestUrl: async () => null,
+      archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+      markWorkspaceArchiving: () => {},
+      clearWorkspaceArchiving: () => {},
+      emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+    } as unknown as AutoArchiveArchiveOptions;
+
+    const outcome = await archiveIfSafe({
+      workspaceId,
+      snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+      options,
+      log: createLogger(),
+    });
+
+    // The push only fires if teardown actually attempted to close this agent.
+    expect(armed).toBe(false);
+    expect(outcome).toBe("deferred");
+    expect(client.sessions[0]?.closed).toBe(false);
+    expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
+  });
+
+  // An idle internal agent must still be closed, or auto-archive defers forever.
+  test("closes an idle internal agent during teardown instead of deferring forever", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const worktree = await createPaseoOwnedWorktree(repoDir, paseoHome, "internal-idle-teardown");
+    const workspaceId = "ws-internal-idle-teardown";
+    const archivedWorkspaceIds = new Set<string>();
+    const realLogger = pino({ level: "silent" });
+    const storage = new AgentStorage(path.join(tempDir, "agents"), realLogger);
+    const client = new RaceClient();
+    const manager = new AgentManager({
+      clients: { codex: client as unknown as AgentClient },
+      registry: storage,
+      logger: realLogger,
+    });
+    await manager.createAgent(
+      { provider: "codex", cwd: worktree.worktreePath, internal: true } as AgentSessionConfig,
+      undefined,
+      { workspaceId },
+    );
+
+    const options = {
+      paseoHome,
+      daemonConfigStore: {
+        get: () => ({ autoArchiveAfterMerge: true }),
+      } as unknown as AutoArchiveArchiveOptions["daemonConfigStore"],
+      workspaceGitService: {
+        getSnapshot: async () => null,
+      } as unknown as AutoArchiveArchiveOptions["workspaceGitService"],
+      github: createGitHubServiceStub(),
+      agentManager: manager,
+      agentStorage: storage,
+      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      findWorkspaceIdForCwd: async () => workspaceId,
+      listActiveWorkspaces: async () =>
+        archivedWorkspaceIds.has(workspaceId)
+          ? []
+          : [{ workspaceId, cwd: worktree.worktreePath, kind: "worktree" as const }],
+      getAutoArchivedChangeRequestUrl: async () => null,
+      archiveWorkspaceRecord: async (id: string) => void archivedWorkspaceIds.add(id),
+      markWorkspaceArchiving: () => {},
+      clearWorkspaceArchiving: () => {},
+      emitWorkspaceUpdatesForWorkspaceIds: async () => {},
+    } as unknown as AutoArchiveArchiveOptions;
+
+    const outcome = await archiveIfSafe({
+      workspaceId,
+      snapshot: { ...createSnapshot(), cwd: worktree.worktreePath },
+      options,
+      log: createLogger(),
+    });
+
+    expect(outcome).toBe("archived");
+    expect(client.sessions[0]?.closed).toBe(true);
+    expect(archivedWorkspaceIds.has(workspaceId)).toBe(true);
+  });
 });

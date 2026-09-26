@@ -600,9 +600,12 @@ export async function archiveWorkspaceContents(
 ): Promise<Set<string>> {
   const archivedAgents = new Set<string>();
 
-  const liveAgents = dependencies.agentManager
-    .listAgents()
-    .filter((agent) => agent.workspaceId === workspaceId);
+  // Auto-archive closes internal agents too, or they never reach "closed".
+  const liveAgents = (
+    requireIdleClose
+      ? dependencies.agentManager.listAgentsIncludingInternal()
+      : dependencies.agentManager.listAgents()
+  ).filter((agent) => agent.workspaceId === workspaceId);
   for (const agent of liveAgents) {
     archivedAgents.add(agent.id);
   }
