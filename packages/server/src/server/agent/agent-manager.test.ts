@@ -1,12 +1,13 @@
 import { expect, test, vi } from "vitest";
 import { spawn } from "node:child_process";
-import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { randomUUID } from "node:crypto";
 
 import { createTestLogger } from "../../test-utils/test-logger.js";
 import {
+  AgentBusyDuringArchiveError,
   AgentManager,
   AgentManagerShuttingDownError,
   commandMayHaveChangedExternalState,
@@ -53,6 +54,364 @@ import type { ProviderDefinition } from "./provider-registry.js";
 
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
+
+test("archive hold rejects new runs until released", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-archive-hold-"));
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const release = manager.holdNewRunsForArchive("workspace-a", workdir);
+    expect(() => manager.streamAgent(agent.id, "prompt")).toThrow("workspace is being archived");
+    release();
+    expect(() => manager.streamAgent(agent.id, "prompt")).not.toThrow();
+  } finally {
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("archive hold covers a dot-dot-prefixed child of the deleted root", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-dotdot-"));
+  const child = join(root, "..cache");
+  mkdirSync(child);
+  const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: child }, undefined, {
+      workspaceId: "other-workspace",
+    });
+    const release = manager.holdNewRunsForArchive("archived-workspace", root);
+    expect(() => manager.streamAgent(agent.id, "prompt")).toThrow("workspace is being archived");
+    release();
+    expect(() => manager.streamAgent(agent.id, "prompt")).not.toThrow();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.each(["create", "resume"] as const)(
+  "archive hold refuses %s registration inside the deleted root",
+  async (mode) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-archive-registration-"));
+    const child = join(root, "child");
+    mkdirSync(child);
+    const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });
+    const release = manager.holdNewRunsForArchive("target", root);
+    try {
+      const register =
+        mode === "create"
+          ? manager.createAgent({ provider: "codex", cwd: child }, undefined, {
+              workspaceId: "other",
+            })
+          : manager.resumeAgentFromPersistence(
+              { provider: "codex", sessionId: "saved" },
+              { cwd: child },
+              undefined,
+              { workspaceId: "other" },
+            );
+      await expect(register).rejects.toThrow("workspace is being archived");
+      expect(manager.listAgents()).toEqual([]);
+    } finally {
+      release();
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each(["create", "resume"] as const)(
+  "archive hold rejects %s before state or provider side effects",
+  async (mode) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-archive-no-side-effects-"));
+    const child = join(root, "child");
+    mkdirSync(child);
+    const agentId = randomUUID();
+    const storage = new AgentStorage(join(root, "agents"), logger);
+    const client = new TestAgentClient();
+    const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+    const deleteAgentState = vi.spyOn(manager, "deleteAgentState");
+    const deleteCommittedTimeline = vi.spyOn(manager, "deleteCommittedTimeline");
+    const writeSnapshot = vi.spyOn(storage, "applySnapshot");
+    const checkProvider = vi.spyOn(client, "isAvailable");
+    const createSession = vi.spyOn(client, "createSession");
+    const resumeSession = vi.spyOn(client, "resumeSession");
+    const register = () =>
+      mode === "create"
+        ? manager.createAgent({ provider: "codex", cwd: child }, agentId, {
+            workspaceId: "other-workspace",
+          })
+        : manager.resumeAgentFromPersistence(
+            { provider: "codex", sessionId: "saved" },
+            { cwd: child },
+            agentId,
+            { workspaceId: "other-workspace" },
+          );
+    let release = manager.holdNewRunsForArchive("target-workspace", root);
+    try {
+      await expect(register()).rejects.toThrow("workspace is being archived");
+      expect(deleteAgentState).not.toHaveBeenCalled();
+      expect(deleteCommittedTimeline).not.toHaveBeenCalled();
+      expect(checkProvider).not.toHaveBeenCalled();
+      expect(createSession).not.toHaveBeenCalled();
+      expect(resumeSession).not.toHaveBeenCalled();
+      expect(writeSnapshot).not.toHaveBeenCalled();
+      expect(await storage.get(agentId)).toBeNull();
+
+      release();
+      release = () => {};
+      await register();
+      expect(mode === "create" ? createSession : resumeSession).toHaveBeenCalledTimes(1);
+      expect(writeSnapshot).toHaveBeenCalled();
+    } finally {
+      release();
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
+
+test("an in-flight creation cannot register after an archive hold begins", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-inflight-create-"));
+  const client = new HeldAgentCreationClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  const creation = manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+    workspaceId: "target",
+  });
+  await client.waitForCreationToStart();
+  const release = manager.holdNewRunsForArchive("target", root);
+  try {
+    client.finishCreating();
+    await expect(creation).rejects.toThrow("workspace is being archived");
+    expect(client.createdSessionClosed).toBe(true);
+    expect(manager.listAgents()).toEqual([]);
+  } finally {
+    release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("an in-flight resume cannot register after an archive hold begins", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-inflight-resume-"));
+  const resumeStarted = deferred<void>();
+  const resumeAllowed = deferred<void>();
+  let sessionClosed = false;
+  class HeldResumeClient extends TestAgentClient {
+    override async resumeSession(
+      _handle: AgentPersistenceHandle,
+      config?: Partial<AgentSessionConfig>,
+    ): Promise<AgentSession> {
+      const session = new (class extends TestAgentSession {
+        override async close(): Promise<void> {
+          sessionClosed = true;
+        }
+      })({ provider: "codex", cwd: config?.cwd ?? root });
+      resumeStarted.resolve();
+      await resumeAllowed.promise;
+      return session;
+    }
+  }
+  const manager = new AgentManager({ clients: { codex: new HeldResumeClient() }, logger });
+  const resuming = manager.resumeAgentFromPersistence(
+    { provider: "codex", sessionId: "saved" },
+    { cwd: root },
+    undefined,
+    { workspaceId: "target" },
+  );
+  await resumeStarted.promise;
+  const release = manager.holdNewRunsForArchive("target", root);
+  try {
+    resumeAllowed.resolve();
+    await expect(resuming).rejects.toThrow("workspace is being archived");
+    expect(sessionClosed).toBe(true);
+    expect(manager.listAgents()).toEqual([]);
+  } finally {
+    release();
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test("provider turn start becomes busy before its queued state update", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-autonomous-archive-"));
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const release = manager.holdNewRunsForArchive("workspace-a", root);
+    expect(() => manager.streamAgent(agent.id, "control")).toThrow("workspace is being archived");
+    client.sessions[0]?.pushEvent({
+      type: "turn_started",
+      provider: "codex",
+      turnId: "autonomous",
+    });
+    expect(manager.hasInFlightRun(agent.id)).toBe(true);
+    release();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression for round-6 P2 A1: a provider turn_started arriving inside
+// archiveAgent's own applySnapshot call must defer, not close mid-turn.
+test("archiveAgent with requireIdle defers when a provider turn starts during teardown", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-requireidle-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    let closed = false;
+    vi.spyOn(session, "close").mockImplementation(async () => {
+      closed = true;
+    });
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+      }
+      return applySnapshot(...args);
+    });
+
+    await expect(manager.archiveAgent(agent.id, { requireIdle: true })).rejects.toThrow(
+      AgentBusyDuringArchiveError,
+    );
+
+    expect(closed).toBe(false);
+    expect((await storage.get(agent.id))?.archivedAt).toBeFalsy();
+    expect(manager.getAgent(agent.id)?.lifecycle).not.toBe("closed");
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Control for the same fix: manual archive (no requireIdle) stays unaffected
+// by the identical race, matching pre-fix behaviour byte-for-byte.
+test("archiveAgent without requireIdle still closes through the same race", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-manual-race-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    const applySnapshot = storage.applySnapshot.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+      if (armed) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+      }
+      return applySnapshot(...args);
+    });
+
+    await manager.archiveAgent(agent.id);
+
+    expect((await storage.get(agent.id))?.archivedAt).toBeTruthy();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+// Regression for round-7 P2: a turn starting during the archived-record write
+// must not slip past the atomic recheck immediately before session.close().
+test("archiveAgent with requireIdle defers a turn that starts during the archived-record write", async () => {
+  const root = mkdtempSync(join(tmpdir(), "agent-archive-post-check-"));
+  const storage = new AgentStorage(join(root, "agents"), logger);
+  const client = new SessionRecordingAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: root }, undefined, {
+      workspaceId: "workspace-a",
+    });
+    const session = client.sessions[0];
+    let closed = false;
+    vi.spyOn(session, "close").mockImplementation(async () => {
+      closed = true;
+    });
+    const upsert = storage.upsert.bind(storage);
+    let armed = true;
+    vi.spyOn(storage, "upsert").mockImplementation(async (record) => {
+      if (armed && record.id === agent.id && record.archivedAt) {
+        armed = false;
+        session.pushEvent({ type: "turn_started", provider: "codex", turnId: "post-check" });
+      }
+      return upsert(record);
+    });
+
+    await expect(manager.archiveAgent(agent.id, { requireIdle: true })).rejects.toThrow(
+      AgentBusyDuringArchiveError,
+    );
+
+    expect(armed).toBe(false);
+    expect(closed).toBe(false);
+    expect((await storage.get(agent.id))?.archivedAt).toBeFalsy();
+    expect(manager.getAgent(agent.id)?.lifecycle).not.toBe("closed");
+
+    session.pushEvent({ type: "turn_completed", provider: "codex", turnId: "post-check" });
+    await vi.waitFor(() => expect(manager.hasInFlightRun(agent.id)).toBe(false));
+    expect(() => manager.streamAgent(agent.id, "still-usable")).not.toThrow();
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
+
+test.each(["create", "resume"] as const)(
+  "%s registration exposes synchronous provider replay as busy",
+  async (mode) => {
+    const root = mkdtempSync(join(tmpdir(), "agent-registration-replay-"));
+    const agentId = randomUUID();
+    let manager: AgentManager;
+    let busyDuringSubscribe = false;
+    class ReplaySession extends TestAgentSession {
+      override subscribe(callback: (event: AgentStreamEvent) => void): () => void {
+        const unsubscribe = super.subscribe(callback);
+        callback({ type: "turn_started", provider: "codex", turnId: "replayed" });
+        busyDuringSubscribe = manager.hasInFlightRun(agentId);
+        return unsubscribe;
+      }
+    }
+    class ReplayClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        return new ReplaySession(config);
+      }
+      override async resumeSession(
+        _handle: AgentPersistenceHandle,
+        config?: Partial<AgentSessionConfig>,
+      ): Promise<AgentSession> {
+        return new ReplaySession({ provider: "codex", cwd: config?.cwd ?? root });
+      }
+    }
+    manager = new AgentManager({ clients: { codex: new ReplayClient() }, logger });
+    let release: (() => void) | undefined;
+    try {
+      if (mode === "create") {
+        await manager.createAgent({ provider: "codex", cwd: root }, agentId, {
+          workspaceId: "workspace-a",
+        });
+      } else {
+        await manager.resumeAgentFromPersistence(
+          { provider: "codex", sessionId: "saved" },
+          { cwd: root },
+          agentId,
+          { workspaceId: "workspace-a" },
+        );
+      }
+      expect(busyDuringSubscribe).toBe(true);
+      expect(manager.hasInFlightRun(agentId)).toBe(true);
+      release = manager.holdNewRunsForArchive("workspace-a", root);
+      expect(() => manager.streamAgent(agentId, "control")).toThrow("workspace is being archived");
+    } finally {
+      release?.();
+      rmSync(root, { recursive: true, force: true });
+    }
+  },
+);
 
 interface Deferred<T> {
   promise: Promise<T>;
