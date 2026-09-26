@@ -249,6 +249,191 @@ afterEach(async () => {
 });
 
 describe("PluginRuntime", () => {
+  it.each(["process.exit(17)", "throw new Error('startup exploded')"])(
+    "startup barrier: register then %s refuses until successful start",
+    async (failure) => {
+      const directory = await createPlugin(
+        "policy",
+        `export default function(server) { server.before("agent.set_model", ({ request }) => request); ${failure}; }`,
+      );
+      const runtime = createTestRuntime();
+      await expect(runtime.startPlugin("policy", directory)).rejects.toThrow();
+      const request = {
+        agentId: "agent",
+        provider: "claude",
+        source: "client" as const,
+        fromModel: "sonnet",
+        toModel: "opus",
+        title: null,
+        cwd: "/project",
+      };
+      await expect(runtime.before("agent.set_model", request)).rejects.toThrow(
+        "policy plugin policy failed to start:",
+      );
+      await writeFile(
+        path.join(directory, "index.server.ts"),
+        `export default function(server) { server.before("agent.set_model", ({ request }) => request); return () => {}; }`,
+      );
+      await runtime.startPlugin("policy", directory);
+      await expect(runtime.before("agent.set_model", request)).rejects.toThrow("failed to start");
+      runtime.clearReload("policy");
+      await expect(runtime.before("agent.set_model", request)).resolves.toEqual(request);
+      await runtime.stopAll();
+    },
+  );
+
+  it("startup barrier: failure before registration does not gate hooks", async () => {
+    const directory = await createPlugin(
+      "policy",
+      `export default function() { throw new Error("early failure"); }`,
+    );
+    const runtime = createTestRuntime();
+    await expect(runtime.startPlugin("policy", directory)).rejects.toThrow("early failure");
+    await expect(
+      runtime.before("workspace.create", { source: { kind: "directory", path: "/project" } }),
+    ).resolves.toMatchObject({ source: { path: "/project" } });
+    await runtime.stopAll();
+  });
+
+  it("crash barrier: process exit refuses until a successful restart", async () => {
+    const source = (crash: boolean) =>
+      `export default function contribute(server) { server.before("workspace.create", ({ request }) => request); server.before("agent.session_opened", ({ request }) => request); ${crash ? "setTimeout(() => process.exit(9), 500);" : ""} return () => {}; }`;
+    const directory = await createPlugin("policy", source(true));
+    const runtime = createTestRuntime();
+    const crashed = new Promise<void>((resolve) => {
+      runtime.subscribe((id, error) => {
+        if (id === "policy" && error?.includes("exited")) resolve();
+      });
+    });
+    await runtime.startPlugin("policy", directory);
+    await crashed;
+    const request = { source: { kind: "directory" as const, path: "/project" } };
+    await expect(runtime.before("workspace.create", request)).rejects.toThrow(
+      "policy plugin policy exited",
+    );
+    const opened = {
+      agentId: "agent",
+      provider: "codex",
+      cwd: "/project",
+      workspaceId: null,
+      reason: "create" as const,
+      purpose: "interactive" as const,
+      model: "sonnet",
+      requestedModel: "sonnet",
+      title: null,
+    };
+    await expect(runtime.before("agent.session_opened", opened)).rejects.toThrow(
+      "policy plugin policy exited",
+    );
+    runtime.failReload("policy", new Error("restart failed"));
+    await expect(runtime.before("workspace.create", request)).rejects.toThrow(
+      "policy plugin policy exited",
+    );
+    await writeFile(path.join(directory, "index.server.ts"), source(false));
+    await runtime.startPlugin("policy", directory);
+    runtime.clearReload("policy");
+    await expect(runtime.before("workspace.create", request)).resolves.toEqual(request);
+    await expect(runtime.before("agent.session_opened", opened)).resolves.toEqual(opened);
+    await runtime.stopAll();
+  }, 20_000);
+
+  it("barrier: a create during reload waits for the new instance; unrelated hooks are not gated", async () => {
+    const source = (title: string) =>
+      `export default function contribute(server) { server.before("agent.create", ({ request }) => ({ ...request, config: { ...request.config, title: "${title}" } })); server.before("agent.session_opened", ({ request }) => request); return () => {}; }`;
+    const directory = await createPlugin("policy", source("old"));
+    const runtime = createTestRuntime();
+    await runtime.startPlugin("policy", directory);
+    runtime.beginReload("policy");
+    const request = { config: { provider: "codex" as const, cwd: "/project" }, env: {} };
+    const pending = runtime.before("agent.create", request);
+    const opened = {
+      agentId: "agent",
+      provider: "codex",
+      cwd: "/project",
+      workspaceId: null,
+      reason: "create" as const,
+      purpose: "interactive" as const,
+      model: "sonnet",
+      requestedModel: "sonnet",
+      title: null,
+    };
+    const pendingOpened = runtime.before("agent.session_opened", opened);
+    let openedSettled = false;
+    void pendingOpened.then(() => {
+      openedSettled = true;
+      return undefined;
+    });
+    let settled = false;
+    void pending.then(() => {
+      settled = true;
+      return undefined;
+    });
+    await Promise.resolve();
+    expect(settled).toBe(false);
+    expect(openedSettled).toBe(false);
+    await expect(
+      runtime.before("agent.set_model", {
+        agentId: "a",
+        provider: "codex",
+        source: "client",
+        fromModel: null,
+        toModel: "m",
+        title: null,
+        cwd: "/project",
+      }),
+    ).resolves.toMatchObject({ toModel: "m" });
+    await runtime.stopPluginById("policy");
+    await writeFile(path.join(directory, "index.server.ts"), source("new"));
+    await runtime.startPlugin("policy", directory);
+    runtime.clearReload("policy");
+    await expect(pending).resolves.toEqual({
+      ...request,
+      config: { ...request.config, title: "new" },
+    });
+    await expect(pendingOpened).resolves.toEqual(opened);
+    await runtime.stopAll();
+  }, 20_000);
+
+  it("barrier: a failed restart refuses until disabled", async () => {
+    const directory = await createPlugin(
+      "policy",
+      `export default function contribute(server) { server.before("workspace.create", ({ request }) => request); return () => {}; }`,
+    );
+    const runtime = createTestRuntime();
+    await runtime.startPlugin("policy", directory);
+    runtime.beginReload("policy");
+    await runtime.stopPluginById("policy");
+    runtime.failReload("policy", new Error("broken"));
+    const request = { source: { kind: "directory" as const, path: "/project" } };
+    await expect(runtime.before("workspace.create", request)).rejects.toThrow(
+      "policy plugin policy failed to restart: broken",
+    );
+    runtime.clearReload("policy");
+    await expect(runtime.before("workspace.create", request)).resolves.toEqual(request);
+  }, 20_000);
+
+  it("barrier: a timeout refuses without waiting ten real seconds", async () => {
+    const directory = await createPlugin(
+      "policy",
+      `export default function contribute(server) { server.before("workspace.create", ({ request }) => request); return () => {}; }`,
+    );
+    const runtime = createTestRuntime();
+    await runtime.startPlugin("policy", directory);
+    runtime.beginReload("policy");
+    await runtime.stopPluginById("policy");
+    vi.useFakeTimers();
+    try {
+      const pending = runtime.before("workspace.create", {
+        source: { kind: "directory", path: "/project" },
+      });
+      const refusal = expect(pending).rejects.toThrow("policy plugin policy is reloading");
+      await vi.advanceTimersByTimeAsync(10_000);
+      await refusal;
+    } finally {
+      vi.useRealTimers();
+      runtime.clearReload("policy");
+    }
+  }, 20_000);
   it.each([
     { specifier: "@getpaseo/plugin", moduleDirectory: "shared" },
     { specifier: "@getpaseo/plugin", moduleDirectory: "server" },
