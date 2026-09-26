@@ -33,7 +33,10 @@ export interface ArchiveDependencies {
   paseoWorktreesBaseRoot?: string;
   github: ForgeService;
   workspaceGitService: Pick<WorkspaceGitService, "getSnapshot" | "invalidateWorktrees">;
-  agentManager: Pick<AgentManager, "listAgents" | "getAgent" | "archiveAgent" | "archiveSnapshot">;
+  agentManager: Pick<
+    AgentManager,
+    "listAgents" | "listAgentsIncludingInternal" | "getAgent" | "archiveAgent" | "archiveSnapshot"
+  >;
   agentStorage: Pick<AgentStorage, "listByWorkspace">;
   // Resolves the worktree at a path to its workspaceId for archive-by-path. The
   // path uniquely identifies a worktree workspace; this is a directory lookup for
@@ -73,11 +76,16 @@ export interface ArchiveResult {
   // disk because no ownership proof held for it. The directory is never
   // deleted in that case; the path and reason surface here and in the log.
   directoryLeftBehind?: { path: string; reason: string };
+  deferredByAgentIds?: string[];
+  cancelled?: boolean;
 }
 
 export interface ArchiveByScopeRequest {
   scope: ArchiveScope;
   requestId: string;
+  abortIf?: () => string[] | "cancelled" | null;
+  holdNewRuns?: () => () => void;
+  keepDirectory?: true;
   // Aborting cancels the archive at its next checkpoint. Removing the worktree directory is the
   // point of no return: once it starts the archive completes.
   signal?: AbortSignal;
@@ -169,25 +177,53 @@ async function archiveByScopeWithPriority(
   await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
   checkpoint();
 
-  if (targetWorkspaceIds.length > 0) {
-    dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
-  }
+  const earlyAbort = archiveAbortResult(request.abortIf?.());
+  if (earlyAbort) return earlyAbort;
 
+  const releaseRunHold = request.holdNewRuns?.();
   let removedDirectory = false;
   let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
 
   try {
     if (targetWorkspaceIds.length > 0) {
+      dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
+    }
+    if (targetWorkspaceIds.length > 0) {
       await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
     }
     checkpoint();
 
-    const { archivedAgents, archivedWorkspaceIds } = await archiveTargetRecords(
+    const storedRecordsByWorkspace = request.abortIf
+      ? new Map<string, StoredAgentRecord[]>()
+      : undefined;
+    if (storedRecordsByWorkspace) {
+      for (const workspaceId of targetWorkspaceIds) {
+        storedRecordsByWorkspace.set(
+          workspaceId,
+          await listStoredAgentRecords(dependencies, workspaceId),
+        );
+      }
+      const lateAbort = archiveAbortResult(request.abortIf?.());
+      if (lateAbort) return lateAbort;
+    }
+
+    // Once teardown starts, cancellation commits to completion.
+    const { archivedAgents, archivedWorkspaceIds, deferredByAgentIds } = await archiveTargetRecords(
       dependencies,
       targetWorkspaceIds,
       { requestId: request.requestId, checkpoint, archivedAt },
+      storedRecordsByWorkspace,
+      Boolean(request.holdNewRuns),
     );
     checkpoint();
+    if (deferredByAgentIds.length > 0) {
+      return {
+        archivedAgentIds: Array.from(archivedAgents),
+        archivedWorkspaceIds,
+        removedDirectory: false,
+        deferredByAgentIds,
+      };
+    }
 
     if (target.backing?.mainRepoRoot) {
       try {
@@ -204,9 +240,9 @@ async function archiveByScopeWithPriority(
     }
 
     if (target.backing !== null) {
-      const removal = await maybeRemoveDirectory(
+      const removal = await finishArchiveDirectory(
         dependencies,
-        { requestId: request.requestId, checkpoint },
+        { ...request, checkpoint },
         target,
         archivedWorkspaceIds,
       );
@@ -221,11 +257,37 @@ async function archiveByScopeWithPriority(
       ...(directoryLeftBehind ? { directoryLeftBehind } : {}),
     };
   } finally {
-    if (targetWorkspaceIds.length > 0) {
-      dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
-      await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+    try {
+      if (targetWorkspaceIds.length > 0) {
+        dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
+        await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+      }
+    } finally {
+      releaseRunHold?.();
     }
   }
+}
+
+function archiveAbortResult(
+  reason: string[] | "cancelled" | null | undefined,
+): ArchiveResult | null {
+  if (reason === "cancelled") {
+    return {
+      archivedAgentIds: [],
+      archivedWorkspaceIds: [],
+      removedDirectory: false,
+      cancelled: true,
+    };
+  }
+  if (reason?.length) {
+    return {
+      archivedAgentIds: [],
+      archivedWorkspaceIds: [],
+      removedDirectory: false,
+      deferredByAgentIds: reason,
+    };
+  }
+  return null;
 }
 
 async function resolveArchiveTarget(
@@ -379,28 +441,27 @@ async function archiveTargetRecords(
     checkpoint: () => void;
     archivedAt: string;
   },
-): Promise<{ archivedAgents: Set<string>; archivedWorkspaceIds: string[] }> {
+  storedRecordsByWorkspace?: ReadonlyMap<string, StoredAgentRecord[]>,
+  requireClosedAgents = false,
+): Promise<{ archivedAgents: Set<string>; archivedWorkspaceIds: string[]; deferredByAgentIds: string[] }> {
   const archivedAgents = new Set<string>();
   const archivedWorkspaceIds: string[] = [];
 
-  const results = await Promise.allSettled(
+  const teardownResults = await Promise.allSettled(
     targetWorkspaceIds.map(async (workspaceId) => {
-      const contents = await archiveWorkspaceContents(
-        dependencies,
-        workspaceId,
-        options.archivedAt,
+      const agents = await archiveWorkspaceContents(
+        dependencies, workspaceId, options.archivedAt,
+        storedRecordsByWorkspace?.get(workspaceId), requireClosedAgents,
       );
-      // Agents and terminals are down, the record is not: an abort here leaves the workspace
-      // listed, and cancellation restores agents carrying this operation stamp.
       options.checkpoint();
-      await dependencies.archiveWorkspaceRecord(workspaceId, options.archivedAt);
-      return { workspaceId, agents: contents };
+      return { workspaceId, agents };
     }),
   );
 
-  for (const result of results) {
+  const ready: Array<{ workspaceId: string; agents: Set<string> }> = [];
+  for (const result of teardownResults) {
     if (result.status === "fulfilled") {
-      archivedWorkspaceIds.push(result.value.workspaceId);
+      ready.push(result.value);
       for (const agentId of result.value.agents) {
         archivedAgents.add(agentId);
       }
@@ -414,7 +475,53 @@ async function archiveTargetRecords(
     }
   }
 
-  return { archivedAgents, archivedWorkspaceIds };
+  const deferredByAgentIds = requireClosedAgents
+    ? dependencies.agentManager
+        .listAgentsIncludingInternal()
+        .filter(
+          (agent) =>
+            agent.lifecycle !== "closed" && targetWorkspaceIds.includes(agent.workspaceId ?? ""),
+        )
+        .map((agent) => agent.id)
+    : [];
+  if (deferredByAgentIds.length > 0) {
+    return { archivedAgents, archivedWorkspaceIds, deferredByAgentIds };
+  }
+
+  const archiveResults = await Promise.allSettled(
+    ready.map(async ({ workspaceId }) => {
+      options.checkpoint();
+      await dependencies.archiveWorkspaceRecord(workspaceId, options.archivedAt);
+      return workspaceId;
+    }),
+  );
+  for (const result of archiveResults) {
+    if (result.status === "fulfilled") archivedWorkspaceIds.push(result.value);
+    else {
+      dependencies.sessionLogger?.warn(
+        { err: result.reason, requestId: options.requestId },
+        "archiveByScope workspace teardown failed; continuing",
+      );
+    }
+  }
+
+  return { archivedAgents, archivedWorkspaceIds, deferredByAgentIds };
+}
+
+async function finishArchiveDirectory(
+  dependencies: ArchiveDependencies,
+  request: ArchiveByScopeRequest & { checkpoint: () => void },
+  target: ArchiveTarget,
+  archivedWorkspaceIds: string[],
+): Promise<Pick<ArchiveResult, "removedDirectory" | "directoryLeftBehind">> {
+  if (request.keepDirectory) {
+    dependencies.sessionLogger?.info(
+      { path: target.backing?.path, requestId: request.requestId },
+      "Auto-archive kept worktree folder for later cleanup",
+    );
+    return { removedDirectory: false };
+  }
+  return maybeRemoveDirectory(dependencies, request, target, archivedWorkspaceIds);
 }
 
 async function maybeRemoveDirectory(
@@ -549,6 +656,21 @@ export type ArchiveWorkspaceContentsDependencies = Pick<
   "agentManager" | "agentStorage" | "killTerminalsForWorkspace" | "sessionLogger"
 >;
 
+async function listStoredAgentRecords(
+  dependencies: Pick<ArchiveDependencies, "agentStorage" | "sessionLogger">,
+  workspaceId: string,
+): Promise<StoredAgentRecord[]> {
+  try {
+    return await dependencies.agentStorage.listByWorkspace(workspaceId);
+  } catch (error) {
+    dependencies.sessionLogger?.warn(
+      { err: error, workspaceId },
+      "Failed to list stored agents during workspace archive; continuing",
+    );
+    return [];
+  }
+}
+
 // Tears down everything OWNED by a single workspace record: its live agents,
 // its persisted-but-not-running agent snapshots, and its terminals. Scoped by
 // workspaceId so a sibling workspace sharing the same directory is untouched.
@@ -557,6 +679,8 @@ export async function archiveWorkspaceContents(
   dependencies: ArchiveWorkspaceContentsDependencies,
   workspaceId: string,
   archivedAt = new Date().toISOString(),
+  storedRecords?: StoredAgentRecord[],
+  requireIdleClose = false,
 ): Promise<Set<string>> {
   const archivedAgents = new Set<string>();
 
@@ -567,16 +691,8 @@ export async function archiveWorkspaceContents(
     archivedAgents.add(agent.id);
   }
 
-  let storedRecords: StoredAgentRecord[] = [];
-  try {
-    storedRecords = await dependencies.agentStorage.listByWorkspace(workspaceId);
-  } catch (error) {
-    dependencies.sessionLogger?.warn(
-      { err: error, workspaceId },
-      "Failed to list stored agents during workspace archive; continuing",
-    );
-  }
-  const matchingStoredRecords = storedRecords;
+  const matchingStoredRecords =
+    storedRecords ?? (await listStoredAgentRecords(dependencies, workspaceId));
   for (const record of matchingStoredRecords) {
     archivedAgents.add(record.id);
   }
@@ -591,7 +707,7 @@ export async function archiveWorkspaceContents(
     Promise.allSettled(
       agentIdsToArchive.map((agentId) =>
         dependencies.agentManager.getAgent(agentId)
-          ? dependencies.agentManager.archiveAgent(agentId, archivedAt)
+          ? dependencies.agentManager.archiveAgent(agentId, archivedAt, { requireIdle: requireIdleClose })
           : dependencies.agentManager.archiveSnapshot(agentId, archivedAt),
       ),
     ),
