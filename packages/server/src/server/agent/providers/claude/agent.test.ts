@@ -3400,57 +3400,147 @@ describe("Claude question permission notifications", () => {
   });
 });
 
-test("Claude same-ID init: real adapter emits provider model change and manager refuses", async () => {
-  const { AgentManager } = await import("../../agent-manager.js");
-  const logger = createTestLogger();
-  const client = new ClaudeAgentClient({ logger });
-  const config = { provider: "claude" as const, cwd: os.tmpdir(), model: "sonnet" };
-  const session = await client.createSession(config);
-  Object.assign(session, { claudeSessionId: "existing", lastOptionsModel: "sonnet" });
-  const adapter = session as unknown as TestClaudeSession & {
-    dispatchEvents(events: AgentStreamEvent[]): void;
-  };
-  const close = vi.spyOn(session, "close").mockResolvedValue();
-  vi.spyOn(session, "interrupt").mockResolvedValue();
-  vi.spyOn(client, "createSession").mockResolvedValue(session);
-  const requests: unknown[] = [];
-  const manager = new AgentManager({
-    clients: { claude: client },
-    logger,
-    pluginLifecycle: {
-      emit: () => {},
-      before: async (name: string, request: unknown) => {
-        if (name === "agent.set_model") {
-          requests.push(request);
-          throw new Error("opus refused");
-        }
-        return request;
-      },
-    } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+test.each(["claude-sonnet-5", "claude-opus-5-5"])(
+  "Claude effective model: settings default cannot report a switch before %s runs",
+  async (effectiveModel) => {
+    const { AgentManager } = await import("../../agent-manager.js");
+    const logger = createTestLogger();
+    const client = new ClaudeAgentClient({ logger });
+    const config = {
+      provider: "claude" as const,
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    };
+    const session = await client.createSession(config);
+    Object.assign(session, { claudeSessionId: "existing", lastOptionsModel: config.model });
+    const adapter = session as unknown as TestClaudeSession & {
+      dispatchEvents(events: AgentStreamEvent[]): void;
+    };
+    const close = vi.spyOn(session, "close").mockResolvedValue();
+    vi.spyOn(session, "interrupt").mockResolvedValue();
+    vi.spyOn(client, "createSession").mockResolvedValue(session);
+    const requests: unknown[] = [];
+    const manager = new AgentManager({
+      clients: { claude: client },
+      logger,
+      pluginLifecycle: {
+        emit: () => {},
+        before: async (name: string, request: unknown) => {
+          if (name === "agent.set_model") {
+            requests.push(request);
+            throw new Error("opus refused");
+          }
+          return request;
+        },
+      } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+    });
+    const agent = await manager.createAgent(config, undefined, {});
+    try {
+      const init = adapter.translateMessageToEvents({
+        type: "system",
+        subtype: "init",
+        session_id: "existing",
+        model: effectiveModel === config.model ? "claude-opus-5-5" : config.model,
+        permissionMode: "default",
+      } as SDKMessage);
+      adapter.dispatchEvents(init);
+      expect(init.some((event) => event.type === "thread_started")).toBe(false);
+      expect(init.filter((event) => event.type === "model_changed")).toEqual([]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model: config.model });
+      expect(requests).toEqual([]);
+
+      const assistant = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "existing",
+        message: {
+          role: "assistant",
+          model: effectiveModel,
+          content: [{ type: "text", text: "hi" }],
+        },
+      } as SDKMessage);
+      adapter.dispatchEvents(assistant);
+      if (effectiveModel === config.model) {
+        expect(assistant.filter((event) => event.type === "model_changed")).toEqual([]);
+        expect(await session.getRuntimeInfo()).toMatchObject({ model: config.model });
+        expect(requests).toEqual([]);
+        expect(close).not.toHaveBeenCalled();
+        expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
+      } else {
+        expect(assistant[0]).toMatchObject({
+          type: "model_changed",
+          runtimeInfo: { model: effectiveModel },
+        });
+        await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
+        expect(requests).toEqual([
+          expect.objectContaining({
+            source: "provider",
+            fromModel: config.model,
+            toModel: effectiveModel,
+          }),
+        ]);
+        expect(manager.getAgent(agent.id)).toBeNull();
+      }
+    } finally {
+      await manager.closeAgent(agent.id);
+    }
+  },
+);
+
+test("Claude effective model: streamed switch survives late init and ignores synthetic/child frames", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
   });
-  const agent = await manager.createAgent(config, undefined, {});
-  const events = adapter.translateMessageToEvents({
-    type: "system",
-    subtype: "init",
-    session_id: "existing",
-    model: "claude-opus-4-6",
-    permissionMode: "default",
-  } as SDKMessage);
-  expect(events).toContainEqual(
-    expect.objectContaining({
+  Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+  const adapter = session as unknown as TestClaudeSession;
+  try {
+    const init = {
+      type: "system",
+      subtype: "init",
+      session_id: "streamed",
+      model: "claude-opus-5-5",
+      permissionMode: "default",
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(init).map((event) => event.type)).toEqual([
+      "thread_started",
+    ]);
+    const start = {
+      type: "stream_event",
+      session_id: "streamed",
+      event: {
+        type: "message_start",
+        message: { model: "claude-opus-5-5", usage: { input_tokens: 1, output_tokens: 0 } },
+      },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(start)[0]).toMatchObject({
       type: "model_changed",
-      runtimeInfo: expect.objectContaining({ model: "claude-opus-4-6" }),
-    }),
-  );
-  expect(events.some((event) => event.type === "thread_started")).toBe(false);
-  adapter.dispatchEvents(events);
-  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(requests).toEqual([
-    expect.objectContaining({
-      source: "provider",
-      fromModel: "sonnet",
-      toModel: "claude-opus-4-6",
-    }),
-  ]);
-  expect(manager.getAgent(agent.id)).toBeNull();
+      runtimeInfo: { model: "claude-opus-5-5" },
+    });
+    const assistant = {
+      type: "assistant",
+      session_id: "streamed",
+      message: { model: "claude-opus-5-5", role: "assistant", content: [] },
+    } as SDKMessage;
+    expect(adapter.translateMessageToEvents(assistant)).toEqual([]);
+    expect(
+      adapter.translateMessageToEvents({ ...init, model: "claude-sonnet-5" } as SDKMessage),
+    ).toEqual([]);
+    adapter.translateMessageToEvents({
+      ...assistant,
+      message: { model: "<synthetic>", role: "assistant", content: [] },
+    } as SDKMessage);
+    adapter.translateMessageToEvents({
+      ...assistant,
+      parent_tool_use_id: "child-tool",
+      message: { model: "claude-sonnet-5", role: "assistant", content: [] },
+    } as SDKMessage);
+    expect(await session.getRuntimeInfo()).toMatchObject({
+      model: "claude-opus-5-5",
+      extra: { runtimeModel: "claude-opus-5-5" },
+    });
+  } finally {
+    await session.close();
+  }
 });

@@ -33,7 +33,7 @@ import {
 import {
   findClaudeModel,
   getClaudeModelsWithSettings,
-  normalizeClaudeRuntimeModelId,
+  resolveObservedClaudeModelId,
   resolveConfiguredClaudeModel,
 } from "./models.js";
 import {
@@ -4130,6 +4130,7 @@ class ClaudeAgentSession implements AgentSession {
         this.appendSidechainResultEvents(message, events);
         break;
       case "assistant": {
+        this.appendEffectiveModelEvent(message.message.model, events);
         const timelineItems = this.mapBlocksToTimeline(message.message.content, {
           suppressAssistantText: options?.suppressAssistantText ?? false,
           suppressReasoning: options?.suppressReasoning ?? false,
@@ -4273,20 +4274,7 @@ class ClaudeAgentSession implements AgentSession {
     events: AgentStreamEvent[],
   ): void {
     if (message.subtype === "init") {
-      const previousModel = this.lastOptionsModel;
       const sessionUpdate = this.handleSystemMessage(message);
-      if (this.lastOptionsModel !== previousModel) {
-        events.push({
-          type: "model_changed",
-          provider: "claude",
-          runtimeInfo: {
-            provider: "claude",
-            sessionId: this.claudeSessionId,
-            model: this.lastOptionsModel,
-            modeId: this.currentMode,
-          },
-        });
-      }
       if (sessionUpdate.notice) {
         events.push({
           type: "timeline",
@@ -4469,11 +4457,35 @@ class ClaudeAgentSession implements AgentSession {
     }
   }
 
+  private appendEffectiveModelEvent(runtimeModel: string, events: AgentStreamEvent[]): void {
+    const model = resolveObservedClaudeModelId(runtimeModel);
+    if (!model) return;
+    const previousModel = this.lastOptionsModel;
+    this.lastOptionsModel = model;
+    this.lastRuntimeModel = runtimeModel;
+    this.cachedRuntimeInfo = null;
+    this.persistence = null;
+    if (model === previousModel) return;
+    events.push({
+      type: "model_changed",
+      provider: "claude",
+      runtimeInfo: {
+        provider: "claude",
+        sessionId: this.claudeSessionId,
+        model,
+        modeId: this.currentMode,
+      },
+    });
+  }
+
   private appendStreamEventEvents(
     message: Extract<SDKMessage, { type: "stream_event" }>,
     events: AgentStreamEvent[],
     options: { suppressAssistantText?: boolean; suppressReasoning?: boolean } | undefined,
   ): void {
+    if (message.event.type === "message_start") {
+      this.appendEffectiveModelEvent(message.event.message.model, events);
+    }
     const usageUpdatedEvent = this.contextUsage.buildStreamUsageEvent(message.event);
     if (usageUpdatedEvent) {
       events.push(usageUpdatedEvent);
@@ -4620,20 +4632,9 @@ class ClaudeAgentSession implements AgentSession {
       this.planResumeMode = this.currentMode;
     }
     this.persistence = null;
-    if (message.model) {
-      const normalizedRuntimeModel = normalizeClaudeRuntimeModelId(message.model);
-      this.logger.debug(
-        { runtimeModel: message.model, normalizedRuntimeModel },
-        "Captured runtime model from SDK init",
-      );
-      if (normalizedRuntimeModel) {
-        this.lastOptionsModel = normalizedRuntimeModel;
-      } else if (!this.lastOptionsModel) {
-        this.lastOptionsModel = this.config.model ?? null;
-      }
-      this.lastRuntimeModel = message.model;
-      this.cachedRuntimeInfo = null;
-    }
+    // Init can report the profile default before the requested model takes effect.
+    // Only assistant frames establish the effective inference model.
+    this.cachedRuntimeInfo = null;
     return { threadStartedSessionId, notice };
   }
 
