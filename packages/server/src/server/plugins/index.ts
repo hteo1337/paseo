@@ -73,6 +73,10 @@ interface PluginRuntimePort {
   startPlugin(pluginId: string, path: string, canPublish: () => boolean): Promise<void>;
   startBuiltinPlugin?(plugin: BuiltinPlugin): Promise<void>;
   stopPluginById(pluginId: string): Promise<boolean>;
+  beginReload?(pluginId: string): void;
+  failReload?(pluginId: string, error: unknown): void;
+  clearReload?(pluginId: string): void;
+  failStart?(pluginId: string, error: unknown): void;
   stopAll(): Promise<void>;
   subscribe(listener: (pluginId: string, error?: string) => void): () => void;
   bindPaseoSessionHost(sessionHost: Parameters<PluginRuntime["bindPaseoSessionHost"]>[0]): void;
@@ -114,6 +118,7 @@ export class PluginService {
     string,
     { kind: "disable" | "remove"; completion: Promise<void> }
   >();
+  private readonly startGenerations = new Map<string, number>();
   private started = false;
   private readonly settingsListeners = new Set<(pluginId: string, settingsId: string) => void>();
 
@@ -513,8 +518,14 @@ export class PluginService {
         throw new Error("Plugins are globally disabled");
       }
       this.errors.delete(pluginId);
-      await this.stopPlugin(pluginId);
-      await this.startExplicit(pluginId, source.path);
+      this.runtime.beginReload?.(pluginId);
+      try {
+        await this.stopPlugin(pluginId);
+        await this.startExplicit(pluginId, source.path);
+      } catch (error) {
+        this.runtime.failReload?.(pluginId, error);
+        throw error;
+      }
       this.notify(pluginId);
       return this.requireItem(pluginId);
     });
@@ -536,6 +547,7 @@ export class PluginService {
   }
 
   async disablePlugin(pluginId: string): Promise<PluginListItem> {
+    this.cancelStart(pluginId);
     const operation = {
       kind: "disable",
       completion: this.patchSource(pluginId, (source) => ({ ...source, enabled: false })),
@@ -558,6 +570,7 @@ export class PluginService {
 
   async removePlugin(pluginId: string): Promise<void> {
     this.requireSource(pluginId);
+    this.cancelStart(pluginId);
     const operation = { kind: "remove", completion: this.removeSource(pluginId) } as const;
     this.pendingOperations.set(pluginId, operation);
     try {
@@ -591,6 +604,7 @@ export class PluginService {
 
   async stopAllPlugins(): Promise<void> {
     this.globalStartsBlocked = true;
+    for (const id of this.startGenerations.keys()) this.cancelStart(id);
     const stopping = this.stopAll();
     await this.enqueue(async () => {
       await stopping;
@@ -601,6 +615,7 @@ export class PluginService {
   private handleGlobalSwitch(enabled: boolean): void {
     if (!enabled) {
       this.globalStartsBlocked = true;
+      for (const id of Object.keys(this.configStore.get().plugins ?? {})) this.cancelStart(id);
       const stopping = this.stopConfiguredPlugins();
       for (const id of Object.keys(this.configStore.get().plugins ?? {})) this.notify(id);
       void this.enqueue(async () => {
@@ -651,17 +666,28 @@ export class PluginService {
     );
   }
 
-  private async startPlugin(
-    pluginId: string,
-    sourcePath: string,
-    publishTurn?: Promise<unknown>,
-  ): Promise<void> {
-    await this.runtime.startPlugin(pluginId, sourcePath, () => this.canPublish(pluginId));
+  private cancelStart(pluginId: string): void {
+    this.startGenerations.set(pluginId, (this.startGenerations.get(pluginId) ?? 0) + 1);
+    this.runtime.clearReload?.(pluginId);
+  }
+
+  private async startPlugin(pluginId: string, sourcePath: string, publishTurn?: Promise<unknown>): Promise<void> {
+    const generation = (this.startGenerations.get(pluginId) ?? 0) + 1;
+    this.startGenerations.set(pluginId, generation);
+    const isCurrent = () =>
+      this.startGenerations.get(pluginId) === generation && this.canPublish(pluginId);
+    await this.runtime.startPlugin(pluginId, sourcePath, isCurrent);
     await publishTurn;
     try {
       await this.publishProviderRegistrations(pluginId, sourcePath);
       this.publishUsageSources(pluginId);
+      if (!this.runtime.catalog().some((plugin) => plugin.id === pluginId)) {
+        throw new Error(`Plugin exited during startup: ${pluginId}`);
+      }
+      if (!isCurrent()) throw new Error(`Plugin start cancelled: ${pluginId}`);
+      this.runtime.clearReload?.(pluginId);
     } catch (error) {
+      if (isCurrent()) this.runtime.failStart?.(pluginId, error);
       try {
         this.removeProviderRegistrations(pluginId);
         this.removeUsageSources(pluginId);
@@ -895,8 +921,9 @@ export class PluginService {
     const shouldActivate =
       current.enabled !== false && this.configStore.get().pluginsEnabled === true;
     if (shouldActivate) {
-      if (isRunning) await this.stopPlugin(pluginId);
+      this.runtime.beginReload?.(pluginId);
       try {
+        if (isRunning) await this.stopPlugin(pluginId);
         await this.startExplicit(pluginId, candidate.directory);
       } catch (error) {
         let recoveryError: unknown;
@@ -907,6 +934,7 @@ export class PluginService {
         } catch (restoreError) {
           recoveryError = restoreError;
         } finally {
+          this.failUnavailableReload(pluginId, recoveryError ?? error, Boolean(recoveryError));
           await managedSources.discard(candidate);
           this.notify(pluginId);
         }
@@ -942,6 +970,12 @@ export class PluginService {
       plugin: await this.requireItem(pluginId),
       ...(warning ? { warning } : {}),
     };
+  }
+
+  private failUnavailableReload(pluginId: string, error: unknown, recoveryFailed: boolean): void {
+    if (recoveryFailed || !this.runtime.catalog().some((plugin) => plugin.id === pluginId)) {
+      this.runtime.failReload?.(pluginId, error);
+    }
   }
 
   private validateCandidate(candidate: ManagedPluginCandidate): Promise<void> {

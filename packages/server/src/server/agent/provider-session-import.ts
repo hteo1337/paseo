@@ -38,6 +38,7 @@ export async function importSessionFromPersistence(input: {
   return {
     session,
     config: storedConfig,
+    persistedModel: input.config?.model ?? null,
     persistence: canonicalImportPersistence(persistence, session),
     timeline: history.timeline,
     providerSubagentEvents: history.providerSubagentEvents,
