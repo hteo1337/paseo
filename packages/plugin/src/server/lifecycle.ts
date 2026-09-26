@@ -90,8 +90,26 @@ export interface PluginSessionOpenRequest {
   readonly labels: Readonly<Record<string, string>>;
   readonly metadata: Readonly<Record<string, JsonValue>>;
   tools: AgentToolDefinition[];
+  model: string | null;
   env: Record<string, string>;
   mcpServers: NonNullable<AgentSessionConfig["mcpServers"]>;
+}
+
+export type PluginSessionOpenedRequest = Pick<
+  PluginSessionOpenRequest,
+  "agentId" | "workspaceId" | "provider" | "cwd" | "reason" | "purpose" | "title" | "model"
+> & {
+  requestedModel: string | null;
+};
+
+export interface PluginSetModelRequest {
+  agentId: string;
+  provider: string;
+  source: "client" | "provider";
+  fromModel: string | null;
+  toModel: string | null;
+  title: string | null;
+  cwd: string;
 }
 
 export type PluginTurnOutcome =
@@ -125,6 +143,8 @@ export interface PluginHookEvents {
 }
 
 export interface PluginHookRequests {
+  "agent.set_model": PluginSetModelRequest;
+  "agent.session_opened": PluginSessionOpenedRequest;
   "worktree.create.before": PluginWorktreeCreateRequest;
   "agent.create.before": {
     config: AgentSessionConfig;
@@ -174,6 +194,12 @@ type HookHandlers = {
   ) => Promise<PluginHookResult<Name>>;
 };
 
+export type PluginBeforeResult<Name extends keyof PluginBeforeRequests> =
+  Name extends "agent.session_open"
+    ? Omit<PluginSessionOpenRequest, "model" | "title"> &
+        Partial<Pick<PluginSessionOpenRequest, "model" | "title">>
+    : PluginBeforeResults[Name];
+
 export interface PluginLifecycleRegistration {
   addHook<Name extends keyof PluginHooks>(name: Name, handler: HookHandlers[Name]): () => void;
   /** @deprecated Use addHook with the renamed hook. Removed after 2027-04-30. */
@@ -190,7 +216,7 @@ export interface PluginLifecycleRegistration {
     handler: (
       input: { request: PluginBeforeRequests[Name] },
       context: PluginHookContext,
-    ) => PluginBeforeResults[Name] | void | Promise<PluginBeforeResults[Name] | void>,
+    ) => PluginBeforeResult<Name> | void | Promise<PluginBeforeResult<Name> | void>,
   ): () => void;
 }
 
@@ -204,6 +230,8 @@ export const pluginHookRegistry = {
   "agent.create.before": { waits: true },
   "agent.create.after": { waits: false },
   "agent.open.before": { waits: true },
+  "agent.set_model": { waits: true },
+  "agent.session_opened": { waits: true },
   "agent.close.after": { waits: false },
   "agent.archive.after": { waits: false },
   "agent.turn.before": { waits: false },
@@ -228,6 +256,8 @@ const legacyRequests = {
   "workspace.create": "workspace.create.before",
   "agent.create": "agent.create.before",
   "agent.session_open": "agent.open.before",
+  "agent.set_model": "agent.set_model",
+  "agent.session_opened": "agent.session_opened",
 } as const;
 export type PluginLifecycleEvents = {
   [Name in keyof typeof legacyEvents]: PluginHookEvents[(typeof legacyEvents)[Name]];
