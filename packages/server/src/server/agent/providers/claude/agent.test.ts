@@ -3500,12 +3500,14 @@ test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider mo
   vi.spyOn(client, "createSession").mockResolvedValue(session);
   const requests: Array<{ source?: string; fromModel?: string | null; toModel?: string | null }> =
     [];
+  const opened: unknown[] = [];
   const manager = new AgentManager({
     clients: { claude: client },
     logger,
     pluginLifecycle: {
       emit: () => {},
       before: async (name: string, request: { source?: string; toModel?: string | null }) => {
+        if (name === "agent.session_opened") opened.push(request);
         if (name === "agent.set_model") {
           requests.push(request);
           if (request.toModel !== "claude-opus-5-5") throw new Error("unexpected model refused");
@@ -3516,6 +3518,9 @@ test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider mo
   });
   const agent = await manager.createAgent(config, undefined, {});
   try {
+    expect(opened).toEqual([
+      expect.objectContaining({ model: null, requestedModel: config.model }),
+    ]);
     const notice = adapter.translateMessageToEvents({
       type: "assistant",
       session_id: "limit-session",
@@ -3541,6 +3546,27 @@ test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider mo
   }
 });
 
+test("Claude runtime info refreshes a cached unknown model after options select Sonnet", async () => {
+  const client = new ClaudeAgentClient({ logger: createTestLogger() });
+  const session = await client.createSession({
+    provider: "claude",
+    cwd: os.tmpdir(),
+    model: "claude-sonnet-5",
+  });
+  const adapter = session as unknown as TestClaudeSession & {
+    buildOptions(): Promise<unknown>;
+    resolveBinary(): Promise<string>;
+  };
+  vi.spyOn(adapter, "resolveBinary").mockResolvedValue("/tmp/claude");
+  try {
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: null });
+    await adapter.buildOptions();
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+  } finally {
+    await session.close();
+  }
+});
+
 test("Claude effective model: streamed switch survives late init and ignores synthetic/child frames", async () => {
   const client = new ClaudeAgentClient({ logger: createTestLogger() });
   const session = await client.createSession({
@@ -3549,7 +3575,11 @@ test("Claude effective model: streamed switch survives late init and ignores syn
     model: "claude-sonnet-5",
   });
   Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
-  const adapter = session as unknown as TestClaudeSession;
+  const adapter = session as unknown as TestClaudeSession & {
+    buildOptions(): Promise<unknown>;
+    resolveBinary(): Promise<string>;
+  };
+  vi.spyOn(adapter, "resolveBinary").mockResolvedValue("/tmp/claude");
   try {
     const init = {
       type: "system",
@@ -3595,6 +3625,8 @@ test("Claude effective model: streamed switch survives late init and ignores syn
       model: "claude-opus-5-5",
       extra: { runtimeModel: "claude-opus-5-5" },
     });
+    await adapter.buildOptions();
+    expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-opus-5-5" });
   } finally {
     await session.close();
   }
