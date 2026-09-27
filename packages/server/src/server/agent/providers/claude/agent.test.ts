@@ -652,6 +652,35 @@ describe("ClaudeAgentSession features", () => {
     return { queryFactory, queryMock, launches };
   }
 
+  test("resume and open do not start the Claude pump before a foreground turn", async () => {
+    const { queryFactory } = createQueryMock();
+    const client = new ClaudeAgentClient({
+      logger,
+      queryFactory,
+      resolveBinary: async () => "/test/claude/bin",
+    });
+    const opened = await client.createSession({ provider: "claude", cwd: process.cwd() });
+    const resumed = await client.resumeSession({
+      provider: "claude",
+      sessionId: "prior-session",
+      metadata: { cwd: process.cwd() },
+    });
+    const events: AgentStreamEvent[] = [];
+    const pump = vi.spyOn(resumed as unknown as { startQueryPump: () => void }, "startQueryPump");
+    const unsubscribe = resumed.subscribe((event) => events.push(event));
+    await Array.fromAsync(resumed.streamHistory());
+    await Promise.resolve();
+    expect(queryFactory).not.toHaveBeenCalled();
+    expect(pump).not.toHaveBeenCalled();
+    expect(events.some((event) => event.type === "turn_started")).toBe(false);
+    await resumed.startTurn("approved prompt");
+    expect(pump).toHaveBeenCalledOnce();
+    expect(queryFactory).toHaveBeenCalledOnce();
+    unsubscribe();
+    await opened.close();
+    await resumed.close();
+  });
+
   test("publishes a resolution when the SDK aborts a permission callback", async () => {
     const { queryFactory } = createQueryMock();
     const session = await new ClaudeAgentClient({

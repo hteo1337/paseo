@@ -494,8 +494,17 @@ describe("ScheduleService", () => {
     expect(steerOrReplace.mock.calls[0]).toEqual([
       agent.id,
       expect.stringContaining(`Schedule fired (id=${schedule.id}, run=`),
-      undefined,
+      { source: "schedule" },
     ]);
+
+    const heartbeat = await service.create({
+      origin: "heartbeat",
+      prompt: "Check heartbeat",
+      cadence: { type: "every", everyMs: 60_000 },
+      target: { type: "agent", agentId: agent.id },
+    });
+    await service.runOnce(heartbeat.id);
+    expect(steerOrReplace.mock.calls[1]?.[2]).toEqual({ source: "heartbeat" });
   });
 
   test("titles scheduled new agents from the schedule prompt", async () => {
@@ -3041,6 +3050,7 @@ describe("ScheduleService", () => {
 
     const agentId = "bbbbbbbb-bbbb-4bbb-8bbb-bbbbbbbbbbbb";
     const first = await service.createOrReplace({
+      origin: "heartbeat",
       name: "babysit-pr PR 1112",
       prompt: "watch the build",
       cadence: { type: "every", everyMs: 60_000 },
@@ -3061,6 +3071,8 @@ describe("ScheduleService", () => {
     });
 
     expect(second.id).toBe(first.id);
+    expect(first.origin).toBe("heartbeat");
+    expect(second.origin).toBeUndefined();
     expect(second.status).toBe("active");
     expect(second.prompt).toBe("watch the build v2");
     expect(second.cadence).toEqual({ type: "cron", expression: "30 9 * * *" });
