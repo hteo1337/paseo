@@ -91,6 +91,7 @@ describe("respondToAgentPermission", () => {
       {
         agentId: "agent-1",
         prompt: "implement the approved plan",
+        options: { source: "other" },
       },
     ]);
     expect(agentManager.replacementRuns).toEqual([]);
@@ -136,6 +137,7 @@ describe("respondToAgentPermission", () => {
       {
         agentId: "agent-1",
         prompt: "continue after approval",
+        options: { source: "other" },
       },
     ]);
   });
