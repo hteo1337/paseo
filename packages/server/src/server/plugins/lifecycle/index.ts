@@ -48,6 +48,7 @@ export const beforeHookNames = [
   "agent.set_model",
   "agent.session_open",
   "agent.session_opened",
+  "agent.turn_start",
   "workspace.create",
 ] as const;
 
@@ -91,6 +92,19 @@ const beforeSchemas = {
       requestedModel: z.string().nullable(),
       model: z.string().nullable(),
       title: z.string().nullable(),
+    })
+    .strict(),
+  "agent.turn_start": z
+    .object({
+      agentId: z.string(),
+      provider: z.string(),
+      model: z.string().nullable(),
+      requestedModel: z.string().nullable(),
+      title: z.string().nullable(),
+      cwd: z.string(),
+      workspaceId: z.string().nullable(),
+      source: z.enum(["prompt", "schedule", "heartbeat", "internal", "other", "autonomous"]),
+      env: z.record(z.string(), z.string()).nullable(),
     })
     .strict(),
   "workspace.create": WorkspaceCreateRequestSchema.omit({ type: true, requestId: true }).strict(),
@@ -212,14 +226,14 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
     output = { model: request.model, title: request.title, ...output };
   }
   const result = validateBeforeRequest(name, output);
-  if (name === "agent.set_model" || name === "agent.session_opened") {
+  if (
+    name === "agent.set_model" ||
+    name === "agent.session_opened" ||
+    name === "agent.turn_start"
+  ) {
     const previous = beforeSchemas[name].parse(input);
     const next = beforeSchemas[name].parse(result);
-    if (
-      Object.keys(previous).some(
-        (key) => previous[key as keyof typeof previous] !== next[key as keyof typeof next],
-      )
-    ) {
+    if (!isDeepStrictEqual(previous, next)) {
       throw new Error(`${name} hooks cannot change the request`);
     }
   }
