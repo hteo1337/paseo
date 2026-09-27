@@ -87,6 +87,20 @@ const worktreeRequestSchema = z.discriminatedUnion("kind", [
 ]);
 
 const beforeSchemas = {
+  "agent.turn_start": z
+    .object({
+      agentId: z.string(),
+      provider: z.string(),
+      model: z.string().nullable(),
+      requestedModel: z.string().nullable(),
+      title: z.string().nullable(),
+      cwd: z.string(),
+      workspaceId: z.string().nullable(),
+      source: z.enum(["prompt", "schedule", "heartbeat", "internal", "other", "autonomous"]),
+      env: z.record(z.string(), z.string()).nullable(),
+    })
+    .strict(),
+
   "agent.session_opened": z
     .object({
       agentId: z.string(),
@@ -256,8 +270,14 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     output = { model: request.model, title: request.title, ...output };
   }
   const result = validateBeforeRequest(name, output);
-  if (name === "agent.set_model" || name === "agent.session_opened") {
-    if (!isDeepStrictEqual(beforeSchemas[name].parse(input), beforeSchemas[name].parse(result))) {
+  if (
+    name === "agent.set_model" ||
+    name === "agent.session_opened" ||
+    name === "agent.turn_start"
+  ) {
+    const previous = beforeSchemas[name].parse(input);
+    const next = beforeSchemas[name].parse(result);
+    if (!isDeepStrictEqual(previous, next)) {
       throw new Error(`${name} hooks cannot change the request`);
     }
   }
