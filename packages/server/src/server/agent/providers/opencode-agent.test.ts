@@ -14,6 +14,9 @@ import {
   translateOpenCodeEvent,
 } from "./opencode-agent.js";
 import { streamSession } from "./test-utils/session-stream-adapter.js";
+import { AgentManager } from "../agent-manager.js";
+import type { AgentClient } from "../agent-sdk-types.js";
+import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import {
   TestOpenCodeClient,
   TestOpenCodeHarness,
@@ -4779,6 +4782,60 @@ describe("OpenCode provider subagent contract", () => {
       await parent.close();
     }
   });
+
+  test.each([
+    { decision: "refuse", message: "opus refused", allowed: false },
+    { decision: "allow", message: null, allowed: true },
+    { decision: "reload", message: "policy plugin is reloading", allowed: false },
+  ])(
+    "manager $decision on OpenCode busy-event autonomous turn",
+    async ({ decision, message, allowed }) => {
+      const { parent, openCode } = await createParentSession(`ses_autonomous_${decision}`);
+      const requests: unknown[] = [];
+      const lifecycle = {
+        emit: () => {},
+        before: async (name: string, request: unknown) => {
+          if (name === "agent.turn_start") {
+            requests.push(request);
+            if (message) throw new Error(message);
+          }
+          return request;
+        },
+      } as PluginLifecycle;
+      const client = {
+        provider: "opencode",
+        capabilities: parent.capabilities,
+        isAvailable: async () => true,
+        fetchCatalog: async () => ({ models: [], modes: [] }),
+        createSession: async () => parent,
+        resumeSession: async () => parent,
+      } as AgentClient;
+      const manager = new AgentManager({
+        clients: { opencode: client },
+        pluginLifecycle: lifecycle,
+        logger: createTestLogger(),
+      });
+      const agent = await manager.createAgent(
+        { provider: "opencode", cwd: process.cwd() },
+        undefined,
+        {},
+      );
+      try {
+        openCode.emitEvent({
+          type: "session.status",
+          properties: { sessionID: `ses_autonomous_${decision}`, status: { type: "busy" } },
+        });
+        await vi.waitFor(() => {
+          expect(requests).toEqual([expect.objectContaining({ source: "autonomous", env: null })]);
+          expect(openCode.calls.sessionAbort).toHaveLength(allowed ? 0 : 1);
+          expect(manager.getAgent(agent.id)?.lifecycle).toBe(allowed ? "running" : "idle");
+        });
+        expect(manager.getAgent(agent.id)?.lastError).toBeUndefined();
+      } finally {
+        await manager.closeAgent(agent.id);
+      }
+    },
+  );
 
   test("does not mistake OpenCode session metadata for an autonomous turn", async () => {
     const { parent, openCode } = await createParentSession("ses_parent_metadata");

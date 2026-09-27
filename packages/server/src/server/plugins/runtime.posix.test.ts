@@ -249,6 +249,31 @@ afterEach(async () => {
 });
 
 describe("PluginRuntime", () => {
+  it("turn_start remains fail-closed while a registered policy reloads", async () => {
+    const source = `export default function(server) { server.before("agent.turn_start", ({ request }) => request); return () => {}; }`;
+    const directory = await createPlugin("policy", source);
+    const runtime = createTestRuntime();
+    const request = {
+      agentId: "agent",
+      provider: "claude",
+      model: "opus",
+      requestedModel: "opus",
+      title: "Fix x",
+      cwd: "/project",
+      workspaceId: null,
+      source: "autonomous" as const,
+      env: null,
+    };
+    await runtime.startPlugin("policy", directory);
+    runtime.beginReload("policy");
+    await runtime.stopPluginById("policy");
+    runtime.failReload("policy", new Error("reload broke"));
+    await expect(runtime.before("agent.turn_start", request)).rejects.toThrow("reload broke");
+    await runtime.startPlugin("policy", directory);
+    runtime.clearReload("policy");
+    await expect(runtime.before("agent.turn_start", request)).resolves.toEqual(request);
+    await runtime.stopAll();
+  });
   it.each(["process.exit(17)", "throw new Error('startup exploded')"])(
     "startup barrier: register then %s refuses until successful start",
     async (failure) => {
