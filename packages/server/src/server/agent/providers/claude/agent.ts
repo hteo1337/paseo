@@ -4141,7 +4141,7 @@ class ClaudeAgentSession implements AgentSession {
         this.appendSidechainResultEvents(message, events);
         break;
       case "assistant": {
-        this.appendEffectiveModelEvent(message.message.model, message.message.id, events);
+        this.appendAssistantEffectiveModelEvent(message, events);
         const timelineItems = this.mapBlocksToTimeline(message.message.content, {
           suppressAssistantText: options?.suppressAssistantText ?? false,
           suppressReasoning: options?.suppressReasoning ?? false,
@@ -4466,6 +4466,20 @@ class ClaudeAgentSession implements AgentSession {
       }
       events.push({ type: "timeline", item, provider: "claude" });
     }
+  }
+
+  private appendAssistantEffectiveModelEvent(
+    message: Extract<SDKMessage, { type: "assistant" }>,
+    events: AgentStreamEvent[],
+  ): void {
+    if (
+      message.error ||
+      ("isApiErrorMessage" in message && message.isApiErrorMessage === true) ||
+      ("isSynthetic" in message && message.isSynthetic === true)
+    ) {
+      return;
+    }
+    this.appendEffectiveModelEvent(message.message.model, message.message.id, events);
   }
 
   private appendEffectiveModelEvent(

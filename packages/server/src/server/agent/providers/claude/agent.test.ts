@@ -3545,6 +3545,93 @@ test("Claude effective model: streamed switch survives late init and ignores syn
   }
 });
 
+test.each([
+  { name: "synthetic limit notice", model: "<synthetic>", error: undefined, flags: {} },
+  {
+    name: "rate-limit error with CLI default",
+    model: "claude-opus-5-5",
+    error: "rate_limit",
+    flags: {},
+  },
+  {
+    name: "API-error frame with CLI default",
+    model: "claude-opus-5-5",
+    error: undefined,
+    flags: { isApiErrorMessage: true },
+  },
+  {
+    name: "synthetic frame with CLI default",
+    model: "claude-opus-5-5",
+    error: undefined,
+    flags: { isSynthetic: true },
+  },
+])(
+  "Claude effective model: $name does not replace a Sonnet request",
+  async ({ model, error, flags }) => {
+    const client = new ClaudeAgentClient({ logger: createTestLogger() });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    });
+    Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
+    const adapter = session as unknown as TestClaudeSession;
+    try {
+      const events = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "limit-turn",
+        error,
+        ...flags,
+        message: {
+          id: "limit-notice",
+          model,
+          role: "assistant",
+          content: [{ type: "text", text: "You have hit your weekly limit" }],
+        },
+      } as SDKMessage);
+      expect(events.filter((event) => event.type === "model_changed")).toEqual([]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
+    } finally {
+      await session.close();
+    }
+  },
+);
+
+test.each([
+  { model: "claude-sonnet-5", previousModel: null },
+  { model: "claude-opus-5-5", previousModel: "claude-sonnet-5" },
+])(
+  "Claude effective model: real $model assistant frame reports inference",
+  async ({ model, previousModel }) => {
+    const client = new ClaudeAgentClient({ logger: createTestLogger() });
+    const session = await client.createSession({
+      provider: "claude",
+      cwd: os.tmpdir(),
+      model: "claude-sonnet-5",
+    });
+    Object.assign(session, { lastOptionsModel: previousModel });
+    const adapter = session as unknown as TestClaudeSession;
+    try {
+      const events = adapter.translateMessageToEvents({
+        type: "assistant",
+        session_id: "inference-turn",
+        message: {
+          id: "real-inference",
+          model,
+          role: "assistant",
+          content: [{ type: "text", text: "Real response" }],
+        },
+      } as SDKMessage);
+      expect(events.filter((event) => event.type === "model_changed")).toMatchObject([
+        { type: "model_changed", runtimeInfo: { model } },
+      ]);
+      expect(await session.getRuntimeInfo()).toMatchObject({ model });
+    } finally {
+      await session.close();
+    }
+  },
+);
+
 test("Claude effective model: a resumed redelivery of an already-persisted Opus frame is not a switch", async () => {
   const client = new ClaudeAgentClient({ logger: createTestLogger() });
   const session = await client.createSession({
