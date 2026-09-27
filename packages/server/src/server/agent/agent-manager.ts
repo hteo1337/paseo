@@ -7,7 +7,11 @@ import { continuesAssistantMessage, projectTimelineRows } from "./timeline-proje
 import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import { applyRecordPatch } from "../record-patch.js";
-import type { PluginSessionOpenRequest, PluginSessionOpenedRequest } from "@getpaseo/plugin/server";
+import type {
+  PluginSessionOpenRequest,
+  PluginSessionOpenedRequest,
+  PluginTurnStartRequest,
+} from "@getpaseo/plugin/server";
 import { randomUUID } from "node:crypto";
 import { basename, resolve } from "node:path";
 import { stat } from "node:fs/promises";
@@ -96,6 +100,7 @@ import { limitAgentTimelineItemContent } from "./agent-timeline-content.js";
 import {
   AgentRunState,
   type ForegroundPromptStart,
+  type AutonomousAgentRun,
   type ForegroundTurnWaiter,
   type PendingForegroundRun,
 } from "./agent-run-state.js";
@@ -161,6 +166,8 @@ export class AgentManagerShuttingDownError extends Error {
 
 type RunCancellationCause = "reload" | "replace" | "rewind" | "stop";
 class ProviderModelRefusal extends Error {}
+
+class TurnStartRefusal extends Error {}
 
 function policyErrorMessage(error: unknown): string {
   return error instanceof Error ? error.message : String(error);
@@ -494,6 +501,16 @@ type ActiveTurnTerminalDisposition = "closed_current" | "stale" | "untracked";
 
 interface HandleStreamEventOptions {
   fromHistory?: boolean;
+}
+
+interface AutonomousTurnPhase {
+  session: AgentSession;
+  state: "judging" | "cancel_pending" | "closed";
+  buffered: AgentStreamEvent[];
+  settled: Promise<void>;
+  settle: () => void;
+  closed: Promise<void>;
+  close: () => void;
 }
 
 interface ManagedAgentBase {
@@ -907,6 +924,12 @@ export class AgentManager {
   >();
   private readonly collectingRuntimes = new Set<string>();
   private readonly refusedProviderSessions = new WeakSet<AgentSession>();
+  private readonly approvedClaudeSessions = new WeakSet<AgentSession>();
+  private readonly refusedAutonomousTurns = new Map<
+    string,
+    { session: AgentSession; turnIds: Set<string> }
+  >();
+  private readonly autonomousTurnPhases = new Map<string, AutonomousTurnPhase>();
   private readonly lifecycleMutationTails = new Map<string, Promise<void>>();
   private readonly pendingCancellations = new Map<string, Promise<unknown>>();
   private readonly agentStreamCoalescer: AgentStreamCoalescer;
@@ -919,6 +942,7 @@ export class AgentManager {
   private paseoToolsEnabled = true;
   private paseoToolCatalogFactory: PaseoToolCatalogFactory | null = null;
   private readonly paseoToolPolicies = new Map<string, ProviderPaseoToolsPolicy | undefined>();
+  private readonly createEnvOverrides = new Map<string, Record<string, string>>();
   private readonly resolvePaseoToolPolicy: (
     provider: AgentProvider,
   ) => ProviderPaseoToolsPolicy | undefined;
@@ -1662,10 +1686,9 @@ export class AgentManager {
         model: storedConfig.model ?? null,
         title: storedConfig.title ?? options.initialTitle ?? null,
         background: options.background,
-        labels: options.labels ?? {},
         metadata: options.metadata ?? {},
-      },
         labels: options.labels ?? {},
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const createOptions = this.buildCreateSessionOptions(options);
@@ -1688,18 +1711,25 @@ export class AgentManager {
       await this.closeUnregisteredSession(session);
       throw error;
     }
-    const agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
-      launchedOptions,
-      labels: options.labels,
-      metadata: options.metadata,
-      initialTitle: options.initialTitle,
-      workspaceId: options.workspaceId,
-      owner: options.owner,
-      background: options.background,
-      launchEnv: options.env ? { ...options.env } : undefined,
-      historyPrimed: true,
-      initialRuntimeInfo: openedInfo,
-    });
+    if (options.env) this.createEnvOverrides.set(resolvedAgentId, { ...options.env });
+    let agent: ManagedAgent;
+    try {
+      agent = await this.registerSession(session, storedConfig, resolvedAgentId, {
+        launchedOptions,
+        metadata: options.metadata,
+        background: options.background,
+        labels: options.labels,
+        initialTitle: options.initialTitle,
+        workspaceId: options.workspaceId,
+        owner: options.owner,
+        launchEnv: options.env ? { ...options.env } : undefined,
+        historyPrimed: true,
+        initialRuntimeInfo: openedInfo,
+      });
+    } catch (error) {
+      this.createEnvOverrides.delete(resolvedAgentId);
+      throw error;
+    }
     if (!agent.internal) {
       this.pluginLifecycle?.emit("agent.create.after", {
         agent: describeHookAgent({ ...agent, title: agent.config.title }),
@@ -1879,6 +1909,7 @@ export class AgentManager {
   }): Promise<ManagedAgent> {
     this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(this.idFactory(), "importProviderSession");
+    this.createEnvOverrides.delete(resolvedAgentId);
     this.requireEnabledProvider(input.provider);
 
     const client = await this.requireAvailableClient({ provider: input.provider });
@@ -1907,8 +1938,8 @@ export class AgentManager {
         workspaceId: input.workspaceId,
         model: null,
         title: null,
-      },
         labels: input.labels ?? {},
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     const launchedOptions = this.launchOptionsFor({ client, own: storedConfig.providerOptions });
@@ -2033,10 +2064,9 @@ export class AgentManager {
         model: nullableHookValue(storedConfig.model),
         title,
         background: existing.background,
-        labels: existing.labels,
         metadata: existing.metadata,
-      },
         labels: existing.labels,
+      },
     );
     const providerLaunchConfig = this.resolveProviderLaunchConfig(launchConfig, launchContext);
     if (
@@ -2331,6 +2361,8 @@ export class AgentManager {
       },
       "agent.manager.close.start",
     );
+    if (this.autonomousTurnPhases.has(agentId)) options?.onBeforeClose?.();
+    this.closeAutonomousTurnPhase(agentId);
     await this.drainSessionEvents(agentId);
     if (canClose && !canClose()) return false;
     // Runs synchronously, with no await between it and session.close(), so a
@@ -3383,6 +3415,26 @@ export class AgentManager {
     }
     try {
       this.assertSessionStillActive(agent);
+      if (this.autonomousTurnPhases.has(agentId)) {
+        await this.waitForAutonomousTurnSettlement(agent);
+        this.assertSessionStillActive(agent);
+      }
+      if (this.pluginLifecycle) {
+        try {
+          await this.pluginLifecycle.before(
+            "agent.turn_start",
+            await this.buildTurnStartRequest(
+              agent,
+              options?.source ?? (agent.internal ? "internal" : "prompt"),
+            ),
+          );
+        } catch (error) {
+          throw new TurnStartRefusal(policyErrorMessage(error));
+        }
+      }
+      this.assertSessionStillActive(agent);
+      pendingRun.resolveAdmission({ approved: true });
+      if (agent.provider === "claude") this.approvedClaudeSessions.add(agent.session);
       const result = await agent.session.startTurn(prompt, options);
       if (this.refusedProviderSessions.has(agent.session) || this.agents.get(agent.id) !== agent) {
         await this.interruptSession(agent.session, agent.id);
@@ -3393,6 +3445,11 @@ export class AgentManager {
       }
       return result.turnId;
     } catch (error) {
+      pendingRun.resolveAdmission(
+        error instanceof TurnStartRefusal
+          ? { approved: false, message: error.message }
+          : { approved: true },
+      );
       if (error instanceof AgentTurnStartCanceledError) {
         if (!pendingRun.settled) {
           if (options?.clientMessageId) {
@@ -3413,14 +3470,14 @@ export class AgentManager {
       if (pendingRun.settled) {
         throw error;
       }
-      if (isStaleProviderSessionError(error)) {
+      if (isStaleProviderSessionError(error) || error instanceof TurnStartRefusal) {
         this.runs.settleForegroundStart(pendingRun, {
           status: "failed",
           error: error.message,
-          stale: true,
+          stale: isStaleProviderSessionError(error),
         });
         agent.pendingReplacement = false;
-        if (!agent.activeForegroundTurnId) agent.lifecycle = "idle";
+        if (!agent.activeForegroundTurnId && agent.lifecycle !== "error") agent.lifecycle = "idle";
         this.runs.settleForegroundRun(agentId, pendingRun.token);
         throw error;
       }
@@ -3522,6 +3579,115 @@ export class AgentManager {
     yield* this.streamAgent(agentId, prompt, options, promptStart);
   }
 
+  private async waitForAutonomousTurnSettlement(
+    agent: ActiveManagedAgent,
+    expectedPhase?: AutonomousTurnPhase,
+  ): Promise<void> {
+    this.assertSessionStillActive(agent);
+    const phase = expectedPhase ?? this.autonomousTurnPhases.get(agent.id);
+    if (!phase || phase.session !== agent.session) return;
+    const settlement = await this.waitWithTimeout({
+      operation: phase.settled,
+      timeoutMs: this.rescueTimeouts.interruptSessionMs,
+    });
+    if (settlement === "completed") return;
+    const message = "Timed out waiting for refused turn cancellation";
+    this.refusedProviderSessions.add(agent.session);
+    agent.lifecycle = "error";
+    agent.lastError = message;
+    this.emitState(agent);
+    this.closeAutonomousTurnPhase(agent.id);
+    await this.closeReloadedSession(agent.session, agent.id);
+    throw new TurnStartRefusal(message);
+  }
+
+  private async createForegroundRunAfterAutonomous(
+    agent: ActiveManagedAgent,
+    phase: AutonomousTurnPhase | undefined,
+    resolveAdmission: PendingForegroundRun["resolveAdmission"],
+  ): Promise<PendingForegroundRun> {
+    try {
+      await this.waitForAutonomousTurnSettlement(agent, phase);
+      await this.drainSessionEvents(agent.id);
+      const activeRun = this.runs.getRun(agent.id);
+      if (activeRun?.kind === "autonomous") {
+        await this.waitForAutonomousRunOrInterrupt(agent, activeRun);
+      }
+      this.assertSessionStillActive(agent);
+      if (this.autonomousTurnPhases.has(agent.id) || this.runs.hasRun(agent.id)) {
+        throw new Error(`Agent ${agent.id} already has an active run`);
+      }
+      const pendingRun = this.runs.createPendingRun(agent.id);
+      void pendingRun.admission.then(resolveAdmission);
+      return pendingRun;
+    } catch (error) {
+      resolveAdmission({ approved: false, message: policyErrorMessage(error) });
+      throw error;
+    }
+  }
+
+  private async waitForAutonomousRunOrInterrupt(
+    agent: ActiveManagedAgent,
+    run: AutonomousAgentRun,
+  ): Promise<void> {
+    const settlement = await this.waitWithTimeout({
+      operation: run.settledPromise,
+      timeoutMs: this.rescueTimeouts.interruptSessionMs,
+    });
+    if (settlement === "completed") return;
+    const acknowledged = await this.interruptSession(agent.session, agent.id);
+    if (!acknowledged) {
+      const message = "Unable to interrupt timed-out autonomous turn";
+      await this.closeUnstoppableAutonomousTurn(agent, message);
+      throw new TurnStartRefusal(message);
+    }
+    this.assertSessionStillActive(agent);
+    if (this.runs.getRun(agent.id) !== run || run.settled) return;
+    await this.dispatchSessionEvent(agent, {
+      type: "turn_canceled",
+      provider: agent.provider,
+      reason: "interrupted",
+      turnId: run.turnId ?? undefined,
+    });
+  }
+
+  private async closeUnstoppableAutonomousTurn(
+    agent: ActiveManagedAgent,
+    message: string,
+  ): Promise<void> {
+    this.refusedProviderSessions.add(agent.session);
+    agent.lifecycle = "error";
+    agent.lastError = message;
+    this.emitState(agent);
+    try {
+      await this.closeReloadedSession(agent.session, agent.id);
+    } catch (error) {
+      this.logger.error({ err: error, agentId: agent.id }, "Failed to close autonomous session");
+    }
+  }
+
+  private getCreateEnvOverrides(agentId: string): Record<string, string> | null {
+    const env = this.createEnvOverrides.get(agentId);
+    return env ? { ...env } : null;
+  }
+
+  private async buildTurnStartRequest(
+    agent: ActiveManagedAgent,
+    source: PluginTurnStartRequest["source"],
+  ): Promise<PluginTurnStartRequest> {
+    return {
+      agentId: agent.id,
+      provider: agent.provider,
+      model: agent.runtimeInfo?.model ?? null,
+      requestedModel: agent.config.model ?? null,
+      title: await this.resolvePolicyTitle(agent.id, agent.config.title),
+      cwd: agent.cwd,
+      workspaceId: agent.workspaceId ?? null,
+      source,
+      env: this.getCreateEnvOverrides(agent.id),
+    };
+  }
+
   holdNewRunsForArchive(workspaceId: string, root: string): () => void {
     const canonicalRoot = normalizePathForIdentity(root);
     const matches = (agent: Pick<ManagedAgent, "workspaceId" | "cwd">): boolean =>
@@ -3568,7 +3734,11 @@ export class AgentManager {
       },
       "agent.manager.stream.request",
     );
-    if (existingAgent.activeForegroundTurnId || this.runs.hasRun(agentId)) {
+    const activeAutonomousRun = this.runs.getRun(agentId)?.kind === "autonomous";
+    if (
+      existingAgent.activeForegroundTurnId ||
+      (this.runs.hasRun(agentId) && !activeAutonomousRun)
+    ) {
       this.logger.trace(
         {
           agentId,
@@ -3587,12 +3757,26 @@ export class AgentManager {
     const isReplacement = agent.pendingReplacement;
     agent.lastError = undefined;
 
-    const pendingRun = this.runs.createPendingRun(agentId);
-    promptStart?.bind(pendingRun);
+    const phaseAtRequest = this.autonomousTurnPhases.get(agentId);
+    const waitForAutonomous = Boolean(phaseAtRequest || activeAutonomousRun);
+    const initialPendingRun = waitForAutonomous ? null : this.runs.createPendingRun(agentId);
+    let resolveDeferredAdmission: PendingForegroundRun["resolveAdmission"] | null = null;
+    const deferredAdmission = waitForAutonomous
+      ? new Promise<{ approved: true } | { approved: false; message: string }>((resolvePromise) => {
+          resolveDeferredAdmission = resolvePromise;
+        })
+      : null;
 
     const streamForwarder = async function* streamForwarder(this: AgentManager) {
       let turnId: string | null;
       let turnStream: ReturnType<AgentRunState["createTurnStream"]> | null = null;
+      const pendingRun =
+        initialPendingRun ??
+        (await this.createForegroundRunAfterAutonomous(
+          agent,
+          phaseAtRequest,
+          resolveDeferredAdmission!,
+        ));
       turnId = await this.startPendingForegroundTurn({
         agent,
         agentId,
@@ -3693,7 +3877,9 @@ export class AgentManager {
       }
     }.call(this);
 
-    return streamForwarder;
+    return Object.assign(streamForwarder, {
+      turnAdmission: initialPendingRun?.admission ?? deferredAdmission,
+    });
   }
 
   private finalizeForegroundTurn(agent: ActiveManagedAgent, turnId?: string): void {
@@ -4394,6 +4580,7 @@ export class AgentManager {
   }
 
   async deleteAgentState(agentId: string): Promise<void> {
+    this.createEnvOverrides.delete(agentId);
     this.discardRetainedAgentState(agentId);
     await this.deleteCommittedTimeline(agentId);
   }
@@ -4733,17 +4920,7 @@ export class AgentManager {
       registered = true;
       // Initialize previousStatus to track transitions
       this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
-      if (session.initialTimeline?.length) {
-        if (!managed.historyPrimed) {
-          // Legacy/imported chats need their existing history before startup rows.
-          await this.primeTimelineFromLegacyProviderHistory(managed, false, startupHistory);
-        } else {
-          for (const entry of buildImportedTimelineRows(session.initialTimeline)) {
-            this.recordTimeline(managed.id, entry.item, { timestamp: entry.timestamp });
-          }
-        }
-        this.refreshSessionPersistence(managed);
-      }
+      await this.recordStartupTimeline(managed, session, startupHistory);
       await this.refreshRuntimeInfo(managed, { emit: false });
       this.assertAgentRegistrationActive(managed);
       await this.persistSnapshot(managed, {
@@ -4771,23 +4948,50 @@ export class AgentManager {
       this.assertAgentRegistrationActive(managed);
       return { ...managed };
     } catch (error) {
-      if (registered && error instanceof ProviderModelRefusal) {
-        const active = this.agents.get(agentId);
-        if (active) this.prepareAgentForClosure(active, error.message);
-        await this.closeUnregisteredSession(session);
-        if (previousRecord) {
-          await this.registry?.upsert({
-            ...previousRecord,
-            lastStatus: "error",
-            lastError: error.message,
-          });
-        } else {
-          await this.registry?.remove(agentId);
-        }
-      } else if (!registered) {
-        await this.closeUnregisteredSession(session);
-      }
+      await this.handleRegistrationFailure(error, registered, session, agentId, previousRecord);
       throw error;
+    }
+  }
+
+  private async recordStartupTimeline(
+    managed: ActiveManagedAgent,
+    session: AgentSession,
+    startupHistory: AgentStreamEvent[],
+  ): Promise<void> {
+    if (!session.initialTimeline?.length) return;
+    if (!managed.historyPrimed) {
+      // Legacy/imported chats need their existing history before startup rows.
+      await this.primeTimelineFromLegacyProviderHistory(managed, false, startupHistory);
+    } else {
+      for (const entry of buildImportedTimelineRows(session.initialTimeline)) {
+        this.recordTimeline(managed.id, entry.item, { timestamp: entry.timestamp });
+      }
+    }
+    this.refreshSessionPersistence(managed);
+  }
+
+  private async handleRegistrationFailure(
+    error: unknown,
+    registered: boolean,
+    session: AgentSession,
+    agentId: string,
+    previousRecord: StoredAgentRecord | null,
+  ): Promise<void> {
+    if (registered && error instanceof ProviderModelRefusal) {
+      const active = this.agents.get(agentId);
+      if (active) this.prepareAgentForClosure(active, error.message);
+      await this.closeUnregisteredSession(session);
+      if (previousRecord) {
+        await this.registry?.upsert({
+          ...previousRecord,
+          lastStatus: "error",
+          lastError: error.message,
+        });
+      } else {
+        await this.registry?.remove(agentId);
+      }
+    } else if (!registered) {
+      await this.closeUnregisteredSession(session);
     }
   }
 
@@ -4964,6 +5168,8 @@ export class AgentManager {
     cancelReason: string,
   ): ManagedAgentClosed {
     this.agentStreamCoalescer.flushAndDiscard(agent.id);
+    this.closeAutonomousTurnPhase(agent.id);
+    this.refusedAutonomousTurns.delete(agent.id);
     this.agents.delete(agent.id);
     this.previousStatuses.delete(agent.id);
     if (agent.unsubscribeSession) {
@@ -5023,6 +5229,76 @@ export class AgentManager {
     agent.unsubscribeSession = unsubscribe;
   }
 
+  private createAutonomousTurnPhase(agent: ActiveManagedAgent): AutonomousTurnPhase {
+    let settle = () => {};
+    let close = () => {};
+    const settled = new Promise<void>((resolvePromise) => {
+      settle = resolvePromise;
+    });
+    const closed = new Promise<void>((resolvePromise) => {
+      close = resolvePromise;
+    });
+    const phase: AutonomousTurnPhase = {
+      session: agent.session,
+      state: "judging",
+      buffered: [],
+      settled,
+      settle,
+      closed,
+      close,
+    };
+    this.autonomousTurnPhases.set(agent.id, phase);
+    return phase;
+  }
+
+  private closeAutonomousTurnPhase(agentId: string): void {
+    const phase = this.autonomousTurnPhases.get(agentId);
+    if (!phase) return;
+    phase.state = "closed";
+    phase.buffered.length = 0;
+    phase.close();
+    phase.settle();
+    this.autonomousTurnPhases.delete(agentId);
+  }
+
+  private settleAutonomousTurnPhase(agentId: string, phase: AutonomousTurnPhase): void {
+    if (this.autonomousTurnPhases.get(agentId) !== phase) return;
+    phase.buffered.length = 0;
+    phase.settle();
+    this.autonomousTurnPhases.delete(agentId);
+  }
+
+  private captureAutonomousTurnEvent(
+    agentId: string,
+    agent: ActiveManagedAgent | undefined,
+    event: AgentStreamEvent,
+  ): boolean {
+    const phase = this.autonomousTurnPhases.get(agentId);
+    if (!phase || phase.session !== agent?.session) return false;
+    if (phase.state === "judging") {
+      phase.buffered.push(event);
+      return true;
+    }
+    if (!this.isAutonomousTurnPhaseEvent(event)) return false;
+    if (event.type === "turn_started" && event.turnId) {
+      this.refusedAutonomousTurns.get(agentId)?.turnIds.add(event.turnId);
+    }
+    return true;
+  }
+
+  private shouldJudgeAutonomousStart(
+    agentId: string,
+    agent: ActiveManagedAgent | undefined,
+    event: AgentStreamEvent,
+  ): boolean {
+    if (event.type !== "turn_started" || !agent || !this.pluginLifecycle) return false;
+    if (agent.activeForegroundTurnId) return false;
+    if (agent.activeTurnId === event.turnId && this.runs.getRun(agentId)?.kind === "autonomous") {
+      return false;
+    }
+    return agent.provider !== "claude" || !this.approvedClaudeSessions.has(agent.session);
+  }
+
   private enqueueSessionEvent(agentId: string, event: AgentStreamEvent): void {
     this.logger.trace(
       {
@@ -5034,6 +5310,8 @@ export class AgentManager {
       },
       "agent.manager.enqueue",
     );
+    const agent = this.agents.get(agentId);
+    if (this.captureAutonomousTurnEvent(agentId, agent, event)) return;
     const steerBarrier = this.steerEventBarriers.get(agentId);
     if (steerBarrier) {
       steerBarrier.events.push(event);
@@ -5044,6 +5322,13 @@ export class AgentManager {
       pendingRun.stagedEvents.push(event);
       return;
     }
+    if (agent && this.shouldJudgeAutonomousStart(agentId, agent, event)) {
+      this.createAutonomousTurnPhase(agent);
+    }
+    this.queueSessionEvent(agentId, event);
+  }
+
+  private queueSessionEvent(agentId: string, event: AgentStreamEvent): void {
     if (event.type === "turn_started") {
       this.pendingProviderTurnStarts.set(
         agentId,
@@ -5134,7 +5419,9 @@ export class AgentManager {
     if (event.type === "timeline" && event.item.type === "notification") {
       event = attachManagedTurnIdentity(agent, event, false).event;
     }
-    const turnId = getAgentStreamEventTurnId(event);
+    const turnId =
+      getAgentStreamEventTurnId(event) ??
+      (event.type === "turn_completed" ? (agent.activeForegroundTurnId ?? undefined) : undefined);
     const matchingWaiters = this.runs.getMatchingWaiters(agent, turnId);
     this.logger.trace(
       {
@@ -5282,9 +5569,9 @@ export class AgentManager {
       newInfo.modeId !== agent.runtimeInfo?.modeId;
     agent.runtimeInfo = newInfo;
     if (!agent.persistence && newInfo.sessionId) {
-      agent.persistence = attachPersistenceCwd(
+      agent.persistence = normalizePersistenceForConfig(
         { provider: agent.provider, sessionId: newInfo.sessionId },
-        agent.cwd,
+        agent.config,
       );
     }
     if (changed && options?.emit !== false) this.emitState(agent);
@@ -5543,12 +5830,14 @@ export class AgentManager {
     event: AgentStreamEvent,
     options?: HandleStreamEventOptions,
   ): Promise<boolean> {
-    if (this.refusedProviderSessions.has(agent.session)) return false;
     event = limitAgentStreamEventContent(event);
     const identified = attachManagedTurnIdentity(agent, event, options?.fromHistory === true);
     event = identified.event;
     const eventTurnId = identified.turnId;
     const isForegroundEvent = agent.activeForegroundTurnId === eventTurnId;
+    if (!(await this.allowProviderEvent(agent, event, eventTurnId, isForegroundEvent, options))) {
+      return false;
+    }
     this.traceHandleStreamEventStart(agent, event, eventTurnId, isForegroundEvent);
     if (
       eventTurnId &&
@@ -5613,6 +5902,175 @@ export class AgentManager {
     this.traceHandleStreamEventEnd(agent, event, eventTurnId, flags);
 
     return flags.shouldNotifyWaiters;
+  }
+
+  private async allowProviderEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    turnId: string | undefined,
+    isForegroundEvent: boolean,
+    options?: HandleStreamEventOptions,
+  ): Promise<boolean> {
+    if (this.refusedProviderSessions.has(agent.session)) return false;
+    if (this.suppressRefusedAutonomousEvent(agent, event, turnId)) return false;
+    if (
+      event.type !== "turn_started" ||
+      options?.fromHistory ||
+      isForegroundEvent ||
+      (agent.activeTurnId === turnId && this.runs.getRun(agent.id)?.kind === "autonomous")
+    ) {
+      return true;
+    }
+    return this.authorizeAutonomousTurn(agent, turnId);
+  }
+
+  private suppressRefusedAutonomousEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    turnId: string | undefined,
+  ): boolean {
+    const refused = this.refusedAutonomousTurns.get(agent.id);
+    if (!refused || refused.session !== agent.session) return false;
+    if (turnId !== undefined && !refused.turnIds.has(turnId)) return false;
+    if (turnId === undefined) return false;
+    if (
+      event.type !== "turn_started" &&
+      event.type !== "turn_completed" &&
+      event.type !== "turn_failed" &&
+      event.type !== "turn_canceled" &&
+      event.type !== "timeline" &&
+      event.type !== "usage_updated" &&
+      event.type !== "permission_requested" &&
+      event.type !== "permission_resolved"
+    ) {
+      return false;
+    }
+    return true;
+  }
+
+  private isAutonomousTurnPhaseEvent(event: AgentStreamEvent): boolean {
+    return (
+      event.type === "turn_started" ||
+      event.type === "turn_completed" ||
+      event.type === "turn_failed" ||
+      event.type === "turn_canceled" ||
+      event.type === "timeline" ||
+      event.type === "usage_updated" ||
+      event.type === "permission_requested" ||
+      event.type === "permission_resolved"
+    );
+  }
+
+  private async authorizeAutonomousTurn(
+    agent: ActiveManagedAgent,
+    turnId: string | undefined,
+  ): Promise<boolean> {
+    const phase = this.autonomousTurnPhases.get(agent.id);
+    if (agent.provider === "claude" && this.approvedClaudeSessions.has(agent.session)) return true;
+    if (!this.pluginLifecycle) return true;
+    if (!agent.activeForegroundTurnId) {
+      agent.lifecycle = "running";
+      this.emitState(agent);
+    }
+    try {
+      if (!(await this.judgeAutonomousTurn(agent, phase))) return false;
+      if (phase) this.releaseAutonomousTurnPhase(agent.id, phase);
+      return true;
+    } catch (error) {
+      if (phase?.state === "closed") return false;
+      this.refuseAutonomousTurn(agent, phase, turnId, policyErrorMessage(error));
+      return false;
+    }
+  }
+
+  private async judgeAutonomousTurn(
+    agent: ActiveManagedAgent,
+    phase: AutonomousTurnPhase | undefined,
+  ): Promise<boolean> {
+    const lifecycle = this.pluginLifecycle;
+    if (!lifecycle) return true;
+    const judgment = (async () =>
+      lifecycle.before(
+        "agent.turn_start",
+        await this.buildTurnStartRequest(agent, "autonomous"),
+      ))();
+    if (!phase) {
+      await judgment;
+      return true;
+    }
+    const result = await Promise.race([
+      judgment.then(() => "allowed" as const),
+      phase.closed.then(() => "closed" as const),
+    ]);
+    return result === "allowed" && phase.state !== "closed";
+  }
+
+  private releaseAutonomousTurnPhase(agentId: string, phase: AutonomousTurnPhase): void {
+    if (this.autonomousTurnPhases.get(agentId) !== phase) return;
+    this.autonomousTurnPhases.delete(agentId);
+    for (const buffered of phase.buffered) this.queueSessionEvent(agentId, buffered);
+    phase.buffered.length = 0;
+    phase.settle();
+  }
+
+  private refuseAutonomousTurn(
+    agent: ActiveManagedAgent,
+    phase: AutonomousTurnPhase | undefined,
+    turnId: string | undefined,
+    message: string,
+  ): void {
+    let refused = this.refusedAutonomousTurns.get(agent.id);
+    if (!refused || refused.session !== agent.session) {
+      refused = { session: agent.session, turnIds: new Set() };
+      this.refusedAutonomousTurns.set(agent.id, refused);
+    }
+    if (turnId !== undefined) {
+      refused.turnIds.add(turnId);
+      if (refused.turnIds.size > 64) {
+        const oldest = refused.turnIds.values().next().value;
+        if (oldest !== undefined) refused.turnIds.delete(oldest);
+      }
+    }
+    if (phase) {
+      phase.state = "cancel_pending";
+      for (const buffered of phase.buffered) {
+        if (!this.isAutonomousTurnPhaseEvent(buffered)) {
+          this.queueSessionEvent(agent.id, buffered);
+        }
+      }
+      phase.buffered.length = 0;
+    }
+    agent.lastError = undefined;
+    this.logger.warn(
+      { agentId: agent.id, provider: agent.provider, turnId, message },
+      "Autonomous turn refused by policy",
+    );
+    this.trackBackgroundTask(this.stopRefusedAutonomousTurn(agent, message, turnId));
+  }
+
+  private async stopRefusedAutonomousTurn(
+    agent: ActiveManagedAgent,
+    message: string,
+    turnId: string | undefined,
+  ): Promise<void> {
+    const phase = this.autonomousTurnPhases.get(agent.id);
+    const acknowledged = await this.interruptSession(agent.session, agent.id);
+    if (phase?.state === "closed") return;
+    if (this.agents.get(agent.id) !== agent) return;
+    if (acknowledged) {
+      if (phase) this.settleAutonomousTurnPhase(agent.id, phase);
+      if (agent.lifecycle !== "error" && !agent.activeForegroundTurnId && !agent.activeTurnId) {
+        agent.lifecycle = "idle";
+        this.emitState(agent);
+      }
+      return;
+    }
+    if (phase) this.settleAutonomousTurnPhase(agent.id, phase);
+    this.logger.error(
+      { agentId: agent.id, provider: agent.provider, turnId },
+      "Unable to interrupt refused autonomous turn; closing session",
+    );
+    await this.closeUnstoppableAutonomousTurn(agent, message);
   }
 
   private traceHandleStreamEventStart(
@@ -5716,7 +6174,6 @@ export class AgentManager {
         this.emitState(agent);
         return undefined;
       case "model_changed":
-
         flags.shouldDispatchEvent = false;
         return this.onProviderModelChanged(agent, event.runtimeInfo);
       case "thinking_option_changed":
@@ -6740,7 +7197,6 @@ export class AgentManager {
         model: opening?.model ?? null,
         title: opening?.title ?? null,
         env: { ...env },
-        title: opening?.title ?? null,
         background: opening?.background === true,
         ...agentEntityData(opening),
         tools: [],

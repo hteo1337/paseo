@@ -2069,6 +2069,7 @@ function createToolCatalog(
         sessionMode,
         activeTurnBehavior,
         onDispatch: confirmDispatch,
+        runOptions: { source: "other" },
         logger: childLogger,
       }).catch((error) => {
         rejectNotification();
@@ -2826,6 +2827,7 @@ function createToolCatalog(
 
       const expiresAt = buildScheduleExpiry(expiresIn);
       const schedule = await scheduleService.createOrReplace({
+        origin: "heartbeat",
         prompt: prompt.trim(),
         cadence: buildCronScheduleCadence({
           cron,
