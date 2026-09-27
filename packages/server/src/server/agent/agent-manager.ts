@@ -4187,6 +4187,12 @@ export class AgentManager {
     newInfo: AgentRuntimeInfo,
     options?: { emit?: boolean },
   ): Promise<void> {
+    if (newInfo.model == null) {
+      newInfo = {
+        ...newInfo,
+        model: agent.runtimeInfo?.model ?? agent.config.model ?? null,
+      };
+    }
     if (!(await this.checkProviderModelChange(agent, newInfo.model))) return;
     if (this.agents.get(agent.id) !== agent) return;
     const changed =
@@ -4208,11 +4214,9 @@ export class AgentManager {
     agent: ActiveManagedAgent,
     toModel: string | null | undefined,
   ): Promise<boolean> {
-    const fromModel = agent.runtimeInfo
-      ? (agent.runtimeInfo.model ?? null)
-      : (agent.config.model ?? null);
-    toModel = toModel ?? null;
-    if ((toModel === null || toModel !== fromModel) && this.pluginLifecycle) {
+    if (toModel == null) return true;
+    const fromModel = agent.runtimeInfo?.model ?? agent.config.model ?? null;
+    if (toModel !== fromModel && this.pluginLifecycle) {
       try {
         await this.pluginLifecycle.before("agent.set_model", {
           agentId: agent.id,

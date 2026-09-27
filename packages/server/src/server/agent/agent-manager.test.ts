@@ -12419,7 +12419,7 @@ test.each(["null", "throws"])(
   },
 );
 
-test("set_model: null provider report invokes policy once and stops when refused", async () => {
+test("set_model: null provider report preserves the requested model without policy", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
   const session = new TestAgentSession(config);
   const close = vi.spyOn(session, "close");
@@ -12446,9 +12446,12 @@ test("set_model: null provider report invokes policy once and stops when refused
     provider: "codex",
     runtimeInfo: { provider: "codex", model: null },
   });
-  await vi.waitFor(() => expect(close).toHaveBeenCalledOnce());
-  expect(requests).toEqual([
-    expect.objectContaining({ source: "provider", fromModel: "sonnet", toModel: null }),
-  ]);
-  expect(manager.getAgent(agent.id)).toBeNull();
+  await (
+    manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+  ).drainSessionEvents(agent.id);
+  expect(manager.getAgent(agent.id)?.runtimeInfo?.model).toBe("sonnet");
+  expect(requests).toEqual([]);
+  expect(close).not.toHaveBeenCalled();
+  expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
+  await manager.closeAgent(agent.id);
 });

@@ -3486,6 +3486,61 @@ test.each(["claude-sonnet-5", "claude-opus-5-5"])(
   },
 );
 
+test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider model switch", async () => {
+  const { AgentManager } = await import("../../agent-manager.js");
+  const logger = createTestLogger();
+  const client = new ClaudeAgentClient({ logger });
+  const config = { provider: "claude" as const, cwd: os.tmpdir(), model: "claude-sonnet-5" };
+  const session = await client.createSession(config);
+  Object.assign(session, { claudeSessionId: "limit-session" });
+  await session.getRuntimeInfo();
+  const adapter = session as unknown as TestClaudeSession & {
+    dispatchEvents(events: AgentStreamEvent[]): void;
+  };
+  vi.spyOn(client, "createSession").mockResolvedValue(session);
+  const requests: Array<{ source?: string; fromModel?: string | null; toModel?: string | null }> =
+    [];
+  const manager = new AgentManager({
+    clients: { claude: client },
+    logger,
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: { source?: string; toModel?: string | null }) => {
+        if (name === "agent.set_model") {
+          requests.push(request);
+          if (request.toModel !== "claude-opus-5-5") throw new Error("unexpected model refused");
+        }
+        return request;
+      },
+    } as import("../../../plugins/lifecycle/index.js").PluginLifecycle,
+  });
+  const agent = await manager.createAgent(config, undefined, {});
+  try {
+    const notice = adapter.translateMessageToEvents({
+      type: "assistant",
+      session_id: "limit-session",
+      error: "rate_limit",
+      isApiErrorMessage: true,
+      apiErrorStatus: 429,
+      message: {
+        id: "limit-notice",
+        model: "<synthetic>",
+        role: "assistant",
+        content: [{ type: "text", text: "You have hit your weekly limit" }],
+      },
+    } as SDKMessage);
+    adapter.dispatchEvents(notice);
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(notice.filter((event) => event.type === "model_changed")).toEqual([]);
+    expect(requests).toEqual([]);
+    expect(manager.getAgent(agent.id)?.runtimeInfo?.model).toBe(config.model);
+  } finally {
+    await manager.closeAgent(agent.id);
+  }
+});
+
 test("Claude effective model: streamed switch survives late init and ignores synthetic/child frames", async () => {
   const client = new ClaudeAgentClient({ logger: createTestLogger() });
   const session = await client.createSession({

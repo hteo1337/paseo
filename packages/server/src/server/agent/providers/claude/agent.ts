@@ -2178,13 +2178,14 @@ class ClaudeAgentSession implements AgentSession {
   }
 
   async getRuntimeInfo(): Promise<AgentRuntimeInfo> {
-    if (this.cachedRuntimeInfo) {
+    const model = this.lastOptionsModel ?? this.config.model ?? null;
+    if (this.cachedRuntimeInfo?.model === model) {
       return { ...this.cachedRuntimeInfo };
     }
     const info: AgentRuntimeInfo = {
       provider: "claude",
       sessionId: this.claudeSessionId,
-      model: this.lastOptionsModel,
+      model,
       modeId: this.currentMode ?? null,
       ...(this.lastRuntimeModel
         ? {
@@ -2211,7 +2212,7 @@ class ClaudeAgentSession implements AgentSession {
     this.cachedRuntimeInfo = {
       provider: "claude",
       sessionId: this.claudeSessionId,
-      model: this.lastOptionsModel,
+      model: this.lastOptionsModel ?? this.config.model ?? null,
       modeId: this.currentMode ?? null,
     };
 
@@ -3349,6 +3350,7 @@ class ClaudeAgentSession implements AgentSession {
       base.model = this.config.model;
     }
     this.lastOptionsModel = base.model ?? null;
+    this.cachedRuntimeInfo = null;
     if (this.claudeSessionId && !this.pendingFreshSessionId) {
       base.resume = this.claudeSessionId;
     }
