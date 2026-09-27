@@ -79,6 +79,10 @@ function buildScheduleFireBody(schedule: StoredSchedule, runId: string): string 
   return `${heading}\n${schedule.prompt}`;
 }
 
+function getScheduleTurnSource(schedule: StoredSchedule): "heartbeat" | "schedule" {
+  return schedule.origin === "heartbeat" ? "heartbeat" : "schedule";
+}
+
 function normalizePrompt(prompt: string): string {
   const trimmed = prompt.trim();
   if (!trimmed) {
@@ -347,6 +351,7 @@ export class ScheduleService {
     const runOnCreate = input.runOnCreate ?? input.cadence.type === "every";
     const nextRunAt = runOnCreate ? now : computeNextRunAt(input.cadence, now);
     return {
+      ...(input.origin ? { origin: input.origin } : {}),
       name: fields.name,
       prompt: fields.prompt,
       cadence: input.cadence,
@@ -380,12 +385,14 @@ export class ScheduleService {
         return this.buildScheduleRecord(input, { name, prompt, target: inputTarget });
       },
       update: async (current) => {
+        const { origin: _previousOrigin, ...currentFields } = current;
         const now = this.now();
         const cadence = mergeScheduleCadenceTimezone(current.cadence, input.cadence);
         const runOnCreate = input.runOnCreate ?? cadence.type === "every";
         const nextRunAt = runOnCreate ? now : computeNextRunAt(cadence, now);
         return {
-          ...current,
+          ...currentFields,
+          ...(input.origin ? { origin: input.origin } : {}),
           name,
           prompt,
           cadence,
@@ -949,6 +956,7 @@ export class ScheduleService {
       await startAgentRun(this.agentManager, agent.id, wrappedPrompt, this.logger, {
         replaceRunning: true,
         activeTurnBehavior: "steer",
+        runOptions: { source: getScheduleTurnSource(schedule) },
       });
       const waitResult = await this.agentManager.waitForAgentEvent(agent.id, {
         waitForActive: true,
@@ -1014,7 +1022,9 @@ export class ScheduleService {
       if (created.initialPromptError) {
         throw created.initialPromptError;
       }
-      const result = await this.agentManager.runAgent(agent.id, schedule.prompt);
+      const result = await this.agentManager.runAgent(agent.id, schedule.prompt, {
+        source: "schedule",
+      });
       const waitResult = await this.agentManager.waitForAgentEvent(agent.id, {
         waitForActive: true,
       });
