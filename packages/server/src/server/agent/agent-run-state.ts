@@ -25,6 +25,8 @@ export interface PendingForegroundRun {
   settled: boolean;
   settledPromise: Promise<void>;
   resolveSettled: () => void;
+  admission: Promise<{ approved: true } | { approved: false; message: string }>;
+  resolveAdmission: (result: { approved: true } | { approved: false; message: string }) => void;
 }
 
 export interface AutonomousAgentRun {
@@ -307,6 +309,12 @@ function createPendingForegroundRun(): PendingForegroundRun {
   const turnStartedPromise = new Promise<void>((resolvePromise) => {
     resolveTurnStarted = resolvePromise;
   });
+  let resolveAdmission!: PendingForegroundRun["resolveAdmission"];
+  const admission = new Promise<{ approved: true } | { approved: false; message: string }>(
+    (resolvePromise) => {
+      resolveAdmission = resolvePromise;
+    },
+  );
   return {
     ...createTrackedRunState(),
     kind: "foreground",
@@ -314,6 +322,8 @@ function createPendingForegroundRun(): PendingForegroundRun {
     turnStartedPromise,
     resolveTurnStarted,
     stagedEvents: [],
+    admission,
+    resolveAdmission,
   };
 }
 
