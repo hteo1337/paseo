@@ -362,7 +362,7 @@ export async function generateStructuredAgentResponse<T>(
   });
   try {
     const caller: AgentCaller = async (nextPrompt) => {
-      const result = await manager.runAgent(agent.id, nextPrompt);
+      const result = await manager.runAgent(agent.id, nextPrompt, { source: "internal" });
       if (typeof result.finalText === "string" && result.finalText.length > 0) {
         return result.finalText;
       }
