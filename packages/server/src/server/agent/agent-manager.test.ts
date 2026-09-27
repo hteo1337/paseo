@@ -57,6 +57,936 @@ import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 const DESKTOP_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("desktop-client");
 const MOBILE_OPEN_AGENT_TAB_LABEL = getOpenAgentTabLabel("mobile-client");
 
+test.each(["prompt", "schedule", "heartbeat", "internal", "other"] as const)(
+  "turn_start: %s source permits the provider turn",
+  async (source) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-turn-start-"));
+    const requests: unknown[] = [];
+    const lifecycle = {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.turn_start") requests.push(request);
+        return request;
+      },
+    } as PluginLifecycle;
+    const manager = new AgentManager({
+      clients: { codex: new TestAgentClient() },
+      logger,
+      pluginLifecycle: lifecycle,
+    });
+    try {
+      const agent = await manager.createAgent(
+        { provider: "codex", cwd: workdir, model: "requested", title: "Review x" },
+        undefined,
+        {},
+      );
+      const session = manager.getAgent(agent.id)?.session;
+      const start = vi.spyOn(session!, "startTurn");
+      await manager.runAgent(agent.id, "hello", { source });
+      expect(start).toHaveBeenCalledOnce();
+      expect(requests).toEqual([
+        expect.objectContaining({
+          agentId: agent.id,
+          source,
+          model: "requested",
+          requestedModel: "requested",
+          title: "Review x",
+          cwd: workdir,
+          workspaceId: null,
+        }),
+      ]);
+    } finally {
+      await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);
+
+test.each([
+  { name: "present", env: { ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-opus-4-1" } },
+  { name: "absent", env: undefined },
+])("turn_start carries create-time launch env when $name", async ({ env }) => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-turn-env-"));
+  const requests: unknown[] = [];
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start") requests.push(request);
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {
+      env,
+    });
+    await manager.runAgent(agent.id, "hello");
+    expect(requests).toEqual([expect.objectContaining({ env: env ?? null })]);
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("turn_start refusal leaves the agent idle without calling the provider", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-turn-refuse-"));
+  let refuse = true;
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && refuse) throw new Error("opus refused");
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new TestAgentClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const start = vi.spyOn(manager.getAgent(agent.id)!.session!, "startTurn");
+    await expect(manager.runAgent(agent.id, "hello")).rejects.toThrow("opus refused");
+    await expect(startAgentRun(manager, agent.id, "hello", logger)).rejects.toThrow("opus refused");
+    expect(start).not.toHaveBeenCalled();
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    refuse = false;
+    await manager.runAgent(agent.id, "allowed retry");
+    expect(start).toHaveBeenCalledOnce();
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("Claude autonomous continuation inherits its approved foreground turn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-claude-autonomous-"));
+  let session: TestAgentSession;
+  class ClaudeClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      Object.defineProperty(session, "provider", { value: "claude" });
+      return session;
+    }
+  }
+  const requests: unknown[] = [];
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start") {
+        requests.push(request);
+        if ((request as { source: string }).source === "autonomous") {
+          throw new Error("do not re-judge this query");
+        }
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { claude: new ClaudeClient("claude") },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+    await manager.runAgent(agent.id, "approved foreground");
+    const interrupt = vi.spyOn(session!, "interrupt");
+    session!.pushEvent({ type: "turn_started", provider: "claude", turnId: "continued-query" });
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("running"));
+    expect(requests).toHaveLength(1);
+    expect(interrupt).not.toHaveBeenCalled();
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("refused autonomous turn stays idle after cancel and late failure", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-late-"));
+  let session: TestAgentSession;
+  let refuse = true;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new (class extends TestAgentSession {
+        override async interrupt(): Promise<void> {
+          this.pushEvent({ type: "turn_canceled", provider: "codex", turnId: "denied" });
+          await super.interrupt();
+        }
+      })(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (
+        name === "agent.turn_start" &&
+        (request as { source: string }).source === "autonomous" &&
+        refuse
+      ) {
+        throw new Error("denied");
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledOnce());
+    session!.pushEvent({ type: "turn_failed", provider: "codex", turnId: "denied", error: "late" });
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    expect(manager.getAgent(agent.id)?.lastError).toBeUndefined();
+    refuse = false;
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed" });
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("running"));
+    session!.pushEvent({
+      type: "turn_failed",
+      provider: "codex",
+      turnId: "denied",
+      error: "later",
+    });
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("running");
+    expect(manager.getAgent(agent.id)?.lastError).toBeUndefined();
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test.each(["failed", "timed out"] as const)(
+  "%s autonomous cancellation closes the session and reports the refusal as error",
+  async (failure) => {
+    const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-stop-failed-"));
+    let session: TestAgentSession;
+    const interruptGate = deferred<void>();
+    class EventClient extends TestAgentClient {
+      override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+        session = new (class extends TestAgentSession {
+          override async interrupt(): Promise<void> {
+            await interruptGate.promise;
+            throw new Error("interrupt failed");
+          }
+        })(config);
+        return session;
+      }
+    }
+    const lifecycle = {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (
+          name === "agent.turn_start" &&
+          (request as { source: string }).source === "autonomous"
+        ) {
+          throw new Error("policy refused this turn");
+        }
+        return request;
+      },
+    } as PluginLifecycle;
+    const manager = new AgentManager({
+      clients: { codex: new EventClient() },
+      logger,
+      pluginLifecycle: lifecycle,
+      rescueTimeouts: { interruptSessionMs: failure === "failed" ? 1000 : 20 },
+    });
+    try {
+      const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+      const close = vi.spyOn(session!, "close");
+      const interrupt = vi.spyOn(session!, "interrupt");
+      session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+      await vi.waitFor(() => expect(interrupt).toHaveBeenCalledOnce());
+      if (failure === "failed") {
+        expect(manager.getAgent(agent.id)?.lifecycle).toBe("running");
+        interruptGate.resolve();
+      }
+      await vi.waitFor(() => {
+        expect(close).toHaveBeenCalledOnce();
+        expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+        expect(manager.getAgent(agent.id)?.lastError).toBe("policy refused this turn");
+      });
+    } finally {
+      await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+      rmSync(workdir, { recursive: true, force: true });
+    }
+  },
+);
+
+test("untagged late failure from a refused turn cannot fail a later allowed turn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-untagged-"));
+  let session: TestAgentSession;
+  let refuse = true;
+  const cancelGate = deferred<void>();
+  const allowedHookGate = deferred<void>();
+  const requests: unknown[] = [];
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new (class extends TestAgentSession {
+        override async interrupt(): Promise<void> {
+          await cancelGate.promise;
+          await super.interrupt();
+        }
+      })(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start") requests.push(request);
+      if (
+        name === "agent.turn_start" &&
+        (request as { source: string }).source === "autonomous" &&
+        refuse
+      ) {
+        throw new Error("denied");
+      }
+      if (name === "agent.turn_start" && !refuse) await allowedHookGate.promise;
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await vi.waitFor(() => {
+      expect(interrupt).toHaveBeenCalledOnce();
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("running");
+    });
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed" });
+    session!.pushEvent({ type: "turn_failed", provider: "codex", error: "late refusal" });
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(requests).toHaveLength(1);
+    cancelGate.resolve();
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle"));
+    refuse = false;
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed-after" });
+    await vi.waitFor(() => expect(requests).toHaveLength(2));
+    allowedHookGate.resolve();
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("running");
+    expect(manager.getAgent(agent.id)?.activeTurnId).toBe("allowed-after");
+    expect(manager.getAgent(agent.id)?.lastError).toBeUndefined();
+  } finally {
+    cancelGate.resolve();
+    allowedHookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("allowed autonomous turn receives untagged events after refused cancellation settles", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-allowed-events-"));
+  let session: TestAgentSession;
+  let refuse = true;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (
+        name === "agent.turn_start" &&
+        (request as { source: string }).source === "autonomous" &&
+        refuse
+      ) {
+        throw new Error("denied");
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await vi.waitFor(() => {
+      expect(interrupt).toHaveBeenCalledOnce();
+      expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+    });
+    refuse = false;
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed" });
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("running"));
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "allowed output" },
+    });
+    session!.pushEvent({ type: "turn_completed", provider: "codex" });
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getTimeline(agent.id)).toContainEqual({
+      type: "assistant_message",
+      text: "allowed output",
+    });
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("foreground prompt waits for refused autonomous cancellation before starting", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-foreground-wait-"));
+  const cancelGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new (class extends TestAgentSession {
+        override async interrupt(): Promise<void> {
+          await cancelGate.promise;
+          await super.interrupt();
+        }
+        override async startTurn(): Promise<{ turnId: string }> {
+          setTimeout(() => {
+            this.pushEvent({
+              type: "timeline",
+              provider: "codex",
+              item: { type: "assistant_message", text: "foreground output" },
+            });
+            this.pushEvent({ type: "turn_completed", provider: "codex" });
+          }, 0);
+          return { turnId: "foreground" };
+        }
+      })(config);
+      return session;
+    }
+  }
+  const sources: string[] = [];
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start") {
+        const source = (request as { source: string }).source;
+        sources.push(source);
+        if (source === "autonomous") throw new Error("denied");
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    const start = vi.spyOn(session!, "startTurn");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledOnce());
+    const run = manager.runAgent(agent.id, "foreground prompt");
+    await Promise.resolve();
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+    expect(sources).toEqual(["autonomous"]);
+    cancelGate.resolve();
+    await Promise.race([
+      run,
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("foreground did not finish")), 500),
+      ),
+    ]);
+    expect(start).toHaveBeenCalledOnce();
+    expect(sources).toEqual(["autonomous", "prompt"]);
+    expect(manager.getTimeline(agent.id)).toContainEqual({
+      type: "assistant_message",
+      text: "foreground output",
+    });
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    cancelGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("untagged output emitted during a refusing hook never reaches a later turn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-judging-refuse-"));
+  const hookEntered = deferred<void>();
+  const hookGate = deferred<void>();
+  let session: TestAgentSession;
+  let refuse = true;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        if (refuse) {
+          hookEntered.resolve();
+          await hookGate.promise;
+          throw new Error("denied");
+        }
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await hookEntered.promise;
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "refused output" },
+    });
+    session!.pushEvent({
+      type: "model_changed",
+      provider: "codex",
+      runtimeInfo: { provider: "codex", sessionId: session!.id, model: "new-model", modeId: null },
+    });
+    expect(manager.getTimeline(agent.id)).toEqual([]);
+    hookGate.resolve();
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle"));
+    expect(manager.getAgent(agent.id)?.runtimeInfo?.model).toBe("new-model");
+    refuse = false;
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed" });
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "allowed output" },
+    });
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getTimeline(agent.id)).toEqual([
+      { type: "assistant_message", text: "allowed output" },
+    ]);
+  } finally {
+    hookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("untagged output emitted during an allowing hook reaches its turn", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-judging-allow-"));
+  const hookEntered = deferred<void>();
+  const hookGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        hookEntered.resolve();
+        await hookGate.promise;
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "allowed" });
+    await hookEntered.promise;
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "buffered output" },
+    });
+    expect(manager.getTimeline(agent.id)).toEqual([]);
+    hookGate.resolve();
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    expect(manager.getTimeline(agent.id)).toContainEqual({
+      type: "assistant_message",
+      text: "buffered output",
+    });
+    expect(manager.getAgent(agent.id)?.activeTurnId).toBe("allowed");
+  } finally {
+    hookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("foreground prompt waits for an approved autonomous turn to finish", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-approved-foreground-"));
+  const hookEntered = deferred<void>();
+  const hookGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        hookEntered.resolve();
+        await hookGate.promise;
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const start = vi.spyOn(session!, "startTurn");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+    await hookEntered.promise;
+    const foreground = manager.runAgent(agent.id, "next prompt");
+    void foreground.catch(() => undefined);
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "autonomous output" },
+    });
+    hookGate.resolve();
+    await vi.waitFor(() =>
+      expect(manager.getTimeline(agent.id)).toContainEqual({
+        type: "assistant_message",
+        text: "autonomous output",
+      }),
+    );
+    expect(manager.getAgent(agent.id)?.activeTurnId).toBe("autonomous");
+    expect(start).not.toHaveBeenCalled();
+    session!.pushEvent({ type: "turn_completed", provider: "codex", turnId: "autonomous" });
+    await vi.waitFor(() => expect(start).toHaveBeenCalledOnce());
+    await expect(foreground).resolves.toMatchObject({ sessionId: session!.id });
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    hookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("foreground prompt interrupts an approved autonomous turn that never ends", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-foreground-timeout-"));
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const sources: string[] = [];
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    rescueTimeouts: { interruptSessionMs: 20 },
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (name: string, request: unknown) => {
+        if (name === "agent.turn_start") sources.push((request as { source: string }).source);
+        return request;
+      },
+    } as PluginLifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    const start = vi.spyOn(session!, "startTurn");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.activeTurnId).toBe("autonomous"));
+    const foreground = manager.runAgent(agent.id, "next prompt");
+    void foreground.catch(() => undefined);
+    await Promise.resolve();
+    expect(start).not.toHaveBeenCalled();
+    await expect(
+      Promise.race([
+        foreground,
+        new Promise<never>((_, reject) =>
+          setTimeout(() => reject(new Error("foreground waited forever")), 1000),
+        ),
+      ]),
+    ).resolves.toMatchObject({ sessionId: session!.id });
+    expect(interrupt).toHaveBeenCalledOnce();
+    expect(start).toHaveBeenCalledOnce();
+    expect(sources).toEqual(["autonomous", "prompt"]);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("idle");
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("failed autonomous interrupt rejects the waiting prompt and closes with error", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-foreground-stop-failed-"));
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new (class extends TestAgentSession {
+        override async interrupt(): Promise<void> {
+          throw new Error("interrupt failed");
+        }
+      })(config);
+      return session;
+    }
+  }
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    rescueTimeouts: { interruptSessionMs: 20 },
+    pluginLifecycle: {
+      emit: () => {},
+      before: async (_name: string, request: unknown) => request,
+    } as PluginLifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const close = vi.spyOn(session!, "close");
+    const start = vi.spyOn(session!, "startTurn");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+    await vi.waitFor(() => expect(manager.getAgent(agent.id)?.activeTurnId).toBe("autonomous"));
+    await expect(manager.runAgent(agent.id, "next prompt")).rejects.toThrow(
+      "Unable to interrupt timed-out autonomous turn",
+    );
+    expect(start).not.toHaveBeenCalled();
+    expect(close).toHaveBeenCalledOnce();
+    expect(manager.getAgent(agent.id)).toMatchObject({
+      lifecycle: "error",
+      lastError: "Unable to interrupt timed-out autonomous turn",
+    });
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("model changes retain arrival order with output during autonomous judgment", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-model-order-"));
+  const hookEntered = deferred<void>();
+  const hookGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        hookEntered.resolve();
+        await hookGate.promise;
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  const events: AgentManagerEvent[] = [];
+  manager.subscribe((event) => events.push(event), { replayState: false });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "autonomous" });
+    await hookEntered.promise;
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "before model" },
+    });
+    session!.pushEvent({
+      type: "model_changed",
+      provider: "codex",
+      runtimeInfo: { provider: "codex", sessionId: session!.id, model: "new-model", modeId: null },
+    });
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "after model" },
+    });
+    session!.pushEvent({ type: "turn_completed", provider: "codex", turnId: "autonomous" });
+    hookGate.resolve();
+    await (
+      manager as unknown as { drainSessionEvents(agentId: string): Promise<void> }
+    ).drainSessionEvents(agent.id);
+    const ordered = events.flatMap((event) => {
+      if (event.type === "agent_state" && event.agent.runtimeInfo?.model === "new-model") {
+        return ["model"];
+      }
+      if (event.type === "agent_stream" && event.event.type === "timeline") {
+        return [event.event.item.type === "assistant_message" ? event.event.item.text : "other"];
+      }
+      return [];
+    });
+    expect(ordered.filter((value, index) => ordered.indexOf(value) === index)).toEqual([
+      "before model",
+      "model",
+      "after model",
+    ]);
+  } finally {
+    hookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("closing during autonomous judgment drops pending output without waiting for the hook", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-judging-close-"));
+  const hookEntered = deferred<void>();
+  const hookGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new TestAgentSession(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        hookEntered.resolve();
+        await hookGate.promise;
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "judging" });
+    await hookEntered.promise;
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "discard me" },
+    });
+    await Promise.race([
+      manager.closeAgent(agent.id),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("close waited for policy hook")), 500),
+      ),
+    ]);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(
+      (manager as unknown as { autonomousTurnPhases: Map<string, unknown> }).autonomousTurnPhases
+        .size,
+    ).toBe(0);
+  } finally {
+    hookGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("closing during autonomous cancellation drops pending output", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-autonomous-cancel-close-"));
+  const cancelGate = deferred<void>();
+  let session: TestAgentSession;
+  class EventClient extends TestAgentClient {
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      session = new (class extends TestAgentSession {
+        override async interrupt(): Promise<void> {
+          await cancelGate.promise;
+          await super.interrupt();
+        }
+      })(config);
+      return session;
+    }
+  }
+  const lifecycle = {
+    emit: () => {},
+    before: async (name: string, request: unknown) => {
+      if (name === "agent.turn_start" && (request as { source: string }).source === "autonomous") {
+        throw new Error("denied");
+      }
+      return request;
+    },
+  } as PluginLifecycle;
+  const manager = new AgentManager({
+    clients: { codex: new EventClient() },
+    logger,
+    pluginLifecycle: lifecycle,
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const interrupt = vi.spyOn(session!, "interrupt");
+    session!.pushEvent({ type: "turn_started", provider: "codex", turnId: "denied" });
+    await vi.waitFor(() => expect(interrupt).toHaveBeenCalledOnce());
+    session!.pushEvent({
+      type: "timeline",
+      provider: "codex",
+      item: { type: "assistant_message", text: "discard me" },
+    });
+    await Promise.race([
+      manager.closeAgent(agent.id),
+      new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error("close waited for cancellation")), 500),
+      ),
+    ]);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(
+      (manager as unknown as { autonomousTurnPhases: Map<string, unknown> }).autonomousTurnPhases
+        .size,
+    ).toBe(0);
+  } finally {
+    cancelGate.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("archive hold rejects new runs until released", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-archive-hold-"));
   const manager = new AgentManager({ clients: { codex: new TestAgentClient() }, logger });

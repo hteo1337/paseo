@@ -19,6 +19,7 @@ export type {
   PluginSessionOpenRequest,
   PluginSessionOpenedRequest,
   PluginSetModelRequest,
+  PluginTurnStartRequest,
   PluginTurnOutcome,
   PluginLifecycleEvents,
   PluginBeforeRequests,
