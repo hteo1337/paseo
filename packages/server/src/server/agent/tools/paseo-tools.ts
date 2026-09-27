@@ -2025,6 +2025,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         sessionMode,
         activeTurnBehavior,
         onDispatch: confirmDispatch,
+        runOptions: { source: "other" },
         logger: childLogger,
       }).catch((error) => {
         acceptDispatch(false);
@@ -2722,6 +2723,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
 
       const expiresAt = buildScheduleExpiry(expiresIn);
       const schedule = await scheduleService.createOrReplace({
+        origin: "heartbeat",
         prompt: prompt.trim(),
         cadence: buildCronScheduleCadence({
           cron,
