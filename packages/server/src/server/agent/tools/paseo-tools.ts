@@ -1934,6 +1934,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
         agentId,
         prompt,
         sessionMode,
+        runOptions: { source: "other" },
         logger: childLogger,
       });
 
@@ -2631,6 +2632,7 @@ export function createPaseoToolCatalog(options: PaseoToolHostDependencies): Pase
 
       const expiresAt = buildScheduleExpiry(expiresIn);
       const schedule = await scheduleService.createOrReplace({
+        origin: "heartbeat",
         prompt: prompt.trim(),
         cadence: buildCronScheduleCadence({
           cron,
