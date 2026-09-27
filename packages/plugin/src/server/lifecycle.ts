@@ -102,6 +102,26 @@ export interface PluginSetModelRequest {
   cwd: string;
 }
 
+export type PluginTurnStartSource =
+  | "prompt"
+  | "schedule"
+  | "heartbeat"
+  | "internal"
+  | "other"
+  | "autonomous";
+
+export interface PluginTurnStartRequest {
+  agentId: string;
+  provider: string;
+  model: string | null;
+  requestedModel: string | null;
+  title: string | null;
+  cwd: string;
+  workspaceId: string | null;
+  source: PluginTurnStartSource;
+  env: Record<string, string> | null;
+}
+
 export type PluginTurnOutcome =
   | { kind: "completed" }
   | { kind: "failed"; error: { message: string; code?: string } }
@@ -139,6 +159,7 @@ export interface PluginHookRequests {
   "agent.create.before": { config: AgentSessionConfig; env?: Record<string, string> };
   "agent.open.before": PluginSessionOpenRequest;
   "workspace.create.before": Omit<WorkspaceCreateRequest, "type" | "requestId">;
+  "agent.turn_start": PluginTurnStartRequest;
 }
 
 export type PluginHooks = {
@@ -207,6 +228,7 @@ export const pluginHookRegistry = {
   "agent.create.after": { waits: false },
   "agent.open.before": { waits: true },
   "agent.set_model": { waits: true },
+  "agent.turn_start": { waits: true },
   "agent.session_opened": { waits: true },
   "agent.close.after": { waits: false },
   "agent.archive.after": { waits: false },
@@ -233,6 +255,7 @@ const legacyRequests = {
   "agent.create": "agent.create.before",
   "agent.session_open": "agent.open.before",
   "agent.set_model": "agent.set_model",
+  "agent.turn_start": "agent.turn_start",
   "agent.session_opened": "agent.session_opened",
 } as const;
 export type PluginLifecycleEvents = {
