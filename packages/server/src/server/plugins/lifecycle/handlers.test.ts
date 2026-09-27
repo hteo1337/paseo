@@ -203,3 +203,59 @@ test("session_open: old-shaped return applies env and preserves model/title", as
     env: { X: "1" },
   });
 });
+
+test("turn_start accepts every source, refuses throws, and rejects changed or extra fields", async () => {
+  const input = {
+    agentId: "agent",
+    provider: "claude",
+    model: "opus",
+    requestedModel: "opus",
+    title: "Fix x",
+    cwd: "/project",
+    workspaceId: null,
+    source: "prompt" as const,
+    env: { ANTHROPIC_DEFAULT_SONNET_MODEL: "claude-opus-4-1" },
+  };
+  for (const source of [
+    "prompt",
+    "schedule",
+    "heartbeat",
+    "internal",
+    "other",
+    "autonomous",
+  ] as const) {
+    const hooks = new PluginHookHandlers(() => {});
+    hooks.before("agent.turn_start", ({ request }) => request);
+    await expect(
+      hooks.invoke(source, "before", "agent.turn_start", { ...input, source }, paseo),
+    ).resolves.toEqual({ ...input, source });
+  }
+  const refusing = new PluginHookHandlers(() => {});
+  refusing.before("agent.turn_start", () => {
+    throw new Error("opus refused");
+  });
+  await expect(
+    refusing.invoke("refuse", "before", "agent.turn_start", input, paseo),
+  ).rejects.toThrow("opus refused");
+  const changing = new PluginHookHandlers(() => {});
+  changing.before("agent.turn_start", ({ request }) => ({ ...request, model: "sonnet" }));
+  await expect(
+    changing.invoke("change", "before", "agent.turn_start", input, paseo),
+  ).rejects.toThrow("agent.turn_start hooks cannot change the request");
+  const changingEnv = new PluginHookHandlers(() => {});
+  changingEnv.before("agent.turn_start", ({ request }) => ({ ...request, env: null }));
+  await expect(
+    changingEnv.invoke("change-env", "before", "agent.turn_start", input, paseo),
+  ).rejects.toThrow("agent.turn_start hooks cannot change the request");
+  await expect(
+    changing.invoke("extra", "before", "agent.turn_start", { ...input, extra: true }, paseo),
+  ).rejects.toThrow();
+  const adding = new PluginHookHandlers(() => {});
+  adding.before("agent.turn_start", ({ request }) => ({ ...request, extra: true }));
+  await expect(
+    adding.invoke("output-extra", "before", "agent.turn_start", input, paseo),
+  ).rejects.toThrow();
+  await expect(
+    adding.invoke("missing-env", "before", "agent.turn_start", { ...input, env: undefined }, paseo),
+  ).rejects.toThrow();
+});
