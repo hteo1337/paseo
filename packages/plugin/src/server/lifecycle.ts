@@ -55,6 +55,26 @@ export interface PluginSetModelRequest {
   cwd: string;
 }
 
+export type PluginTurnStartSource =
+  | "prompt"
+  | "schedule"
+  | "heartbeat"
+  | "internal"
+  | "other"
+  | "autonomous";
+
+export interface PluginTurnStartRequest {
+  agentId: string;
+  provider: string;
+  model: string | null;
+  requestedModel: string | null;
+  title: string | null;
+  cwd: string;
+  workspaceId: string | null;
+  source: PluginTurnStartSource;
+  env: Record<string, string> | null;
+}
+
 export type PluginTurnOutcome =
   | { kind: "completed" }
   | { kind: "failed"; error: { message: string; code?: string } }
@@ -85,6 +105,7 @@ export interface PluginBeforeRequests {
   "agent.set_model": PluginSetModelRequest;
   "agent.session_open": PluginSessionOpenRequest;
   "agent.session_opened": PluginSessionOpenedRequest;
+  "agent.turn_start": PluginTurnStartRequest;
   "workspace.create": Omit<WorkspaceCreateRequest, "type" | "requestId">;
 }
 
