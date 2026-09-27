@@ -58,6 +58,7 @@ export type ScheduleRun = z.infer<typeof ScheduleRunSchema>;
 
 export const StoredScheduleSchema = z.object({
   id: z.string(),
+  origin: z.literal("heartbeat").optional(),
   name: z.string().nullable(),
   prompt: z.string().min(1),
   cadence: ScheduleCadenceSchema,
@@ -80,6 +81,7 @@ export const ScheduleSummarySchema = StoredScheduleSchema.omit({
 export type ScheduleSummary = z.infer<typeof ScheduleSummarySchema>;
 
 export interface CreateScheduleInput {
+  origin?: "heartbeat";
   name?: string | null;
   prompt: string;
   cadence: ScheduleCadence;
