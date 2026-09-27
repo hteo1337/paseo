@@ -152,6 +152,11 @@ async function startAgentRunInner(
     "agent.session.start_stream.iterator_returned",
   );
   options?.onDispatch?.("turn_started");
+  const admission = (
+    iterator as typeof iterator & {
+      turnAdmission?: Promise<{ approved: true } | { approved: false; message: string }>;
+    }
+  ).turnAdmission;
   void (async () => {
     try {
       try {
@@ -187,6 +192,10 @@ async function startAgentRunInner(
       logger.error({ err: error, agentId }, "Agent stream failed");
     }
   })();
+  if (admission) {
+    const result = await admission;
+    if (!result.approved) throw new Error(result.message);
+  }
   return { disposition: "turn_started" };
 }
 
