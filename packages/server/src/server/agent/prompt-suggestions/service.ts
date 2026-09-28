@@ -32,6 +32,7 @@ export interface PromptSuggestionGeneration {
     schemaName: string;
     agentTitle: string;
     configKey?: "promptSuggestions" | "newChatSuggestions";
+    selectionPolicy: "configured-only";
     currentSelection?: { provider?: string | null; model?: string | null };
   }): Promise<T>;
 }
@@ -249,6 +250,7 @@ export class PromptSuggestionService {
         schemaName: PROMPT_SUGGESTIONS_SCHEMA_NAME,
         agentTitle: "Prompt suggestions",
         configKey: "newChatSuggestions",
+        selectionPolicy: "configured-only",
       });
       const suggestions = normalizeSuggestions(response.suggestions);
       if (suggestions.length === 0 || !isCurrent()) {
@@ -460,9 +462,7 @@ export class PromptSuggestionService {
         prompt: prepared.built.prompt,
         agentTitle: "Prompt suggestions",
         configKey: prepared.configKey,
-        // When the metadata chain has nothing usable, fall back to the agent's own
-        // model: it has already seen this conversation, so nothing new leaves.
-        currentSelection: { provider: agent.provider, model: agent.config?.model ?? null },
+        selectionPolicy: "configured-only",
       });
       if (entry.token !== token) {
         return;
