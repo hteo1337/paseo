@@ -1,6 +1,4 @@
-import { describe, expect, it } from "vitest";
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
-import { buildAgentLsFetchOptions, listAgents } from "./ls.js";
 
 const daemonTarget = { kind: "endpoint" as const, host: "example.test:12345" };
 
@@ -55,6 +53,33 @@ function createPagingClient() {
   };
   return { fetchAgents, close: async () => {} };
 }
+import { describe, expect, it, vi } from "vitest";
+import { render } from "../../output/index.js";
+import { agentLsSchema, buildAgentLsFetchOptions, listAgents, runLsCommand } from "./ls.js";
+
+const snapshot = {
+  id: "14780c9d-6c06-4556-91b9-5e5209a1881d",
+  title: "Review",
+  provider: "codex",
+  model: null,
+  status: "running",
+  cwd: "/tmp/project",
+  createdAt: "2026-09-29T00:00:00.000Z",
+  updatedAt: "2026-09-29T01:23:45.678Z",
+  archivedAt: null,
+  labels: {},
+};
+const client = {
+  fetchAgents: vi.fn(async () => ({
+    entries: [{ agent: snapshot }],
+    pageInfo: { nextCursor: null, hasMore: false },
+  })),
+  close: vi.fn(async () => undefined),
+};
+
+vi.mock("../../utils/client.js", () => ({
+  connectToDaemon: vi.fn(async () => client),
+}));
 
 describe("buildAgentLsFetchOptions", () => {
   it("fetches active agents by default", () => {
@@ -129,5 +154,34 @@ describe("runLsCommand", () => {
     );
 
     expect(result.data.map((item) => item.name)).toEqual(["agent 3", "agent 2", "agent 1"]);
+  });
+});
+
+describe("runLsCommand output", () => {
+  it("passes the snapshot updatedAt through JSON without adding a table column", async () => {
+    const result = await runLsCommand(
+      { daemonTarget: { kind: "endpoint", host: "example.test:12345" } },
+      {} as never,
+    );
+
+    expect(result.data[0]?.updatedAt).toBe(snapshot.updatedAt);
+    expect(JSON.parse(render(result, { format: "json" }))).toMatchObject([
+      { id: snapshot.id, updatedAt: snapshot.updatedAt },
+    ]);
+    expect(agentLsSchema.columns.map((column) => column.header)).toEqual([
+      "AGENT ID",
+      "NAME",
+      "PROVIDER",
+      "THINKING",
+      "STATUS",
+      "CWD",
+      "CREATED",
+    ]);
+    expect(render(result, { format: "table", noColor: true })).toBe(
+      render(
+        { ...result, data: [{ ...result.data[0]!, updatedAt: "different" }] },
+        { format: "table", noColor: true },
+      ),
+    );
   });
 });
