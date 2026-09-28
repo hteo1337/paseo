@@ -36,6 +36,7 @@ export interface AgentListItem {
   cwd: string;
   created: string;
   background: boolean;
+  updatedAt: string;
 }
 
 /** Helper to get relative time string */
@@ -112,6 +113,7 @@ function toListItem(agent: AgentSnapshotPayload): AgentListItem {
     cwd: shortenPath(agent.cwd),
     created: relativeTime(agent.createdAt),
     background: agent.background === true,
+    updatedAt: agent.updatedAt,
   };
 }
 
