@@ -38,6 +38,7 @@ export interface AgentListItem {
   background: boolean;
   labels: Record<string, string>;
   workspaceId: string | null;
+  updatedAt: string;
 }
 
 /** Helper to get relative time string */
@@ -116,6 +117,7 @@ function toListItem(agent: AgentSnapshotPayload): AgentListItem {
     background: agent.background === true,
     labels: agent.labels,
     workspaceId: agent.workspaceId ?? null,
+    updatedAt: agent.updatedAt,
   };
 }
 
