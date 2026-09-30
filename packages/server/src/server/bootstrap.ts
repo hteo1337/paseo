@@ -139,6 +139,9 @@ import type { RequestedSpeechProviders } from "./speech/speech-types.js";
 import { createSpeechService } from "./speech/speech-runtime.js";
 import { AgentManager } from "./agent/agent-manager.js";
 import { AgentStorage } from "./agent/agent-storage.js";
+import { KeeperControl } from "./keeper/keeper-control.js";
+import { KeeperEventOutbox } from "./keeper/event-outbox.js";
+import { KeeperSendReceipts } from "./keeper/send-receipts.js";
 import { attachAgentStoragePersistence } from "./persistence-hooks.js";
 import { createAgentMcpServer } from "./agent/mcp-server.js";
 import {
@@ -416,6 +419,7 @@ export interface PaseoDaemonConfig {
   mcpEnabled?: boolean;
   mcpInjectIntoAgents?: boolean;
   browserToolsEnabled?: boolean;
+  keeperControlEnabled?: boolean;
   git?: {
     maxProcessesPerSecond: number;
     maxProcessConcurrency: number;
@@ -715,6 +719,7 @@ export async function createPaseoDaemon(
     appBaseUrl = typeof value === "string" ? value : "https://app.paseo.sh";
   });
   let wsServer: VoiceAssistantWebSocketServer | null = null;
+  let keeperControl: KeeperControl | null = null;
   let serviceProxyListenTarget: ListenTarget | null = null;
   const scriptHealthMonitor = new ScriptHealthMonitor({
     serviceProxy,
@@ -1712,6 +1717,19 @@ export async function createPaseoDaemon(
         );
       }
 
+      if (config.keeperControlEnabled) {
+        const outbox = await KeeperEventOutbox.open(path.join(config.paseoHome, "keeper-events"));
+        keeperControl = new KeeperControl({
+          enabled: true,
+          agentManager,
+          agentStorage,
+          receipts: new KeeperSendReceipts(path.join(config.paseoHome, "keeper-send-receipts")),
+          outbox,
+          logger: logger.child({ module: "keeper" }),
+        });
+        keeperControl.start();
+      }
+
       // Start main HTTP server
       await new Promise<void>((resolve, reject) => {
         const onError = (err: Error) => {
@@ -1788,6 +1806,7 @@ export async function createPaseoDaemon(
                 daemonStatusRpc: dependencies.serverFeatureOverrides?.daemonStatusRpc,
                 relayConfig: dependencies.serverFeatureOverrides?.relayConfig,
                 startPaused: true,
+                keeperControl,
               },
               workspaceAutoName,
               workspaceRuntimeStore,
@@ -1938,6 +1957,7 @@ export async function createPaseoDaemon(
     await hubRelationships.stop();
     workspaceReconciliation.dispose();
     scriptHealthMonitor.stop();
+    await keeperControl?.close();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     await finishSubscriptions.close();
