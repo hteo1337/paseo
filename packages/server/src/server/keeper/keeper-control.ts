@@ -17,12 +17,14 @@ import {
 } from "../agent/agent-manager.js";
 import type { AgentStorage } from "../agent/agent-storage.js";
 import type { PermissionChange } from "../agent/tracked-permission-map.js";
+import { withTimeout } from "../../utils/promise-timeout.js";
 import type { KeeperEventInput, KeeperEventOutbox } from "./event-outbox.js";
 import { type KeeperSendReceipts, sendFingerprint } from "./send-receipts.js";
 
 const DETAIL_INPUT_LIMIT = 8_000;
 const DETAIL_TEXT_LIMIT = 2_000;
 const DEFAULT_EVENT_LIMIT = 100;
+const START_TIMEOUT_MS = 60_000;
 
 type SendPayload = KeeperSendMessageResponse["payload"];
 
@@ -191,9 +193,14 @@ export class KeeperControl {
             return "steered";
           }
           const iterator = agentManager.startTurnHeld(context, req.text, options);
-          void drain(iterator, this.deps.logger, req.agentId);
-          // Held in the lane so a close or reload cannot tear the session down mid-start.
-          await waitStart(agentManager, req.agentId);
+          // The first event means the provider accepted the turn, even if it then ends at once.
+          // Waiting here keeps the lane held so a close or reload cannot interleave.
+          const first = await withTimeout({
+            promise: iterator.next(),
+            timeoutMs: START_TIMEOUT_MS,
+            label: "keeper turn start",
+          });
+          void drain(iterator, this.deps.logger, req.agentId, first.done === true);
           return "turn_started";
         },
       );
@@ -285,7 +292,9 @@ async function drain(
   iterator: AsyncGenerator<unknown>,
   logger: Logger,
   agentId: string,
+  finished: boolean,
 ): Promise<void> {
+  if (finished) return;
   try {
     for await (const _ of iterator) {
       // Events reach consumers through manager subscribers.
@@ -293,11 +302,6 @@ async function drain(
   } catch (error) {
     logger.error({ err: error, agentId }, "Keeper send stream failed");
   }
-}
-
-async function waitStart(agentManager: AgentManager, agentId: string): Promise<void> {
-  const { waitForAgentRunStartWithTimeout } = await import("../agent/agent-prompt.js");
-  await waitForAgentRunStartWithTimeout(agentManager, agentId);
 }
 
 function messageOf(error: unknown): string {

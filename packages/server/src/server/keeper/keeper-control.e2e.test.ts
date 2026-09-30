@@ -137,6 +137,15 @@ describe("keeper atomic send", () => {
     await closing;
   });
 
+  test("a turn that finishes at once still reports the acknowledgement", async () => {
+    const h = await setup();
+    const seen = await observe(h);
+    h.provider.finishOnStart = true;
+    const reply = await h.ctx.client.keeperSendMessage(sendParams(h, seen, "k3d"));
+    expect(reply).toMatchObject({ result: "accepted", delivery: "turn_started" });
+    expect(h.provider.callsOf("startTurn")).toHaveLength(1);
+  });
+
   test("a retry that overlaps the first attempt sends at most once", async () => {
     const h = await setup();
     const seen = await observe(h);
