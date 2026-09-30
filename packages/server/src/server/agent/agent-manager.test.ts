@@ -13678,7 +13678,6 @@ test("failed startup history closes the session without registering an agent", a
   }
 });
 
-
 test("usage session is a pure read of the live adapter and disappears on close", async () => {
   const descriptor = {
     provider: "claude",
@@ -14226,4 +14225,3 @@ test("set_model: null provider report preserves the requested model without poli
   expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
   await manager.closeAgent(agent.id);
 });
-
