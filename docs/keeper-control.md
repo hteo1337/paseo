@@ -87,7 +87,8 @@ epoch, or one older than retention, returns `resyncRequired: true`: take a fresh
 
 The feed and receipts survive a restart; incarnations, generations and in-flight sends do not. After a
 restart every agent has a new incarnation (sessions are reloaded) and a new boot ID, so all old guards
-are stale. Events buffered but not flushed at a crash are lost, which is why reads never expose them.
+are stale. An agent whose close outlives the shutdown timeout gets a `lifecycle.close_timeout` event instead of
+its closure event. Events buffered but not flushed at a crash are lost, which is why reads never expose them.
 
 ## Known races
 
