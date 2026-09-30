@@ -58,6 +58,13 @@ export class KeeperControl {
     return this.stop;
   }
 
+  /** Marks agents whose close outlived the shutdown timeout; their closure event may be missing. */
+  noteUnclosed(agentIds: string[]): void {
+    for (const agentId of agentIds) {
+      this.emit({ category: "lifecycle", type: "lifecycle.close_timeout", agentId });
+    }
+  }
+
   async close(): Promise<void> {
     this.stop();
     await this.deps.outbox.flush();
@@ -185,6 +192,8 @@ export class KeeperControl {
           }
           const iterator = agentManager.startTurnHeld(context, req.text, options);
           void drain(iterator, this.deps.logger, req.agentId);
+          // Held in the lane so a close or reload cannot tear the session down mid-start.
+          await waitStart(agentManager, req.agentId);
           return "turn_started";
         },
       );
@@ -193,9 +202,6 @@ export class KeeperControl {
     }
     if ("rejected" in admitted) return reject(admitted.rejected, admitted.state);
     try {
-      if (admitted.value === "turn_started") {
-        await waitStart(agentManager, req.agentId);
-      }
       await receipts.complete(req.agentId, req.idempotencyKey, fingerprint, admitted.value);
     } catch (error) {
       // The provider may have the message; the pending receipt makes every retry report that.
