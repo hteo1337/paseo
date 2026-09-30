@@ -38,6 +38,8 @@ export interface KeeperControlDeps {
 export class KeeperControl {
   private readonly seen = new Map<string, { incarnation: string | null; lifecycle: string }>();
 
+  private stop: () => void = () => {};
+
   constructor(private readonly deps: KeeperControlDeps) {}
 
   /** Feeds the outbox from the manager; returns the unsubscribe. */
@@ -49,13 +51,15 @@ export class KeeperControl {
     const offEvents = manager.subscribe((event) => this.onManagerEvent(event), {
       replayState: false,
     });
-    return () => {
+    this.stop = () => {
       offPermissions();
       offEvents();
     };
+    return this.stop;
   }
 
   async close(): Promise<void> {
+    this.stop();
     await this.deps.outbox.flush();
     this.deps.outbox.close();
   }

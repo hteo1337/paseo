@@ -73,6 +73,16 @@ describe("keeper atomic send", () => {
     expect(h.provider.callsOf("interrupt")).toEqual([]);
   });
 
+  test("a send queued behind a session reload is rejected against the new incarnation", async () => {
+    const h = await setup();
+    const seen = await observe(h);
+    const reloading = h.ctx.daemon.daemon.agentManager.reloadAgentSession(h.agentId);
+    const reply = await h.ctx.client.keeperSendMessage(sendParams(h, seen, "k3b"));
+    await reloading;
+    expect(reply).toMatchObject({ result: "rejected", reason: "stale_incarnation" });
+    expectNoSideEffects(h);
+  });
+
   test("a question that arrived before admission rejects the stale send untouched", async () => {
     const h = await setup();
     const seen = await observe(h);
