@@ -31,6 +31,20 @@ function input(agentId: string): KeeperEventInput {
 }
 
 describe("KeeperEventOutbox", () => {
+  test("an append after a torn tail survives the next restart", async () => {
+    const d = await dir();
+    const first = await KeeperEventOutbox.open(d);
+    first.append(input("a"));
+    await first.flush();
+    await appendFile(path.join(d, "events.jsonl"), '{"eventId":"torn');
+    const second = await KeeperEventOutbox.open(d);
+    second.append(input("b"));
+    await second.flush();
+    const third = await KeeperEventOutbox.open(d);
+    const page = await third.read(null, 10, 0);
+    expect(page.events.map((e) => e.agentId)).toEqual(["a", "b"]);
+  });
+
   test("continues sequence numbers and epoch across a restart", async () => {
     const d = await dir();
     const first = await KeeperEventOutbox.open(d);
