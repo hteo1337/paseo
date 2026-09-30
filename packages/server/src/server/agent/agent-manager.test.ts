@@ -13423,7 +13423,6 @@ test("failed startup history closes the session without registering an agent", a
   }
 });
 
-
 test("usage session is a pure read of the live adapter and disappears on close", async () => {
   const descriptor = {
     provider: "claude",
@@ -13453,7 +13452,6 @@ test("usage session is a pure read of the live adapter and disappears on close",
   }
   expect(manager.usageSession(agent.id)).toBeNull();
 });
-
 
 test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
@@ -13610,4 +13608,3 @@ test("set_model: null provider report preserves the requested model without poli
   expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
   await manager.closeAgent(agent.id);
 });
-
