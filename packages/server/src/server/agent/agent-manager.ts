@@ -354,6 +354,8 @@ export interface CreateAgentOptions {
 }
 
 export interface AgentManagerOptions {
+  /** Counts pending-permission changes per agent; only the keeper control API reads them. */
+  trackPermissions?: boolean;
   pluginLifecycle?: PluginLifecycle;
   /** An internal workspace makes every agent created inside it internal. */
   clients?: ProviderClientMap;
@@ -871,6 +873,7 @@ export class AgentManager {
   private onWorkspaceStateMayHaveChanged?: (params: { cwd: string }) => void;
   private logger: Logger;
   private readonly rescueTimeouts: Required<AgentManagerRescueTimeouts>;
+  private readonly trackPermissions: boolean;
   private readonly beforeSteerUnavailableFallback?: AgentManagerOptions["beforeSteerUnavailableFallback"];
   private acceptingAgentRegistrations = true;
   private readonly runAdmissionHolds = new Set<
@@ -880,6 +883,7 @@ export class AgentManager {
 
   constructor(options: AgentManagerOptions) {
     this.pluginLifecycle = options.pluginLifecycle;
+    this.trackPermissions = options.trackPermissions === true;
     this.idFactory = options?.idFactory ?? (() => randomUUID());
     this.registry = options?.registry;
     this.durableTimelineStore = options?.durableTimelineStore;
@@ -3324,6 +3328,18 @@ export class AgentManager {
     guard: AgentAdmissionGuard,
     commit: (context: AgentAdmissionContext) => Promise<T>,
   ): Promise<AgentAdmissionResult<T>> {
+    // The lifecycle lane is held too, so reload, archive and detach cannot tear the session down
+    // between the comparison and the send.
+    return this.runLifecycleMutation(agentId, () =>
+      this.admitGuardedInLane(agentId, guard, commit),
+    );
+  }
+
+  private async admitGuardedInLane<T>(
+    agentId: string,
+    guard: AgentAdmissionGuard,
+    commit: (context: AgentAdmissionContext) => Promise<T>,
+  ): Promise<AgentAdmissionResult<T>> {
     return this.runForegroundMutation(agentId, async () => {
       const check = async (): Promise<AgentAdmissionRejection | AgentAdmissionContext> => {
         await this.drainSessionEvents(agentId);
@@ -4416,10 +4432,7 @@ export class AgentManager {
       updatedAt: options?.updatedAt ?? now,
       availableModes: [],
       currentModeId: null,
-      pendingPermissions: new TrackedPermissionMap(
-        this.permissionLedgerFor(resolvedAgentId),
-        sessionIncarnation,
-      ),
+      pendingPermissions: this.createPendingPermissions(resolvedAgentId, sessionIncarnation),
       bufferedPermissionResolutions: new Map(),
       inFlightPermissionResponses: new Set(),
       pendingReplacement: false,
@@ -4441,6 +4454,15 @@ export class AgentManager {
       internal: config.internal ?? false,
       labels: options?.labels ?? {},
     } as ActiveManagedAgent;
+  }
+
+  private createPendingPermissions(
+    agentId: string,
+    sessionIncarnation: string,
+  ): Map<string, AgentPermissionRequest> {
+    return this.trackPermissions
+      ? new TrackedPermissionMap(this.permissionLedgerFor(agentId), sessionIncarnation)
+      : new Map();
   }
 
   private async loadCommittedTimelineSeed(
@@ -5442,7 +5464,6 @@ export class AgentManager {
         this.emitState(agent);
         return undefined;
       case "model_changed":
-
         flags.shouldDispatchEvent = false;
         return this.onProviderModelChanged(agent, event.runtimeInfo);
       case "thinking_option_changed":
