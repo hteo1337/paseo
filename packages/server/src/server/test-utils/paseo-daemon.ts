@@ -54,6 +54,7 @@ interface TestPaseoDaemonOptions {
   autoArchiveAfterMerge?: boolean;
   resumeOnStartup?: boolean;
   resumePrompt?: string;
+  keeperControlEnabled?: boolean;
   pluginsEnabled?: PaseoDaemonConfig["pluginsEnabled"];
   pluginRegistryUrl?: PaseoDaemonConfig["pluginRegistryUrl"];
   builtinPlugins?: BuiltinPluginLoader;
@@ -231,6 +232,7 @@ async function prepareTestDaemonConfig(
     autoArchiveAfterMerge: options.autoArchiveAfterMerge,
     resumeOnStartup: options.resumeOnStartup,
     resumePrompt: options.resumePrompt,
+    keeperControlEnabled: options.keeperControlEnabled,
     pluginsEnabled: options.pluginsEnabled,
     plugins: options.plugins,
     pluginRegistryUrl: options.pluginRegistryUrl,
