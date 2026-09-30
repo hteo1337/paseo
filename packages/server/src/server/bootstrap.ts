@@ -1879,14 +1879,21 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
   const unclosed: string[] = [];
   await Promise.all(
     agents.map(async (agent) => {
+      let settled = false;
       try {
+        const closing = agentManager.closeAgent(agent.id);
+        closing
+          .finally(() => {
+            settled = true;
+          })
+          .catch(() => undefined);
         await withTimeout({
-          promise: agentManager.closeAgent(agent.id),
+          promise: closing,
           timeoutMs: AGENT_CLOSE_TIMEOUT_MS,
           label: `close agent ${agent.id}`,
         });
       } catch (err) {
-        unclosed.push(agent.id);
+        if (!settled) unclosed.push(agent.id);
         logger.error({ err, agentId: agent.id }, "Failed to close agent");
       }
     }),
