@@ -119,6 +119,24 @@ describe("keeper atomic send", () => {
     expect(h.provider.callsOf("startTurn")).toHaveLength(1);
   });
 
+  test("a close queued behind a held start waits for the acknowledgement", async () => {
+    const h = await setup();
+    const seen = await observe(h);
+    const release = h.provider.holdStartTurn();
+    const sending = h.ctx.client.keeperSendMessage(sendParams(h, seen, "k3c"));
+    await until(() => h.provider.heldStarts === 1, "provider to hold the start");
+    let closed = false;
+    const closing = (async () => {
+      await h.ctx.daemon.daemon.agentManager.closeAgent(h.agentId);
+      closed = true;
+    })();
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    expect(closed).toBe(false);
+    release();
+    expect(await sending).toMatchObject({ result: "accepted", delivery: "turn_started" });
+    await closing;
+  });
+
   test("a retry that overlaps the first attempt sends at most once", async () => {
     const h = await setup();
     const seen = await observe(h);
