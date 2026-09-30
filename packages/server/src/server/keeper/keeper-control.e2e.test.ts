@@ -1,8 +1,9 @@
 import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
+import { AgentRunState } from "../agent/agent-run-state.js";
 import { ControllableAgentClient } from "../test-utils/controllable-agent-client.js";
 import { KeeperSendReceipts, sendFingerprint } from "./send-receipts.js";
 
@@ -29,6 +30,7 @@ async function setup(keeperControlEnabled = true): Promise<Harness> {
 afterEach(async () => {
   await harness?.ctx.cleanup();
   harness = null;
+  vi.restoreAllMocks();
 }, 60_000);
 
 async function until(check: () => boolean | Promise<boolean>, what: string): Promise<void> {
@@ -135,6 +137,25 @@ describe("keeper atomic send", () => {
     release();
     expect(await sending).toMatchObject({ result: "accepted", delivery: "turn_started" });
     await closing;
+  });
+
+  test("a turn that finishes at once still reports the acknowledgement", async () => {
+    const h = await setup();
+    const seen = await observe(h);
+    const start = vi.spyOn(AgentRunState.prototype, "settleForegroundStart");
+    const settle = vi.spyOn(AgentRunState.prototype, "settleForegroundRun");
+    h.provider.finishOnStart = true;
+    const reply = await h.ctx.client.keeperSendMessage(sendParams(h, seen, "k3d"));
+    expect(start).toHaveBeenCalledWith(
+      expect.objectContaining({ kind: "foreground" }),
+      expect.objectContaining({ status: "started" }),
+    );
+    await until(() => {
+      for (const [id] of settle.mock.calls) if (id === h.agentId) return true;
+      return false;
+    }, "foreground settlement primitive");
+    expect(reply).toMatchObject({ result: "accepted", delivery: "turn_started" });
+    expect(h.provider.callsOf("startTurn")).toHaveLength(1);
   });
 
   test("a retry that overlaps the first attempt sends at most once", async () => {
