@@ -74,6 +74,11 @@ export class KeeperEventOutbox {
     if (!reuse) await writeJsonFileAtomic(metaPath, { epoch });
     const maxEvents = options.maxEvents ?? 10_000;
     const loaded = parseEvents(raw ?? "").slice(-maxEvents);
+    if (raw && !isCleanLog(raw, loaded.length)) {
+      // A torn tail would swallow the next append, so the log is rewritten first.
+      const body = loaded.map((e) => JSON.stringify(e)).join("\n");
+      await writeFileAtomic(path.join(directory, "events.jsonl"), body ? `${body}\n` : "");
+    }
     const now = options.now ?? (() => new Date());
     return new KeeperEventOutbox(directory, epoch, loaded, maxEvents, now);
   }
@@ -206,6 +211,10 @@ async function readEpoch(file: string): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function isCleanLog(raw: string, parsed: number): boolean {
+  return raw.endsWith("\n") && raw.split("\n").filter(Boolean).length === parsed;
 }
 
 function parseEvents(raw: string): KeeperEvent[] {
