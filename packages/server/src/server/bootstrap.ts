@@ -1029,6 +1029,7 @@ export async function createPaseoDaemon(
   });
   const initialAgentManagerState = providerSnapshotManager.getAgentManagerProviderState();
   const agentManager = new AgentManager({
+    trackPermissions: config.keeperControlEnabled === true,
     pluginLifecycle: pluginRuntime,
     pluginAgentTools: pluginRuntime,
     clients: initialAgentManagerState.clients,
@@ -2046,7 +2047,6 @@ export async function createPaseoDaemon(
     scriptHealthMonitor.stop();
     unsubscribeIdleRuntimeCleanup();
     await idleRuntimeCleanup.close();
-    await keeperControl?.close();
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     await finishSubscriptions.close();
@@ -2060,6 +2060,7 @@ export async function createPaseoDaemon(
       label: "drain plugin lifecycle events",
     }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
     await agentManager.flushForShutdown().catch(() => undefined);
+    await keeperControl?.close();
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
     await agentProviderRuntime.shutdown();
