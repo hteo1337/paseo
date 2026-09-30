@@ -91,6 +91,11 @@ are stale. Events buffered but not flushed at a crash are lost, which is why rea
 
 ## Known races
 
+The guarded send holds the agent's lifecycle lane as well as its foreground lane, so reload, archive
+and detach queue behind it. The archive flag is re-read after the receipt is reserved; the tiny window
+between that read and the provider call is not closed. With the flag off, pending permissions stay a
+plain map and no generation is counted.
+
 The daemon cannot exclude the provider emitting a question at the same moment it accepts the turn; it
 preserves that question rather than excluding it. Turn events from a session that was just replaced may
 carry the newer incarnation. A provider that cannot steer while a question is pending is reported as
