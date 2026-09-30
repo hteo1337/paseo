@@ -1865,13 +1865,14 @@ export async function createPaseoDaemon(
     // Freeze both ingress and registration before taking the agent closure snapshot.
     wsServer?.prepareForShutdown();
     agentManager.prepareForShutdown();
-    await closeAllAgents(logger, agentManager);
+    const unclosed = await closeAllAgents(logger, agentManager);
     await withTimeout({
       promise: pluginRuntime.drainEvents(),
       timeoutMs: AGENT_CLOSE_TIMEOUT_MS,
       label: "drain plugin lifecycle events",
     }).catch((error) => logger.warn({ err: error }, "Plugin lifecycle events did not finish"));
     await agentManager.flushForShutdown().catch(() => undefined);
+    keeperControl?.noteUnclosed(unclosed);
     await keeperControl?.close();
     detachAgentStoragePersistence();
     await agentStorage.flush().catch(() => undefined);
@@ -1925,8 +1926,9 @@ export async function createPaseoDaemon(
  */
 const AGENT_CLOSE_TIMEOUT_MS = 5_000;
 
-async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promise<void> {
+async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promise<string[]> {
   const agents = agentManager.listAgents();
+  const unclosed: string[] = [];
   await Promise.all(
     agents.map(async (agent) => {
       try {
@@ -1936,8 +1938,10 @@ async function closeAllAgents(logger: Logger, agentManager: AgentManager): Promi
           label: `close agent ${agent.id}`,
         });
       } catch (err) {
+        unclosed.push(agent.id);
         logger.error({ err, agentId: agent.id }, "Failed to close agent");
       }
     }),
   );
+  return unclosed;
 }
