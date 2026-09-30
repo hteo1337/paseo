@@ -165,7 +165,10 @@ export class KeeperControl {
           allowPendingPermissions: req.allowPendingPermissions,
           reserve: async () => {
             await receipts.reserve(req.agentId, req.idempotencyKey, fingerprint);
-            return { ok: true };
+            const latest = await this.deps.agentStorage.get(req.agentId);
+            if (!latest?.archivedAt) return { ok: true };
+            await receipts.release(req.agentId, req.idempotencyKey);
+            return { ok: false, reason: "agent_archived" };
           },
           release: () => receipts.release(req.agentId, req.idempotencyKey),
         },
