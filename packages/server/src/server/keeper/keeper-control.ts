@@ -194,13 +194,17 @@ export class KeeperControl {
           }
           const iterator = agentManager.startTurnHeld(context, req.text, options);
           // The first event means the provider accepted the turn, even if it then ends at once.
-          // Waiting here keeps the lane held so a close or reload cannot interleave.
-          const first = await withTimeout({
-            promise: iterator.next(),
+          // One continuation drains the rest, also when the result arrives after the timeout.
+          const firstEvent = iterator.next();
+          void firstEvent.then(
+            (first) => drain(iterator, this.deps.logger, req.agentId, first.done === true),
+            () => undefined,
+          );
+          await withTimeout({
+            promise: firstEvent,
             timeoutMs: START_TIMEOUT_MS,
             label: "keeper turn start",
           });
-          void drain(iterator, this.deps.logger, req.agentId, first.done === true);
           return "turn_started";
         },
       );
