@@ -539,6 +539,7 @@ function resolveProfileLists(persisted: ReturnType<typeof loadPersistedConfig>) 
   };
 }
 
+// eslint-disable-next-line complexity
 function resolveStaticLoadConfigSettings(
   env: NodeJS.ProcessEnv,
   cli: CliConfigOverrides | undefined,
@@ -549,6 +550,7 @@ function resolveStaticLoadConfigSettings(
     mcpInjectIntoAgents:
       cli?.mcpInjectIntoAgents ?? persisted.daemon?.mcp?.injectIntoAgents ?? false,
     browserToolsEnabled: resolveBrowserToolsEnabled(persisted),
+    keeperControlEnabled: persisted.daemon?.keeperControl?.enabled ?? false,
     autoArchiveAfterMerge: persisted.daemon?.autoArchiveAfterMerge ?? false,
     appendSystemPrompt: resolveAppendSystemPrompt(persisted),
     ...resolveProfileLists(persisted),
@@ -574,6 +576,7 @@ export type ResolvedDaemonSettings = Pick<
   | "corsAllowedOrigins"
   | "hostnames"
   | "trustedProxies"
+  | "keeperControlEnabled"
   | "mcpEnabled"
   | "mcpInjectIntoAgents"
   | "browserToolsEnabled"

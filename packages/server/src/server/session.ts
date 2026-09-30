@@ -16,6 +16,8 @@ import { isAbsolute } from "node:path";
 import { CreationService, type CreatedAgent } from "./creation/index.js";
 import type { CreationSnapshot, AgentCreateRequest } from "@getpaseo/protocol/messages";
 import type { MessageReceipts } from "./message-receipts/index.js";
+import type { KeeperControl } from "./keeper/keeper-control.js";
+import { dispatchKeeperMessage } from "./keeper/keeper-session-handlers.js";
 import equal from "fast-deep-equal";
 import { WorkspaceSetupObservation } from "./workspace-setup-observation.js";
 import { SessionDelivery, type OwnedSubscription } from "./session/owned-subscriptions/index.js";
@@ -467,6 +469,7 @@ export interface SessionOptions {
   agentStorage: AgentStorage;
   messageReceipts: Pick<MessageReceipts, "send">;
   agentMessages: AgentMessageDelivery;
+  keeperControl?: KeeperControl | null;
   creationService: Pick<CreationService, "create" | "subscribe">;
   projectRegistry: ProjectRegistry;
   workspaceRegistry: WorkspaceRegistry;
@@ -831,9 +834,11 @@ export class Session {
   private readonly workspaceScripts: WorkspaceScriptsService;
   private readonly messageReceipts: Pick<MessageReceipts, "send">;
   private readonly agentMessages: AgentMessageDelivery;
+  private readonly keeperControl: KeeperControl | null;
   private readonly createAgentLifecycleDispatch: CreateAgentLifecycleDispatch;
   private readonly creationService: Pick<CreationService, "create" | "subscribe">;
 
+  // eslint-disable-next-line complexity
   constructor(options: SessionOptions) {
     const {
       clientId,
@@ -917,6 +922,7 @@ export class Session {
     this.paseoHome = paseoHome;
     this.messageReceipts = options.messageReceipts;
     this.agentMessages = options.agentMessages;
+    this.keeperControl = options.keeperControl ?? null;
     this.creationService = options.creationService;
     this.projectIcons = new ProjectIconReader(paseoHome);
     this.worktreesRoot = worktreesRoot;
@@ -2786,6 +2792,11 @@ export class Session {
         return this.handleAgentTimelineAppendRequest(msg);
       case "agent.timeline.search.request":
         return this.handleAgentTimelineSearchRequest(msg, source);
+      case "keeper.agent.get_snapshot.request":
+      case "keeper.agent.send_message.request":
+      case "keeper.agent.get_pending_request.request":
+      case "keeper.events.read.request":
+        return dispatchKeeperMessage(this.keeperControl, msg, (out) => this.emit(out));
       case "agent.timeline.list_prompts.request":
         return this.handleAgentTimelineListPromptsRequest(msg, source);
       case "agent.provider_subagents.list.request":
