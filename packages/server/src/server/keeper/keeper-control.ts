@@ -243,17 +243,20 @@ export class KeeperControl {
     });
   }
 
-  /** A rejection means nothing was sent, so the receipt must go; one retry before giving up. */
+  /** A rejection means nothing was sent, so the receipt must go; one retry, then the error surfaces. */
   private async releaseReceipt(req: KeeperSendMessageRequest): Promise<void> {
     const { receipts, logger } = this.deps;
+    let last: unknown;
     for (let attempt = 0; attempt < 2; attempt += 1) {
       try {
         await receipts.release(req.agentId, req.idempotencyKey);
         return;
       } catch (error) {
+        last = error;
         logger.error({ err: error, agentId: req.agentId }, "Keeper receipt release failed");
       }
     }
+    throw last;
   }
 
   private emit(
