@@ -19,7 +19,7 @@ import type { AgentStorage } from "../agent/agent-storage.js";
 import type { PermissionChange } from "../agent/tracked-permission-map.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import type { KeeperEventInput, KeeperEventOutbox } from "./event-outbox.js";
-import { type KeeperSendReceipts, sendFingerprint } from "./send-receipts.js";
+import { type KeeperSendReceipts, type ReceiptOutcome, sendFingerprint } from "./send-receipts.js";
 
 const DETAIL_INPUT_LIMIT = 8_000;
 const DETAIL_TEXT_LIMIT = 2_000;
@@ -71,6 +71,12 @@ export class KeeperControl {
     this.stop();
     await this.deps.outbox.flush();
     this.deps.outbox.close();
+  }
+
+  /** Set once the outbox latched a write error; the feed then stops advancing. */
+  feedError(): string | null {
+    const error = this.deps.outbox.lastWriteError();
+    return error ? `event feed stalled: ${error.message}` : null;
   }
 
   get enabled(): boolean {
@@ -169,6 +175,7 @@ export class KeeperControl {
   ): Promise<SendPayload> {
     const { agentManager, receipts } = this.deps;
     let admitted;
+    const held: { outcome: ReceiptOutcome | null } = { outcome: null };
     try {
       admitted = await agentManager.admitGuarded(
         req.agentId,
@@ -177,13 +184,17 @@ export class KeeperControl {
           expectedPermissionGeneration: req.expectedPermissionGeneration,
           allowPendingPermissions: req.allowPendingPermissions,
           reserve: async () => {
-            await receipts.reserve(req.agentId, req.idempotencyKey, fingerprint);
+            const outcome = await receipts.reserve(req.agentId, req.idempotencyKey, fingerprint);
+            if (outcome.kind !== "none") {
+              held.outcome = outcome;
+              return { ok: false, reason: `receipt_${outcome.kind}` };
+            }
             const latest = await this.deps.agentStorage.get(req.agentId);
             if (!latest?.archivedAt) return { ok: true };
-            await receipts.release(req.agentId, req.idempotencyKey);
+            await this.releaseReceipt(req);
             return { ok: false, reason: "agent_archived" };
           },
-          release: () => receipts.release(req.agentId, req.idempotencyKey),
+          release: () => this.releaseReceipt(req),
         },
         async (context) => {
           const options = { clientMessageId: `keeper:${req.idempotencyKey}` };
@@ -211,7 +222,14 @@ export class KeeperControl {
     } catch (error) {
       return reply("outcome_unknown", null, { error: messageOf(error) });
     }
-    if ("rejected" in admitted) return reject(admitted.rejected, admitted.state);
+    if ("rejected" in admitted) {
+      const prior = held.outcome;
+      if (prior?.kind === "duplicate")
+        return reply("duplicate", null, { delivery: prior.delivery });
+      if (prior?.kind === "outcome_unknown") return reply("outcome_unknown", null);
+      if (prior?.kind === "idempotency_conflict") return reject("idempotency_conflict");
+      return reject(admitted.rejected, admitted.state);
+    }
     try {
       await receipts.complete(req.agentId, req.idempotencyKey, fingerprint, admitted.value);
     } catch (error) {
@@ -223,6 +241,19 @@ export class KeeperControl {
       delivery: admitted.value,
       current: current ? summarize(current) : null,
     });
+  }
+
+  /** A rejection means nothing was sent, so the receipt must go; one retry before giving up. */
+  private async releaseReceipt(req: KeeperSendMessageRequest): Promise<void> {
+    const { receipts, logger } = this.deps;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await receipts.release(req.agentId, req.idempotencyKey);
+        return;
+      } catch (error) {
+        logger.error({ err: error, agentId: req.agentId }, "Keeper receipt release failed");
+      }
+    }
   }
 
   private emit(
