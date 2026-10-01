@@ -51,7 +51,8 @@ Results: `accepted`, `duplicate`, `rejected` (with `reason`), `outcome_unknown`.
 `permission_pending`, `turn_active`, `steer_unavailable`, `admission_busy`, `idempotency_conflict`,
 `send_failed`. `rejected` always means zero side effects; retry after a fresh snapshot. A receipt that appears
 between the pre-check and the reserve answers `duplicate` or `outcome_unknown` and is never sent.
-A failed receipt release is retried once; if it fails again the reply is `outcome_unknown`, never `rejected`,
+The receipt lookup runs before any agent-existence check, so a retry after an unknown outcome
+still answers `outcome_unknown`. A failed receipt release is retried once; if it fails again the reply is `outcome_unknown`, never `rejected`,
 because the pending receipt is still on disk. A provider error after the start was dispatched stays
 `outcome_unknown`, since the daemon cannot tell whether the provider acted.
 
