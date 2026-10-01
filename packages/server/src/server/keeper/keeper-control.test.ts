@@ -22,10 +22,12 @@ function build(options: {
   releaseFailures?: number;
   writeError?: Error;
   rejectAt?: "second";
+  lookup?: ReceiptOutcome;
+  agentGone?: boolean;
 }) {
   const calls = { released: 0, committed: 0, logged: 0 };
   const manager = {
-    getAgent: () => ({}),
+    getAgent: () => (options.agentGone ? null : {}),
     admitGuarded: async (_id: string, guard: { reserve: () => Promise<{ ok: boolean }> }) => {
       const reserved = await guard.reserve();
       if (!reserved.ok) return { rejected: (reserved as { reason: string }).reason, state: null };
@@ -40,7 +42,7 @@ function build(options: {
   };
   const receipts = {
     serialize: (_a: string, _k: string, op: () => Promise<unknown>) => op(),
-    lookup: async () => ({ kind: "none" }),
+    lookup: async () => options.lookup ?? { kind: "none" },
     reserve: async () => options.reserve,
     complete: async () => undefined,
     release: async () => {
@@ -91,6 +93,16 @@ describe("keeper control guards", () => {
     });
     expect(await control.send(request)).toMatchObject({ result: "outcome_unknown" });
     expect(calls).toMatchObject({ released: 2, logged: 2 });
+  });
+
+  test("a pending receipt answers outcome_unknown even when the agent is gone", async () => {
+    const { control, calls } = build({
+      reserve: { kind: "none" },
+      lookup: { kind: "outcome_unknown" },
+      agentGone: true,
+    });
+    expect(await control.send(request)).toMatchObject({ result: "outcome_unknown" });
+    expect(calls.committed).toBe(0);
   });
 
   test("a latched outbox write error is reported by the feed", () => {
