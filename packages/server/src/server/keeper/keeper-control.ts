@@ -152,17 +152,15 @@ export class KeeperControl {
     const reject = (reason: string, state: AgentControlState | null = null) =>
       reply("rejected", reason, { current: state ? summarize(state) : null });
     if (!this.deps.enabled) return reject("disabled");
-    const { agentManager, receipts } = this.deps;
-    if (!agentManager.getAgent(req.agentId)) return reject("agent_not_found");
-    const record = await this.deps.agentStorage.get(req.agentId);
-    if (record?.archivedAt) return reject("agent_archived");
-
+    const { receipts } = this.deps;
     const fingerprint = sendFingerprint(req.text, req.onActiveTurn);
     return receipts.serialize(req.agentId, req.idempotencyKey, async () => {
       const prior = await receipts.lookup(req.agentId, req.idempotencyKey, fingerprint);
       if (prior.kind === "duplicate") return reply("duplicate", null, { delivery: prior.delivery });
       if (prior.kind === "outcome_unknown") return reply("outcome_unknown", null);
       if (prior.kind === "idempotency_conflict") return reject("idempotency_conflict");
+      const record = await this.deps.agentStorage.get(req.agentId);
+      if (record?.archivedAt) return reject("agent_archived");
       return this.admitAndSend(req, fingerprint, reply, reject);
     });
   }
