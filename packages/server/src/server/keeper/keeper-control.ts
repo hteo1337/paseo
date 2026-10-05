@@ -173,6 +173,7 @@ export class KeeperControl {
   ): Promise<SendPayload> {
     const { agentManager, receipts } = this.deps;
     let admitted;
+    const matched: { state: AgentControlState | null } = { state: null };
     const held: { outcome: ReceiptOutcome | null } = { outcome: null };
     try {
       admitted = await agentManager.admitGuarded(
@@ -181,8 +182,13 @@ export class KeeperControl {
           expectedSessionIncarnation: req.expectedSessionIncarnation,
           expectedPermissionGeneration: req.expectedPermissionGeneration,
           allowPendingPermissions: req.allowPendingPermissions,
-          reserve: async () => {
-            const outcome = await receipts.reserve(req.agentId, req.idempotencyKey, fingerprint);
+          // Identity recorded in the receipt is what the lane compared and matched, not the request.
+          reserve: async (seen) => {
+            const outcome = await receipts.reserve(req.agentId, req.idempotencyKey, fingerprint, {
+              bootId: this.bootId,
+              sessionIncarnation: seen.sessionIncarnation,
+              permissionGeneration: seen.permissionGeneration,
+            });
             if (outcome.kind !== "none") {
               held.outcome = outcome;
               return { ok: false, reason: `receipt_${outcome.kind}` };
@@ -195,6 +201,7 @@ export class KeeperControl {
           release: () => this.releaseReceipt(req),
         },
         async (context) => {
+          matched.state = context.state;
           const options = { clientMessageId: `keeper:${req.idempotencyKey}` };
           if (context.state.hasActiveTurn) {
             if (req.onActiveTurn === "reject") throw new AdmissionRefused("turn_active");
@@ -229,7 +236,13 @@ export class KeeperControl {
       return reject(admitted.rejected, admitted.state);
     }
     try {
-      await receipts.complete(req.agentId, req.idempotencyKey, fingerprint, admitted.value);
+      const matchedState = matched.state;
+      if (!matchedState) throw new Error("admitted without a matched state");
+      await receipts.complete(req.agentId, req.idempotencyKey, fingerprint, admitted.value, {
+        bootId: this.bootId,
+        sessionIncarnation: matchedState.sessionIncarnation,
+        permissionGeneration: matchedState.permissionGeneration,
+      });
     } catch (error) {
       // The provider may have the message; the pending receipt makes every retry report that.
       return reply("outcome_unknown", null, { error: messageOf(error) });
