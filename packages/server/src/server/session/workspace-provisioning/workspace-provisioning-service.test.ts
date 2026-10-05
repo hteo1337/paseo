@@ -495,7 +495,7 @@ test("resolveOrCreateWorkspaceIdForCreateAgent honors an explicitly requested wo
 });
 
 test("resolveOrCreateWorkspaceIdForCreateAgent creates a titled workspace when nothing is provided", async () => {
-  const dir = path.join(tmpDir, "plain");
+  const dir = path.join(os.homedir(), "Paseo", "patch-0025-titled-workspace");
 
   const id = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
     createdWorktree: null,
@@ -506,6 +506,161 @@ test("resolveOrCreateWorkspaceIdForCreateAgent creates a titled workspace when n
   const created = await workspaceRegistry.get(id);
   expect(created?.cwd).toBe(dir);
   expect(created?.title).toBe("My Title");
+});
+
+test("create-agent reuses only active directory workspaces and groups disposable cwds", async () => {
+  const cwd = path.join(os.homedir(), "Paseo", "patch-0025-directory");
+  const first = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd,
+    initialTitle: "Original",
+  });
+  const second = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd,
+    initialTitle: "Replacement",
+  });
+  expect(second).toBe(first);
+  expect(await workspaceRegistry.get(first)).toMatchObject({ cwd, title: "Original" });
+
+  const worktreeCwd = path.join(tmpDir, "owned-worktree");
+  mkdirSync(worktreeCwd);
+  gitRoots.add(worktreeCwd);
+  const worktreeProject = await provisioning.findOrCreateProjectForDirectory(worktreeCwd);
+  const registeredWorktree = createPersistedWorkspaceRecord({
+    workspaceId: "wks-owned-worktree",
+    projectId: worktreeProject.projectId,
+    cwd: worktreeCwd,
+    kind: "worktree",
+    displayName: "Owned worktree",
+    worktreeRoot: worktreeCwd,
+    mainRepoRoot: path.join(tmpDir, "main-repo"),
+    isPaseoOwnedWorktree: true,
+    createdAt: ARCHIVED_AT,
+    updatedAt: ARCHIVED_AT,
+  });
+  await workspaceRegistry.upsert(registeredWorktree);
+  const isolated = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: worktreeCwd,
+    initialTitle: null,
+  });
+  expect(isolated).not.toBe(registeredWorktree.workspaceId);
+  expect((await workspaceRegistry.get(registeredWorktree.workspaceId))?.kind).toBe("worktree");
+
+  const concurrentCwd = path.join(os.homedir(), "Paseo", "patch-0025-concurrent");
+  const mutations: Array<{ workspaceId: string; expectsInitialAgent?: boolean }> = [];
+  const unsubscribe = workspaceRegistry.subscribeToMutations((mutation) => {
+    if (mutation.kind === "upsert" && mutation.workspace.cwd === concurrentCwd) {
+      mutations.push({
+        workspaceId: mutation.workspaceId,
+        expectsInitialAgent: mutation.expectsInitialAgent,
+      });
+    }
+  });
+  const [concurrentA, concurrentB] = await Promise.all(
+    ["First agent", "Second agent"].map((initialTitle) =>
+      provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+        createdWorktree: null,
+        cwd: concurrentCwd,
+        initialTitle,
+      }),
+    ),
+  );
+  unsubscribe();
+  expect(concurrentB).toBe(concurrentA);
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => workspace.cwd === concurrentCwd),
+  ).toHaveLength(1);
+  expect(mutations).toEqual([{ workspaceId: concurrentA, expectsInitialAgent: true }]);
+
+  const archivedCwd = path.join(os.homedir(), "Paseo", "patch-0025-archived");
+  const archived = await provisioning.createWorkspaceForDirectory(archivedCwd);
+  await workspaceRegistry.archive(archived.workspaceId, ARCHIVED_AT);
+  const replacement = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: archivedCwd,
+    initialTitle: "New workspace",
+  });
+  expect(replacement).not.toBe(archived.workspaceId);
+  expect((await workspaceRegistry.get(archived.workspaceId))?.archivedAt).toBe(ARCHIVED_AT);
+  expect((await workspaceRegistry.get(replacement))?.title).toBe("New workspace");
+
+  const throwawayA = path.join("/tmp", "paseo-patch-0025-a");
+  const throwawayB = path.join(os.tmpdir(), "paseo-patch-0025-b");
+  expect(throwawayA).not.toBe(throwawayB);
+  const scratchA = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: throwawayA,
+    initialTitle: null,
+  });
+  const scratchB = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: throwawayB,
+    initialTitle: null,
+  });
+  expect(scratchB).toBe(scratchA);
+  expect((await workspaceRegistry.get(scratchA))?.cwd).toBe(
+    path.join(os.homedir(), "Paseo", "Scratch"),
+  );
+  for (const throwawayCwd of [
+    "/private/tmp/paseo-patch-0025-c",
+    "/private/var/folders/paseo-patch-0025-d",
+    "/var/folders/paseo-patch-0025-e",
+    path.join(os.homedir(), "Paseo", "Sandbox", "paseo-patch-0025-e"),
+  ]) {
+    expect(throwawayCwd).not.toBe(throwawayA);
+    const scratch = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+      createdWorktree: null,
+      cwd: throwawayCwd,
+      initialTitle: null,
+    });
+    expect(scratch).toBe(scratchA);
+  }
+
+  const checkout = path.join(tmpDir, "scratchpad");
+  mkdirSync(path.join(checkout, ".git"), { recursive: true });
+  gitRoots.add(checkout);
+  const checkoutId = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: checkout,
+    initialTitle: "Real checkout",
+  });
+  expect(checkoutId).not.toBe(scratchA);
+  expect((await workspaceRegistry.get(checkoutId))?.cwd).toBe(checkout);
+  const checkoutSubdir = path.join(checkout, "src");
+  mkdirSync(checkoutSubdir);
+  const checkoutSubdirId = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: checkoutSubdir,
+    initialTitle: null,
+  });
+  expect((await workspaceRegistry.get(checkoutSubdirId))?.cwd).toBe(checkoutSubdir);
+
+  const canonical = path.join(tmpDir, "alias-target");
+  const alias = path.join(tmpDir, "alias");
+  mkdirSync(path.join(canonical, ".git"), { recursive: true });
+  symlinkSync(canonical, alias, directorySymlinkType);
+  gitRoots.add(canonical);
+  const canonicalProject = await provisioning.findOrCreateProjectForDirectory(canonical);
+  await workspaceRegistry.upsert(
+    createPersistedWorkspaceRecord({
+      workspaceId: "wks-alias",
+      projectId: canonicalProject.projectId,
+      cwd: alias,
+      kind: "local_checkout",
+      displayName: "Alias",
+      worktreeRoot: canonical,
+      createdAt: ARCHIVED_AT,
+      updatedAt: ARCHIVED_AT,
+    }),
+  );
+  const aliasId = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: canonical,
+    initialTitle: null,
+  });
+  expect(aliasId).toBe("wks-alias");
 });
 
 test("createWorkspaceForDirectory always mints a fresh workspace even when one already occupies the cwd", async () => {
