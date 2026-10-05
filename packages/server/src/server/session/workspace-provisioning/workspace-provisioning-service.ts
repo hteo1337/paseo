@@ -1,6 +1,7 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
-import { basename, resolve } from "node:path";
+import { basename, join, resolve } from "node:path";
+import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
@@ -101,6 +102,7 @@ export function createWorkspaceProvisioningService(deps: {
   lifecycle?: PluginLifecycle;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
+  const createAgentWorkspaceLocks = new Map<string, Promise<void>>();
 
   /**
    * Placement facts at a workspace directory, or null when there is nothing
@@ -353,32 +355,61 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<string> {
     if (input.createdWorktree) return input.createdWorktree.workspace.workspaceId;
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
+
     const cwd = resolve(input.cwd);
     const sandbox = resolve(homedir(), "Paseo", "Sandbox");
+    const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
     const throwaway =
-      cwd === "/tmp" ||
-      cwd.startsWith("/tmp/") ||
-      cwd === "/private/tmp" ||
-      cwd.startsWith("/private/tmp/") ||
-      cwd === "/private/var/folders" ||
-      cwd.startsWith("/private/var/folders/") ||
-      cwd === "/var/folders" ||
-      cwd.startsWith("/var/folders/") ||
-      cwd.split(/[\\/]/).includes("scratchpad") ||
-      cwd === sandbox ||
-      cwd.startsWith(`${sandbox}/`);
+      !existsSync(join(cwd, ".git")) &&
+      (["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].some(inDirectory) ||
+        inDirectory(sandbox));
     const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
-    const knownIds = new Set(
-      (await workspaceRegistry.list()).map((workspace) => workspace.workspaceId),
-    );
-    const workspace = await findOrCreateWorkspaceForDirectory(workspaceCwd);
-    if (!knownIds.has(workspace.workspaceId)) {
-      await workspaceRegistry.upsert(
-        { ...workspace, title: throwaway ? null : input.initialTitle?.trim() || null },
-        { expectsInitialAgent: true },
-      );
+
+    const realPath = (target: string) => {
+      try {
+        return realpathSync(target);
+      } catch {
+        return resolve(target);
+      }
+    };
+    const lockKey = realPath(workspaceCwd);
+    const previous = createAgentWorkspaceLocks.get(lockKey);
+    let release!: () => void;
+    const current = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    createAgentWorkspaceLocks.set(lockKey, current);
+    if (previous) await previous;
+    try {
+      const project = await findOrCreateProjectForDirectory(workspaceCwd);
+      const workspaces = await workspaceRegistry.list();
+      const active = workspaces
+        .filter(
+          (workspace) =>
+            !workspace.archivedAt &&
+            workspace.projectId === project.projectId &&
+            workspace.kind !== "worktree" &&
+            !workspace.isPaseoOwnedWorktree &&
+            !(workspace.worktreeRoot && workspace.mainRepoRoot) &&
+            areEquivalentPaths(realPath(workspace.cwd), lockKey),
+        )
+        .sort(
+          (left, right) =>
+            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+            left.workspaceId.localeCompare(right.workspaceId),
+        )[0];
+      if (active) return active.workspaceId;
+      return (
+        await createWorkspaceForDirectory(workspaceCwd, input.initialTitle, undefined, {
+          expectsInitialAgent: true,
+        })
+      ).workspaceId;
+    } finally {
+      if (createAgentWorkspaceLocks.get(lockKey) === current) {
+        createAgentWorkspaceLocks.delete(lockKey);
+      }
+      release();
     }
-    return workspace.workspaceId;
   }
 
   async function resolveRestoredAutoArchiveChangeRequestUrl(
