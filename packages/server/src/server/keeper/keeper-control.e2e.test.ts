@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, describe, expect, test } from "vitest";
@@ -71,6 +71,29 @@ describe("keeper atomic send", () => {
     expect(reply).toMatchObject({ result: "accepted", delivery: "turn_started", reason: null });
     expect(h.provider.callsOf("startTurn")).toEqual([{ kind: "startTurn", text: "hello k1" }]);
     expect(h.provider.callsOf("interrupt")).toEqual([]);
+  });
+
+  test("a completed receipt carries the admitted identity and a rejected send writes none", async () => {
+    const h = await setup();
+    const dir = path.join(h.ctx.daemon.paseoHome, "keeper-send-receipts");
+    const files = () => (existsSync(dir) ? readdirSync(dir) : []);
+    const receipts = () => files().map((f) => JSON.parse(readFileSync(path.join(dir, f), "utf8")));
+    const seen = await observe(h);
+    const stale = { ...sendParams(h, seen, "kr0"), expectedPermissionGeneration: 99 };
+    expect(await h.ctx.client.keeperSendMessage(stale)).toMatchObject({ result: "rejected" });
+    expect(files()).toEqual([]);
+    const { bootId } = await h.ctx.client.keeperGetSnapshot(h.agentId);
+    await h.ctx.client.keeperSendMessage(sendParams(h, seen, "kr1"));
+    expect(receipts()).toEqual([
+      expect.objectContaining({
+        state: "completed",
+        admission: {
+          bootId,
+          sessionIncarnation: seen.incarnation,
+          permissionGeneration: seen.permissionGeneration,
+        },
+      }),
+    ]);
   });
 
   test("a send queued behind a session reload is rejected against the new incarnation", async () => {
