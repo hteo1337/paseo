@@ -19,7 +19,12 @@ import type { AgentStorage } from "../agent/agent-storage.js";
 import type { PermissionChange } from "../agent/tracked-permission-map.js";
 import { withTimeout } from "../../utils/promise-timeout.js";
 import type { KeeperEventInput, KeeperEventOutbox } from "./event-outbox.js";
-import { type KeeperSendReceipts, type ReceiptOutcome, sendFingerprint } from "./send-receipts.js";
+import {
+  type KeeperSendReceipts,
+  type ReceiptOutcome,
+  sendFingerprint,
+  sendKey,
+} from "./send-receipts.js";
 
 const DETAIL_INPUT_LIMIT = 8_000;
 const DETAIL_TEXT_LIMIT = 2_000;
@@ -149,12 +154,15 @@ export class KeeperControl {
       error: null,
       ...extra,
     });
-    const reject = (reason: string, state: AgentControlState | null = null) =>
-      reply("rejected", reason, { current: state ? summarize(state) : null });
+    const compared: { state: AgentControlState | null } = { state: null };
+    const reject = (reason: string, state: AgentControlState | null = null) => {
+      compared.state = state;
+      return reply("rejected", reason, { current: state ? summarize(state) : null });
+    };
     if (!this.deps.enabled) return reject("disabled");
     const { receipts } = this.deps;
     const fingerprint = sendFingerprint(req.text, req.onActiveTurn);
-    return receipts.serialize(req.agentId, req.idempotencyKey, async () => {
+    const outcome = await receipts.serialize(req.agentId, req.idempotencyKey, async () => {
       const prior = await receipts.lookup(req.agentId, req.idempotencyKey, fingerprint);
       if (prior.kind === "duplicate") return reply("duplicate", null, { delivery: prior.delivery });
       if (prior.kind === "outcome_unknown") return reply("outcome_unknown", null);
@@ -163,6 +171,37 @@ export class KeeperControl {
       if (record?.archivedAt) return reject("agent_archived");
       return this.admitAndSend(req, fingerprint, reply, reject);
     });
+    if (outcome.result === "rejected" && outcome.reason !== "disabled") {
+      await this.recordRejected(req, outcome.reason, compared.state);
+    }
+    return outcome;
+  }
+
+  /** Daemon-side proof that a rejected send was attempted; durable before the reply goes out. */
+  private async recordRejected(
+    req: KeeperSendMessageRequest,
+    reason: string | null,
+    state: AgentControlState | null,
+  ): Promise<void> {
+    const { outbox, logger } = this.deps;
+    outbox.append({
+      category: "send",
+      type: "send.rejected",
+      agentId: req.agentId,
+      bootId: this.bootId,
+      sessionIncarnation: state?.sessionIncarnation ?? null,
+      permissionGeneration: state?.permissionGeneration ?? null,
+      permissionRequestId: null,
+      turnId: null,
+      lifecycle: null,
+      reason,
+      sendKey: sendKey(req.agentId, req.idempotencyKey),
+    });
+    try {
+      await outbox.flush();
+    } catch (error) {
+      logger.error({ err: error, agentId: req.agentId }, "Keeper reject event flush failed");
+    }
   }
 
   private async admitAndSend(
