@@ -114,6 +114,11 @@ export class KeeperSendReceipts {
   }
 }
 
+/** Stable id of a send attempt: hex sha256 over length-prefixed ("sendkey", agentId, idempotencyKey). */
+export function sendKey(agentId: string, key: string): string {
+  return digest("sendkey", agentId, key);
+}
+
 export function sendFingerprint(text: string, onActiveTurn: string): string {
   return digest("send", text, onActiveTurn);
 }
