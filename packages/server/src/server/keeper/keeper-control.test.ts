@@ -28,8 +28,12 @@ function build(options: {
   const calls = { released: 0, committed: 0, logged: 0 };
   const manager = {
     getAgent: () => (options.agentGone ? null : {}),
-    admitGuarded: async (_id: string, guard: { reserve: () => Promise<{ ok: boolean }> }) => {
-      const reserved = await guard.reserve();
+    admitGuarded: async (
+      _id: string,
+      guard: { reserve: (matched: unknown) => Promise<{ ok: boolean }> },
+    ) => {
+      const matched = { sessionIncarnation: "i", permissionGeneration: 0, pending: [] };
+      const reserved = await guard.reserve(matched);
       if (!reserved.ok) return { rejected: (reserved as { reason: string }).reason, state: null };
       if (options.rejectAt === "second") {
         await (guard as { release: () => Promise<void> }).release();
