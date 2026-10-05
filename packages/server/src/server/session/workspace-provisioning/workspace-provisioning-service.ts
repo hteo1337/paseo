@@ -1,6 +1,6 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
-import { basename, join, resolve } from "node:path";
+import { basename, dirname, join, resolve } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
@@ -359,8 +359,14 @@ export function createWorkspaceProvisioningService(deps: {
     const cwd = resolve(input.cwd);
     const sandbox = resolve(homedir(), "Paseo", "Sandbox");
     const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
+    let repoRoot = cwd;
+    while (!existsSync(join(repoRoot, ".git"))) {
+      const parent = dirname(repoRoot);
+      if (parent === repoRoot) break;
+      repoRoot = parent;
+    }
     const throwaway =
-      !existsSync(join(cwd, ".git")) &&
+      !existsSync(join(repoRoot, ".git")) &&
       (["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].some(inDirectory) ||
         inDirectory(sandbox));
     const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;

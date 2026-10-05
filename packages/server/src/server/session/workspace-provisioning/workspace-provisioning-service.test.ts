@@ -628,6 +628,14 @@ test("create-agent reuses only active directory workspaces and groups disposable
   });
   expect(checkoutId).not.toBe(scratchA);
   expect((await workspaceRegistry.get(checkoutId))?.cwd).toBe(checkout);
+  const checkoutSubdir = path.join(checkout, "src");
+  mkdirSync(checkoutSubdir);
+  const checkoutSubdirId = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: checkoutSubdir,
+    initialTitle: null,
+  });
+  expect((await workspaceRegistry.get(checkoutSubdirId))?.cwd).toBe(checkoutSubdir);
 
   const canonical = path.join(tmpDir, "alias-target");
   const alias = path.join(tmpDir, "alias");
