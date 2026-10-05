@@ -5151,6 +5151,9 @@ export const KeeperEventSchema = z.object({
   permissionRequestId: z.string().nullable(),
   turnId: z.string().nullable(),
   lifecycle: z.string().nullable(),
+  /** send.rejected only: the reject reason and sha256("sendkey", agentId, idempotencyKey). */
+  reason: z.string().nullable().optional(),
+  sendKey: z.string().nullable().optional(),
 });
 
 export const KeeperReadEventsResponseSchema = z.object({
