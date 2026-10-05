@@ -495,7 +495,7 @@ test("resolveOrCreateWorkspaceIdForCreateAgent honors an explicitly requested wo
 });
 
 test("resolveOrCreateWorkspaceIdForCreateAgent creates a titled workspace when nothing is provided", async () => {
-  const dir = path.join(tmpDir, "plain");
+  const dir = path.join(os.homedir(), "Paseo", "patch-0025-titled-workspace");
 
   const id = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
     createdWorktree: null,
@@ -506,6 +506,64 @@ test("resolveOrCreateWorkspaceIdForCreateAgent creates a titled workspace when n
   const created = await workspaceRegistry.get(id);
   expect(created?.cwd).toBe(dir);
   expect(created?.title).toBe("My Title");
+});
+
+test("create-agent reuses a directory, isolates a worktree, and groups throwaway cwds in Scratch", async () => {
+  const cwd = path.join(os.homedir(), "Paseo", "patch-0025-directory");
+  const first = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd,
+    initialTitle: null,
+  });
+  const second = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd,
+    initialTitle: null,
+  });
+  expect(second).toBe(first);
+  expect((await workspaceRegistry.get(first))?.cwd).toBe(cwd);
+
+  const worktree = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: {
+      workspace: { workspaceId: "ws-isolated-worktree" },
+    } as unknown as CreatePaseoWorktreeWorkflowResult,
+    cwd,
+    initialTitle: null,
+  });
+  expect(worktree).toBe("ws-isolated-worktree");
+  expect(worktree).not.toBe(first);
+
+  const throwawayA = path.join("/tmp", "paseo-patch-0025-a");
+  const throwawayB = path.join(os.tmpdir(), "paseo-patch-0025-b");
+  expect(throwawayA).not.toBe(throwawayB);
+  const scratchA = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: throwawayA,
+    initialTitle: null,
+  });
+  const scratchB = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    createdWorktree: null,
+    cwd: throwawayB,
+    initialTitle: null,
+  });
+  expect(scratchB).toBe(scratchA);
+  expect((await workspaceRegistry.get(scratchA))?.cwd).toBe(
+    path.join(os.homedir(), "Paseo", "Scratch"),
+  );
+  for (const throwawayCwd of [
+    "/private/tmp/paseo-patch-0025-c",
+    "/private/var/folders/paseo-patch-0025-d",
+    path.join(os.homedir(), "Paseo", "Sandbox", "paseo-patch-0025-e"),
+    path.join(os.homedir(), "project", "scratchpad", "paseo-patch-0025-f"),
+  ]) {
+    expect(throwawayCwd).not.toBe(throwawayA);
+    const scratch = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+      createdWorktree: null,
+      cwd: throwawayCwd,
+      initialTitle: null,
+    });
+    expect(scratch).toBe(scratchA);
+  }
 });
 
 test("createWorkspaceForDirectory always mints a fresh workspace even when one already occupies the cwd", async () => {

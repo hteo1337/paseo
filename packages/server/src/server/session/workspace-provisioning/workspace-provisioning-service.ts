@@ -1,6 +1,7 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
 import { basename, resolve } from "node:path";
+import { homedir } from "node:os";
 import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
 import {
@@ -352,11 +353,32 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<string> {
     if (input.createdWorktree) return input.createdWorktree.workspace.workspaceId;
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
-    return (
-      await createWorkspaceForDirectory(input.cwd, input.initialTitle, undefined, {
-        expectsInitialAgent: true,
-      })
-    ).workspaceId;
+    const cwd = resolve(input.cwd);
+    const sandbox = resolve(homedir(), "Paseo", "Sandbox");
+    const throwaway =
+      cwd === "/tmp" ||
+      cwd.startsWith("/tmp/") ||
+      cwd === "/private/tmp" ||
+      cwd.startsWith("/private/tmp/") ||
+      cwd === "/private/var/folders" ||
+      cwd.startsWith("/private/var/folders/") ||
+      cwd === "/var/folders" ||
+      cwd.startsWith("/var/folders/") ||
+      cwd.split(/[\\/]/).includes("scratchpad") ||
+      cwd === sandbox ||
+      cwd.startsWith(`${sandbox}/`);
+    const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
+    const knownIds = new Set(
+      (await workspaceRegistry.list()).map((workspace) => workspace.workspaceId),
+    );
+    const workspace = await findOrCreateWorkspaceForDirectory(workspaceCwd);
+    if (!knownIds.has(workspace.workspaceId)) {
+      await workspaceRegistry.upsert(
+        { ...workspace, title: throwaway ? null : input.initialTitle?.trim() || null },
+        { expectsInitialAgent: true },
+      );
+    }
+    return workspace.workspaceId;
   }
 
   async function resolveRestoredAutoArchiveChangeRequestUrl(
