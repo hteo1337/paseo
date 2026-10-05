@@ -643,7 +643,7 @@ export interface AgentAdmissionGuard {
   expectedPermissionGeneration: number;
   allowPendingPermissions?: boolean;
   /** Persist dedupe state after the first comparison; the send needs it durable before it starts. */
-  reserve?: () => Promise<{ ok: true } | { ok: false; reason: string }>;
+  reserve?: (matched: AgentControlState) => Promise<{ ok: true } | { ok: false; reason: string }>;
   release?: () => Promise<void>;
 }
 
@@ -3229,7 +3229,7 @@ export class AgentManager {
       };
       const first = await check();
       if ("rejected" in first) return first;
-      const reserved = await guard.reserve?.();
+      const reserved = await guard.reserve?.(first.state);
       if (reserved && !reserved.ok) return { rejected: reserved.reason, state: first.state };
       const second = await check();
       if ("rejected" in second) {
