@@ -9,6 +9,7 @@ import * as pluginSharedRuntime from "@getpaseo/plugin";
 import * as pluginProviderRuntime from "@getpaseo/plugin/server/provider";
 import * as pluginAcpRuntime from "@getpaseo/plugin/server/acp";
 import type { SettingsDefinition, PluginRpcContract } from "@getpaseo/plugin";
+import { assertPluginRpcAuthorization } from "./invocation-authority.js";
 import type { PluginHandlerContext } from "@getpaseo/plugin/server";
 import type { ZodType } from "zod";
 import {
@@ -288,6 +289,11 @@ async function initialize(message: Extract<PluginProcessRequest, { type: "initia
   send({
     type: "ready",
     methods: [...handlers.keys()].sort(),
+    rpcAuthorizations: Object.fromEntries(
+      [...handlers.entries()]
+        .filter(([, registered]) => registered.contract.authorization)
+        .map(([method, registered]) => [method, registered.contract.authorization!]),
+    ),
     hooks: hooks.catalog(),
     providers: [...providers.values()]
       .sort((left, right) => left.id.localeCompare(right.id))
@@ -431,7 +437,11 @@ process.on("message", (rawMessage: unknown) => {
     .parseAsync(message.input)
     .then((input) => {
       if (!paseo) throw new Error("Plugin Paseo API is unavailable");
-      return registered.handler(input, { paseo });
+      assertPluginRpcAuthorization(registered.contract, message.invocation);
+      return registered.handler(input, {
+        paseo,
+        ...(message.invocation ? { invocation: message.invocation } : {}),
+      });
     })
     .then((output) => registered.contract.output.parseAsync(output))
     .then(

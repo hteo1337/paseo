@@ -105,7 +105,14 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginRuntimeBoundary plugin={plugin} client={client}>
+      <PluginRuntimeBoundary
+        plugin={plugin}
+        client={client}
+        scope={{
+          workspaceId,
+          ...(target.context === "agent" ? { agentId: target.agentId } : {}),
+        }}
+      >
         <PluginClientStateProvider source={stateSource}>{panel}</PluginClientStateProvider>
       </PluginRuntimeBoundary>
     </SurfaceErrorBoundary>

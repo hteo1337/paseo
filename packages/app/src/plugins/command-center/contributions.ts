@@ -1,3 +1,4 @@
+import type { PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import type { PluginClientStateSource } from "@getpaseo/plugin/client/host";
 import type { CommandCenterContribution } from "@/command-center/contributions";
 import { getCommandCenterIcon } from "@/command-center/icon";
@@ -9,7 +10,7 @@ import { createPluginCapabilities, type PluginNavigation } from "../actions";
 
 export interface PluginCommandCenterSource {
   plugins: readonly InstalledPlugin[];
-  runtime(plugin: InstalledPlugin): PluginSurfaceRuntime;
+  runtime(plugin: InstalledPlugin, scope?: PluginRpcInvocationScope): PluginSurfaceRuntime;
   state: PluginClientStateSource;
   workspaceId: string | null;
   agentId: string | null;
@@ -26,7 +27,14 @@ export function buildPluginCommandCenterContributions(
       if (item.context === "workspace" && !source.workspaceId) continue;
       if (item.context === "agent" && (!source.workspaceId || !source.agentId)) continue;
       const run = async () => {
-        const runtime = source.runtime(plugin);
+        const scope =
+          item.context !== "global" && source.workspaceId
+            ? {
+                workspaceId: source.workspaceId,
+                ...(item.context === "agent" && source.agentId ? { agentId: source.agentId } : {}),
+              }
+            : undefined;
+        const runtime = source.runtime(plugin, scope);
         const common = createPluginCapabilities(plugin, runtime, source.navigation);
         try {
           if (item.context === "global") {

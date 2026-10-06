@@ -7,7 +7,7 @@ import { existsSync, mkdtempSync, realpathSync, rmSync, symlinkSync, writeFileSy
 import { tmpdir } from "os";
 import { join, resolve as resolvePath } from "path";
 import pino from "pino";
-import { afterEach, describe, expect, test, vi } from "vitest";
+import { afterAll, afterEach, beforeAll, describe, expect, test, vi } from "vitest";
 
 import {
   assertPullRequestAutoMergeDisableReady,
@@ -23,7 +23,16 @@ import {
   type FileTransferFrame,
 } from "@getpaseo/protocol/binary-frames/index";
 import { Session } from "./session.js";
-import { OWNER_PERMISSIONS, type DaemonPermission } from "./authorization/index.js";
+import { DaemonConfigStore } from "./daemon-config-store.js";
+import { PluginService } from "./plugins/index.js";
+import { PluginRuntime } from "./plugins/runtime.js";
+import { resolvePluginInvocation } from "./plugins/invocation-authority.js";
+import type { PluginInvocationContext } from "@getpaseo/plugin/server";
+import {
+  OWNER_PERMISSIONS,
+  SessionAuthorization,
+  type DaemonPermission,
+} from "./authorization/index.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import { StructuredAgentFallbackError } from "./agent/agent-response-loop.js";
 import type { StoredAgentRecord } from "./agent/agent-storage.js";
@@ -5851,4 +5860,458 @@ test("provider snapshots preserve versionless visibility while capabilities upda
     "plugin-provider",
   ]);
   expect(references.compactSnapshot!.entries[0]!.modes![0]!.icon).toBe("ShieldCheck");
+});
+
+// Real child-process coverage: no mocked RPC service or invocation-authority helper.
+describe.skipIf(process.platform === "win32")("plugin invocation authority transport", () => {
+  let directory: string;
+  let service: PluginService;
+  let runtime: PluginRuntime;
+
+  beforeAll(async () => {
+    directory = mkdtempSync(join(tmpdir(), "paseo-invocation-security-"));
+    writeFileSync(
+      join(directory, "paseo-plugin.json"),
+      JSON.stringify({
+        id: "authority-test",
+        requirements: { paseo: ">=0.10.3" },
+      }),
+    );
+    writeFileSync(
+      join(directory, "index.server.ts"),
+      `
+import { z } from "zod";
+import { defineRpc } from "@getpaseo/plugin";
+export default function contribute(server) {
+  let executions = 0;
+  for (const [name, authorization] of [
+    ["legacy", undefined],
+    ["read", { scope: "workspace", permission: "workspace.read" }],
+    ["write", { scope: "workspace", permission: "workspace.write" }],
+    ["agent", { scope: "agent", permission: "workspace.write" }],
+  ]) {
+    server.handle(defineRpc({ name, authorization, input: z.any(), output: z.any() }),
+      (input, context) => {
+        if (name !== "legacy") executions++;
+        return { invocation: context.invocation ?? null, input, executions };
+      });
+  }
+  return () => undefined;
+}`,
+    );
+    // In-memory synthetic config only; this fixture never reads a user's config.
+    const store = new DaemonConfigStore(directory, {
+      mcp: { injectIntoAgents: false },
+      browserTools: { enabled: false },
+      providers: {},
+      metadataGeneration: { providers: [] },
+      autoArchiveAfterMerge: false,
+      enableTerminalAgentHooks: false,
+      appendSystemPrompt: "",
+      pluginsEnabled: true,
+      plugins: {
+        "authority-test": {
+          source: "directory",
+          path: directory,
+          enabled: true,
+        },
+      },
+    });
+    runtime = new PluginRuntime(pino({ level: "silent" }), "0.10.3");
+    service = new PluginService(pino({ level: "silent" }), store, "0.10.3", {
+      runtime,
+    });
+    service.bindPaseoSessionHost({
+      async attachPluginSocket(_pluginId, socket) {
+        const closed = new Promise<void>((resolve) => socket.once("close", resolve));
+        socket.on("message", (data) => {
+          if (typeof data !== "string" || JSON.parse(data).type !== "hello") return;
+          socket.send(
+            JSON.stringify({
+              type: "session",
+              message: {
+                type: "status",
+                payload: {
+                  status: "server_info",
+                  serverId: "authority-test",
+                  hostname: "authority-test",
+                  version: "0.10.3",
+                  features: {},
+                },
+              },
+            }),
+          );
+        });
+        return { closed };
+      },
+    });
+    await service.start();
+    expect(await service.listPlugins()).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ id: "authority-test", status: "running" }),
+      ]),
+    );
+  });
+
+  afterAll(async () => {
+    await service?.stopAllPlugins();
+    if (directory) rmSync(directory, { recursive: true, force: true });
+  });
+
+  function caller(
+    options: {
+      permissions?: readonly DaemonPermission[];
+      workspace?: { workspaceId: string; archivedAt?: string | null } | null;
+      agent?: {
+        id: string;
+        workspaceId: string;
+        archivedAt?: string | null;
+      } | null;
+      getWorkspace?: ReturnType<typeof vi.fn>;
+    } = {},
+  ) {
+    const messages: SessionOutboundMessage[] = [];
+    const session = createSessionForTest({
+      messages,
+      clientId: options.clientId ?? "reported-test-client",
+      pluginRuntime: service,
+      permissions: options.permissions ?? ["daemon.manage", "workspace.read", "workspace.write"],
+      workspaceRegistry: {
+        get:
+          options.getWorkspace ??
+          vi
+            .fn()
+            .mockResolvedValue(
+              options.workspace === undefined
+                ? { workspaceId: "workspace-a", archivedAt: null }
+                : options.workspace,
+            ),
+      },
+      agentStorage: {
+        get: vi.fn().mockResolvedValue(
+          options.agent === undefined
+            ? {
+                id: "agent-a",
+                workspaceId: "workspace-a",
+                archivedAt: null,
+              }
+            : options.agent,
+        ),
+      },
+    });
+    async function invoke(
+      method: string,
+      scope?: { workspaceId: string; agentId?: string },
+      input: unknown = {},
+    ) {
+      messages.length = 0;
+      await session.handleMessage({
+        type: "plugin.rpc.invoke.request",
+        requestId: "invoke",
+        pluginId: "authority-test",
+        method,
+        input,
+        ...(scope ? { scope } : {}),
+      });
+      return messages.find(
+        (message) => message.type === "plugin.rpc.invoke.response" || message.type === "rpc_error",
+      );
+    }
+    return { session, invoke };
+  }
+
+  test("preserves unscoped legacy calls and carries canonical host context through the real child", async () => {
+    const { invoke, session } = caller({
+      permissions: ["daemon.manage", "workspace.read"],
+    });
+    expect(await invoke("legacy", undefined, { workspace: "forged" })).toEqual({
+      type: "plugin.rpc.invoke.response",
+      payload: {
+        requestId: "invoke",
+        output: {
+          invocation: null,
+          input: { workspace: "forged" },
+          executions: expect.any(Number),
+        },
+      },
+    });
+    expect(await invoke("read", { workspaceId: "workspace-a" }, { workspace: "forged" })).toEqual({
+      type: "plugin.rpc.invoke.response",
+      payload: {
+        requestId: "invoke",
+        output: {
+          invocation: {
+            authentication: {
+              kind: "session",
+              sessionId: session.getSessionId(),
+              clientId: "reported-test-client",
+            },
+            workspaceId: "workspace-a",
+            permissions: ["workspace.read"],
+          },
+          input: { workspace: "forged" },
+          executions: expect.any(Number),
+        },
+      },
+    });
+    expect(
+      await caller().invoke("agent", {
+        workspaceId: "workspace-a",
+        agentId: "agent-a",
+      }),
+    ).toMatchObject({
+      type: "plugin.rpc.invoke.response",
+      payload: {
+        output: {
+          invocation: {
+            workspaceId: "workspace-a",
+            agentId: "agent-a",
+            permissions: ["workspace.read", "workspace.write"],
+          },
+        },
+      },
+    });
+  });
+
+  test("keeps legacy revocation calls usable with an archived requested surface and daemon-only grants", async () => {
+    const { invoke } = caller({
+      permissions: ["daemon.manage"],
+      workspace: { workspaceId: "workspace-a", archivedAt: "2026-01-01" },
+    });
+    expect(
+      await invoke("legacy", { workspaceId: "workspace-a" }, { enabled: false }),
+    ).toMatchObject({
+      type: "plugin.rpc.invoke.response",
+      payload: { output: { invocation: null, input: { enabled: false } } },
+    });
+  });
+
+  test.each([
+    ["missing scope despite forged payload", {}, "read", undefined],
+    ["missing agent scope", {}, "agent", { workspaceId: "workspace-a" }],
+    [
+      "read cannot authorize write",
+      { permissions: ["daemon.manage", "workspace.read"] },
+      "write",
+      { workspaceId: "workspace-a" },
+    ],
+    [
+      "daemon grant cannot authorize scoped read",
+      { permissions: ["daemon.manage"] },
+      "read",
+      { workspaceId: "workspace-a" },
+    ],
+    [
+      "workspace grant cannot bypass global RPC permission",
+      { permissions: ["workspace.read"] },
+      "read",
+      { workspaceId: "workspace-a" },
+    ],
+    ["missing workspace", { workspace: null }, "read", { workspaceId: "workspace-a" }],
+    [
+      "mismatched canonical workspace",
+      { workspace: { workspaceId: "workspace-b" } },
+      "read",
+      { workspaceId: "workspace-a" },
+    ],
+    [
+      "archived workspace",
+      { workspace: { workspaceId: "workspace-a", archivedAt: "2026-01-01" } },
+      "read",
+      { workspaceId: "workspace-a" },
+    ],
+    ["missing agent", { agent: null }, "agent", { workspaceId: "workspace-a", agentId: "agent-a" }],
+    [
+      "mismatched canonical agent",
+      { agent: { id: "agent-b", workspaceId: "workspace-a" } },
+      "agent",
+      { workspaceId: "workspace-a", agentId: "agent-a" },
+    ],
+    [
+      "agent belongs to another workspace",
+      { agent: { id: "agent-a", workspaceId: "workspace-b" } },
+      "agent",
+      { workspaceId: "workspace-a", agentId: "agent-a" },
+    ],
+    [
+      "archived agent",
+      {
+        agent: {
+          id: "agent-a",
+          workspaceId: "workspace-a",
+          archivedAt: "2026-01-01",
+        },
+      },
+      "agent",
+      { workspaceId: "workspace-a", agentId: "agent-a" },
+    ],
+  ] as const)("rejects %s before handler execution", async (_name, options, method, scope) => {
+    const inspect = caller({ permissions: ["daemon.manage"] });
+    const before = await inspect.invoke("legacy");
+    expect(
+      await caller(options).invoke(method, scope, {
+        workspace: "workspace-a",
+        workspaceId: "workspace-a",
+        agentId: "agent-a",
+        invocation: {
+          workspaceId: "workspace-a",
+          agentId: "agent-a",
+          permissions: ["workspace.write", "workspace.read"],
+        },
+      }),
+    ).toMatchObject({
+      type: "rpc_error",
+      payload: {
+        requestId: "invoke",
+        requestType: "plugin.rpc.invoke.request",
+      },
+    });
+    expect(await inspect.invoke("legacy")).toEqual(before);
+  });
+
+  test("ignores permission forgery in the requested scope", async () => {
+    const { invoke } = caller({
+      permissions: ["daemon.manage", "workspace.read"],
+    });
+    const forged = {
+      workspaceId: "workspace-a",
+      permissions: ["workspace.write"],
+    };
+    expect(await invoke("write", forged)).toMatchObject({
+      type: "rpc_error",
+    });
+    expect(await invoke("read", forged)).toMatchObject({
+      type: "plugin.rpc.invoke.response",
+      payload: {
+        output: {
+          invocation: {
+            workspaceId: "workspace-a",
+            permissions: ["workspace.read"],
+          },
+        },
+      },
+    });
+  });
+
+  test.each([{ remaining: ["daemon.manage"] }, { remaining: ["workspace.read"] }] as const)(
+    "rechecks revoked grants after asynchronous record resolution ($remaining)",
+    async ({ remaining }) => {
+      let release!: (value: { workspaceId: string }) => void;
+      const pending = new Promise<{ workspaceId: string }>((resolve) => {
+        release = resolve;
+      });
+      let lookupStarted!: () => void;
+      const started = new Promise<void>((resolve) => {
+        lookupStarted = resolve;
+      });
+      const getWorkspace = vi.fn(() => {
+        lookupStarted();
+        return pending;
+      });
+      const { session, invoke } = caller({
+        permissions: ["daemon.manage", "workspace.read"],
+        getWorkspace,
+      });
+      const response = invoke("read", { workspaceId: "workspace-a" });
+      await started;
+      session.setPermissions(remaining);
+      release({ workspaceId: "workspace-a" });
+      expect(await response).toMatchObject({ type: "rpc_error" });
+    },
+  );
+
+  test("attributes calls to host sessions rather than a shared reported client identity", async () => {
+    const first = caller({
+      clientId: "same-reported-client",
+      workspace: { workspaceId: "workspace-b" },
+    });
+    const second = caller({
+      clientId: "same-reported-client",
+      workspace: { workspaceId: "workspace-b" },
+    });
+    expect(first.session.getSessionId()).not.toBe(second.session.getSessionId());
+    for (const current of [first, second]) {
+      expect(await current.invoke("read", { workspaceId: "workspace-b" })).toMatchObject({
+        type: "plugin.rpc.invoke.response",
+        payload: {
+          output: {
+            invocation: {
+              authentication: {
+                kind: "session",
+                sessionId: current.session.getSessionId(),
+                clientId: "same-reported-client",
+              },
+              workspaceId: "workspace-b",
+              permissions: ["workspace.read", "workspace.write"],
+            },
+          },
+        },
+      });
+    }
+  });
+
+  test("rejects fabricated internal contexts at both service and runtime ingress", async () => {
+    const fake: PluginInvocationContext = {
+      authentication: {
+        kind: "session",
+        sessionId: caller().session.getSessionId(),
+        clientId: "reported-test-client",
+      },
+      workspaceId: "workspace-a",
+      agentId: "agent-a",
+      permissions: ["workspace.read", "workspace.write"],
+    };
+    await expect(service.invokePluginRpc("authority-test", "read", {}, fake)).rejects.toThrow(
+      "Plugin invocation access denied",
+    );
+    await expect(runtime.invoke("authority-test", "agent", {}, fake)).rejects.toThrow(
+      "Plugin invocation access denied",
+    );
+    await expect(runtime.invoke("authority-test", "legacy", {}, fake)).resolves.toMatchObject({
+      invocation: null,
+    });
+  });
+
+  test("freezes an issued snapshot and prevents copies or replay from claiming host issuance", async () => {
+    const authorization = new SessionAuthorization(["daemon.manage", "workspace.read"]);
+    const invocation = await resolvePluginInvocation(
+      { workspaceId: "workspace-a" },
+      {
+        authorization,
+        authentication: {
+          kind: "session",
+          sessionId: caller().session.getSessionId(),
+          clientId: "reported-test-client",
+        },
+        getWorkspace: async () => ({ workspaceId: "workspace-a" }),
+        getAgent: async () => null,
+      },
+    );
+    expect(invocation).not.toBeUndefined();
+    expect(Object.isFrozen(invocation)).toBe(true);
+    expect(Object.isFrozen(invocation!.permissions)).toBe(true);
+    expect(Object.isFrozen(invocation!.authentication)).toBe(true);
+    await expect(runtime.invoke("authority-test", "read", {}, { ...invocation! })).rejects.toThrow(
+      "Plugin invocation access denied",
+    );
+    const admitted = runtime.invoke("authority-test", "read", {}, invocation);
+    authorization.replacePermissions([]);
+    await expect(admitted).resolves.toMatchObject({
+      invocation: { permissions: ["workspace.read"] },
+    });
+    await expect(runtime.invoke("authority-test", "read", {}, invocation)).rejects.toThrow(
+      "Plugin invocation access denied",
+    );
+    await expect(
+      resolvePluginInvocation(
+        { workspaceId: "workspace-a" },
+        {
+          authorization,
+          authentication: invocation!.authentication,
+          getWorkspace: async () => ({ workspaceId: "workspace-a" }),
+          getAgent: async () => null,
+        },
+      ),
+    ).rejects.toThrow("Plugin invocation access denied");
+  });
 });
