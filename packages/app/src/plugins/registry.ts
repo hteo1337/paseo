@@ -87,7 +87,7 @@ export class PluginRegistry {
           locale: this.dependencies.localeSource.getLocale(),
           i18n: new PluginTranslationRuntime(this.dependencies.localeSource),
           paseo: createPaseoApi(client),
-          invoke: (method, input) => client.invokePluginRpc(entry.id, method, input),
+          invoke: (method, input, scope) => client.invokePluginRpc(entry.id, method, input, scope),
           id: entry.id,
           serverId,
           clientBundle: entry.clientBundle,
