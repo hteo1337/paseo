@@ -4102,6 +4102,9 @@ export const WorkspaceDescriptorPayloadSchema = z
     projectKind: z.enum(["git", "non_git", "directory"]),
     // COMPAT(workspaces): keep legacy directory workspace kind parseable.
     workspaceKind: z.enum(["directory", "local_checkout", "checkout", "worktree"]),
+    // COMPAT(workspaceCreatedAt): added in v0.10.3 local patch 0026; old daemons omit it.
+    // Creation time lets clients pick the oldest active workspace for a directory.
+    createdAt: z.string().optional(),
     name: z.string(),
     // COMPAT(workspaceTitles): added in v0.1.97, drop the optional gate when floor >= v0.1.97.
     // When the user has titled a workspace, `name` carries the resolved value
