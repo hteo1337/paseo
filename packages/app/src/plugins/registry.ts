@@ -82,7 +82,7 @@ export class PluginRegistry {
         installation = {
           lifetime: new AbortController(),
           paseo: createPaseoApi(client),
-          invoke: (method, input) => client.invokePluginRpc(entry.id, method, input),
+          invoke: (method, input, scope) => client.invokePluginRpc(entry.id, method, input, scope),
           id: entry.id,
           serverId,
           clientBundle: entry.clientBundle,
