@@ -48,7 +48,8 @@ interface PluginRuntimePort {
   before?: PluginLifecycle["before"];
   wait?: PluginLifecycle["wait"];
   catalog: PluginRuntime["catalog"];
-  invoke(pluginId: string, method: string, input: unknown): Promise<unknown>;
+  invoke: PluginRuntime["invoke"];
+  rpcRequiresScope?: PluginRuntime["rpcRequiresScope"];
   startSubscription: PluginRuntime["startSubscription"];
   getLogs(pluginId: string): PluginLogEntry[];
   clearLogs(pluginId: string): void;
@@ -550,8 +551,17 @@ export class PluginService {
     });
   }
 
-  invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
-    return this.runtime.invoke(pluginId, method, input);
+  pluginRpcRequiresScope(pluginId: string, method: string): boolean {
+    return this.runtime.rpcRequiresScope?.(pluginId, method) ?? false;
+  }
+
+  invokePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    invocation?: import("@getpaseo/plugin/server").PluginInvocationContext,
+  ): Promise<unknown> {
+    return this.runtime.invoke(pluginId, method, input, invocation);
   }
 
   subscribePluginRpc(pluginId: string, method: string, input: unknown): PluginRuntimeSubscription {

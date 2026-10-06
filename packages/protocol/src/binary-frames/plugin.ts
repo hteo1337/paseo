@@ -1,3 +1,4 @@
+import type { PluginRpcInvocationScope } from "../messages.js";
 import { MAX_ROUTED_PAYLOAD_BYTES } from "./host-route.js";
 
 /**
@@ -31,6 +32,7 @@ export type PluginFrame =
       pluginId: string;
       method: string;
       payload: Uint8Array;
+      scope?: PluginRpcInvocationScope;
     };
 
 export function isPluginFrameOpcode(value: number | undefined): value is PluginFrameOpcode {
@@ -54,9 +56,10 @@ export function encodePluginInputFrame(input: {
   pluginId: string;
   method: string;
   payload: Uint8Array;
+  scope?: PluginRpcInvocationScope;
 }): Uint8Array {
   const header = new TextEncoder().encode(
-    JSON.stringify({ pluginId: input.pluginId, method: input.method }),
+    JSON.stringify({ pluginId: input.pluginId, method: input.method, ...(input.scope ? { scope: input.scope } : {}) }),
   );
   if (header.byteLength > 0xffff) throw new RangeError("Plugin input header is too long");
   const prefix = new Uint8Array(2 + header.byteLength);
@@ -101,7 +104,7 @@ function encodeFrame(
   return frame;
 }
 
-function decodeInputHeader(bytes: Uint8Array): { pluginId: string; method: string } | null {
+function decodeInputHeader(bytes: Uint8Array): { pluginId: string; method: string; scope?: PluginRpcInvocationScope } | null {
   try {
     const header: unknown = JSON.parse(new TextDecoder().decode(bytes));
     if (typeof header !== "object" || header === null) return null;
@@ -109,7 +112,13 @@ function decodeInputHeader(bytes: Uint8Array): { pluginId: string; method: strin
     const method = Reflect.get(header, "method");
     if (typeof pluginId !== "string" || typeof method !== "string" || !pluginId || !method)
       return null;
-    return { pluginId, method };
+    const scope: unknown = Reflect.get(header, "scope");
+    if (scope === undefined) return { pluginId, method };
+    if (typeof scope !== "object" || scope === null) return null;
+    const workspaceId: unknown = Reflect.get(scope, "workspaceId");
+    const agentId: unknown = Reflect.get(scope, "agentId");
+    if (typeof workspaceId !== "string" || !workspaceId || (agentId !== undefined && (typeof agentId !== "string" || !agentId))) return null;
+    return { pluginId, method, scope: { workspaceId, ...(typeof agentId === "string" ? { agentId } : {}) } };
   } catch {
     return null;
   }
