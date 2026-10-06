@@ -16,6 +16,7 @@ const status = defineRpc({
   input: z.object({}),
   output: z.object({ state: z.string() }),
 });
+const mountedScope = { workspaceId: "workspace-a", agentId: "agent-a" };
 
 function installation(invoked: string[]): InstalledPlugin {
   return {
@@ -88,4 +89,31 @@ it("gives every surface the installation's client and RPCs on its first frame", 
   expect(invoked).toEqual(["deploys.status"]);
   plugin.lifetime.abort();
   await plugin.paseo.dispose();
+});
+
+it("passes the mounted workspace and agent scope separately from the RPC payload", async () => {
+  const plugin = installation([]);
+  const calls: unknown[] = [];
+  plugin.invoke = async (method, input, scope) => {
+    calls.push({ method, input, scope });
+    return { state: "green" };
+  };
+  let rpc: ((input: Record<string, never>) => Promise<unknown>) | null = null;
+  function Surface() {
+    rpc = useRpc(status);
+    return null;
+  }
+  renderToStaticMarkup(
+    <PluginInstallationProvider plugin={plugin} scope={mountedScope}>
+      <Surface />
+    </PluginInstallationProvider>,
+  );
+  await expect(rpc!({})).resolves.toEqual({ state: "green" });
+  expect(calls).toEqual([
+    {
+      method: "deploys.status",
+      input: {},
+      scope: { workspaceId: "workspace-a", agentId: "agent-a" },
+    },
+  ]);
 });

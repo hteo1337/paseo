@@ -1,6 +1,7 @@
 import { pluginComposersSource } from "./composer-items/source";
 import { getPluginClientApi } from "./client-state/api";
 import { callPluginRpc } from "@getpaseo/plugin/client/host";
+import type { PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import type {
   PluginAgentCommandContext,
   PluginCommandCapabilities,
@@ -28,6 +29,7 @@ export interface PluginNavigation {
 export function createPluginCapabilities(
   plugin: InstalledPlugin,
   navigation: PluginNavigation,
+  scope?: PluginRpcInvocationScope,
 ): PluginCommandCapabilities {
   function openScreen(input: unknown) {
     const { screenId, params } = parsePluginOpenScreenInput(plugin, input);
@@ -35,7 +37,8 @@ export function createPluginCapabilities(
   }
   return {
     paseo: getPluginClientApi(plugin).paseo,
-    rpc: (contract, input) => callPluginRpc(contract, plugin.invoke, input),
+    rpc: (contract, input) =>
+      callPluginRpc(contract, (method, payload) => plugin.invoke(method, payload, scope), input),
     openSettings(screenId) {
       if (!plugin.settingsScreens.some((screen) => screen.id === screenId))
         throw new Error(`Plugin settings screen is unavailable: ${screenId}`);
@@ -61,7 +64,7 @@ export function createPluginAgentActionContext(input: {
   if (!workspace || !agent || agent.workspaceId !== workspace.id) return null;
   return {
     context: "agent",
-    ...createPluginCapabilities(plugin, navigation),
+    ...createPluginCapabilities(plugin, navigation, { workspaceId, agentId }),
     workspace,
     agent,
     openPanel(panelId, options) {
@@ -88,7 +91,7 @@ export function createPluginWorkspaceActionContext(input: {
   if (!workspace) return null;
   return {
     context: "workspace",
-    ...createPluginCapabilities(plugin, navigation),
+    ...createPluginCapabilities(plugin, navigation, { workspaceId }),
     workspace,
     openPanel(panelId, options) {
       const panel = plugin.workspacePanels.find(
