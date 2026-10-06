@@ -1,4 +1,5 @@
 import type { ReactNode } from "react";
+import type { PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import { View } from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { MenuSurface, type MenuSurfaceProps } from "@/components/ui/menu";
@@ -11,6 +12,7 @@ export interface PluginEnvironment {
   installation: InstalledPlugin;
   state: ReturnType<typeof createPluginClientStateSource>;
   toast: ReturnType<typeof useToast>;
+  scope?: PluginRpcInvocationScope;
 }
 
 interface PluginEnvironmentProviderProps {
@@ -29,7 +31,7 @@ export function PluginEnvironmentProvider({
 }: PluginEnvironmentProviderProps) {
   return (
     <ToastApiProvider api={environment.toast}>
-      <PluginInstallationProvider plugin={environment.installation} state={environment.state}>
+      <PluginInstallationProvider plugin={environment.installation} state={environment.state} scope={environment.scope}>
         {children}
       </PluginInstallationProvider>
     </ToastApiProvider>

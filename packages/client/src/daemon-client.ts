@@ -48,6 +48,7 @@ import {
   ShutdownRequestedStatusPayloadSchema,
   DaemonUpdateResponseSchema,
   SessionInboundMessageSchema,
+  type PluginRpcInvocationScope,
   type ActiveTurnBehavior,
   type ServerInfoStatusPayload,
 } from "@getpaseo/protocol/messages";
@@ -6977,7 +6978,12 @@ export class DaemonClient {
    * A `Uint8Array` input or output crosses the wire as a binary frame. Any other value is JSON and
    * must not contain a `Uint8Array`.
    */
-  async invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
+  async invokePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    scope?: PluginRpcInvocationScope,
+  ): Promise<unknown> {
     assertPluginWireValue(input, "input");
     const requestId = this.createRequestId();
     if (!(input instanceof Uint8Array)) {
@@ -6989,16 +6995,17 @@ export class DaemonClient {
           pluginId,
           method,
           input,
+          ...(scope ? { scope } : {}),
         },
         responseType: "plugin.rpc.invoke.response",
       });
       return payload.output;
     }
     this.requirePluginSubscriptions();
-    const frame = encodePluginInputFrame({ requestId, pluginId, method, payload: input });
+    const frame = encodePluginInputFrame({ requestId, pluginId, method, payload: input, scope });
     const payload = await this.sendCorrelatedRequest({
       requestId,
-      message: { type: "plugin.rpc.invoke.request", requestId, pluginId, method, input: null },
+      message: { type: "plugin.rpc.invoke.request", requestId, pluginId, method, input: null, ...(scope ? { scope } : {}) },
       responseType: "plugin.rpc.invoke.response",
       options: { skipQueue: true },
       transmit: () => this.sendBinaryFrame(frame),

@@ -26,6 +26,8 @@ export {
   defineRpc,
   defineSubscription,
   type PluginRpcContract,
+  type PluginRpcAuthorization,
+  type PluginRpcWorkspacePermission,
   type PluginSubscriptionContract,
   type RpcInput,
   type RpcOutput,

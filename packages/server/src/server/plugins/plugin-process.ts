@@ -27,6 +27,7 @@ import {
   type PluginSubscriptionHandler,
 } from "./subscription-handlers.js";
 import { fileURLToPath } from "node:url";
+import { assertPluginRpcAuthorization } from "./invocation-authority.js";
 import type { ZodType } from "zod";
 import {
   ProviderEventSchema,
@@ -373,6 +374,7 @@ export function createPluginWorker(options: {
       throw error;
     }
     pendingProviderConnections.delete(message.connectionId);
+
     if (pending.tombstoned || stopping) {
       await connection.close().catch(() => undefined);
       return;
@@ -769,7 +771,11 @@ export function createPluginWorker(options: {
       .parseAsync(message.input)
       .then((input) => {
         if (!paseo) throw new Error("Plugin Paseo API is unavailable");
-        return registered.handler(input, { paseo });
+        assertPluginRpcAuthorization(registered.contract, message.invocation);
+        return registered.handler(input, {
+          paseo,
+          ...(message.invocation ? { invocation: message.invocation } : {}),
+        });
       })
       .then((output: unknown) => {
         assertPluginWireValue(output, "output");

@@ -11,6 +11,7 @@ import {
 import React, { useMemo, type ReactNode } from "react";
 import { createPluginClientStateSource } from "./client-state/source";
 import { pluginComposersSource } from "./composer-items/source";
+import type { PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import type { InstalledPlugin } from "./types";
 
 /**
@@ -22,19 +23,25 @@ export function PluginInstallationProvider({
   plugin,
   state: surfaceState,
   children,
+  scope,
 }: {
   plugin: InstalledPlugin;
   state?: PluginClientStateSource;
   children: ReactNode;
+  scope?: PluginRpcInvocationScope;
 }) {
   const state = useMemo(
     () => surfaceState ?? createPluginClientStateSource(plugin.serverId),
     [plugin.serverId, surfaceState],
   );
+  const invoke = React.useCallback(
+    (method: string, input: unknown) => plugin.invoke(method, input, scope),
+    [plugin, scope],
+  );
   return (
     <QueryClientProvider client={plugin.queryClient}>
       <PaseoApiProvider paseo={getPluginClientApi(plugin).paseo}>
-        <PluginRpcProvider invoke={plugin.invoke} subscribe={plugin.subscribe}>
+        <PluginRpcProvider invoke={invoke} subscribe={plugin.subscribe}>
           <PluginTranslationProvider runtime={plugin.i18n}>
             <PluginComposersProvider source={pluginComposersSource(plugin)}>
               <PluginClientStateProvider source={state}>{children}</PluginClientStateProvider>

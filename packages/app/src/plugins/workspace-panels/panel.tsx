@@ -66,6 +66,14 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
   const host = useMemo(() => ({ id: serverId, label: hostLabel }), [hostLabel, serverId]);
   const layout = useMemo(() => ({ compact, platform: resolvePluginPlatform() }), [compact]);
   const navigation = usePluginHostNavigation(serverId);
+  const agentId = target.context === "agent" ? target.agentId : undefined;
+  const scope = useMemo(
+    () => ({
+      workspaceId,
+      ...(agentId ? { agentId } : {}),
+    }),
+    [workspaceId, agentId],
+  );
 
   if (!plugin || !contribution || !workspaceExists) {
     return <PluginPanelUnavailable />;
@@ -120,7 +128,7 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginInstallationProvider plugin={plugin}>{panel}</PluginInstallationProvider>
+      <PluginInstallationProvider plugin={plugin} state={stateSource} scope={scope}>{panel}</PluginInstallationProvider>
     </SurfaceErrorBoundary>
   );
 }
