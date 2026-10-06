@@ -1,5 +1,14 @@
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
 
+export type PluginRpcWorkspacePermission =
+  | "workspace.read"
+  | "workspace.write"
+  | "workspace.manage";
+export interface PluginRpcAuthorization {
+  scope: "workspace" | "agent";
+  permission: PluginRpcWorkspacePermission;
+}
+
 export interface PluginRpcContract<
   InputSchema extends ZodType = ZodType,
   OutputSchema extends ZodType = ZodType,
@@ -7,6 +16,7 @@ export interface PluginRpcContract<
   name: string;
   input: InputSchema;
   output: OutputSchema;
+  authorization?: PluginRpcAuthorization;
 }
 
 export type RpcInput<Contract extends PluginRpcContract> = ZodOutput<Contract["input"]>;
@@ -16,6 +26,7 @@ interface RpcDefinition<InputSchema extends ZodType, OutputSchema extends ZodTyp
   name: string;
   input: InputSchema;
   output: OutputSchema;
+  authorization?: PluginRpcAuthorization;
 }
 
 const RPC_NAME = /^[a-z][a-z0-9._-]*$/;
