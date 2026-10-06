@@ -13,6 +13,9 @@ import {
   ProviderInputSchema,
   ProviderLaunchSchema,
 } from "@getpaseo/plugin/server/provider";
+
+import type { PluginRpcAuthorization } from "@getpaseo/plugin";
+import type { PluginInvocationContext } from "@getpaseo/plugin/server";
 import { z } from "zod";
 
 export interface PluginProviderMetadata {
@@ -60,7 +63,13 @@ export type PluginProcessRequest =
   | { type: "hook.cancel"; requestId: string }
   | { type: "usage.fetch"; requestId: string; sourceId: string; input: unknown }
   | { type: "usage.discover"; requestId: string; sourceId: string; scope: UsageScope }
-  | { type: "invoke"; requestId: string; method: string; input: unknown }
+  | {
+      type: "invoke";
+      requestId: string;
+      method: string;
+      input: unknown;
+      invocation?: PluginInvocationContext;
+    }
   | {
       type: "subscribe";
       requestId: string;
@@ -93,6 +102,7 @@ export type PluginProcessMessage =
       type: "ready";
       methods: string[];
       subscriptions?: string[];
+      rpcAuthorizations?: Record<string, PluginRpcAuthorization>;
       providers: PluginProviderMetadata[];
       usageSources?: PluginUsageSourceMetadata[];
       hooks?: string[];
@@ -252,6 +262,21 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
         requestId: z.string().min(1),
         method: z.string().min(1),
         input: z.unknown(),
+        invocation: z
+          .object({
+            authentication: z
+              .object({
+                kind: z.literal("session"),
+                sessionId: z.string().uuid(),
+                clientId: z.string(),
+              })
+              .strict(),
+            workspaceId: z.string().min(1).max(200),
+            agentId: z.string().min(1).max(200).optional(),
+            permissions: z.array(z.enum(["workspace.read", "workspace.write", "workspace.manage"])),
+          })
+          .strict()
+          .optional(),
       })
       .strict(),
     z
@@ -297,6 +322,17 @@ export const PluginProcessMessageSchema: z.ZodType<PluginProcessMessage> = z.dis
         type: z.literal("ready"),
         methods: z.array(z.string()),
         subscriptions: z.array(z.string()).optional(),
+        rpcAuthorizations: z
+          .record(
+            z.string(),
+            z
+              .object({
+                scope: z.enum(["workspace", "agent"]),
+                permission: z.enum(["workspace.read", "workspace.write", "workspace.manage"]),
+              })
+              .strict(),
+          )
+          .optional(),
         providers: z.array(providerMetadataSchema),
         usageSources: z.array(usageSourceMetadataSchema).optional(),
         hooks: hooksSchema.optional(),

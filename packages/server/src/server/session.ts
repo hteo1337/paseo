@@ -293,6 +293,7 @@ import {
   type WorkspaceArchiveUndoInput,
 } from "./workspace-archive-operations.js";
 import { WorkspaceSetupRuntime } from "./workspace-setup-runtime.js";
+import { resolvePluginInvocation } from "./plugins/invocation-authority.js";
 import { SessionAuthorization, type DaemonPermission } from "./authorization/index.js";
 
 function resolveWorkspaceSetupRuntime(
@@ -572,7 +573,14 @@ export interface SessionOptions {
     subscribe(listener: (pluginId: string) => void): () => void;
     subscribeSettings?(listener: (pluginId: string, settingsId: string) => void): () => void;
     catalog(): Array<{ id: string; clientBundle: string; clientBundleHash?: string }>;
-    invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown>;
+
+    invokePluginRpc(
+      pluginId: string,
+      method: string,
+      input: unknown,
+      invocation?: import("@getpaseo/plugin/server").PluginInvocationContext,
+    ): Promise<unknown>;
+
     subscribePluginRpc(
       pluginId: string,
       method: string,
@@ -583,6 +591,7 @@ export interface SessionOptions {
       reportIds?: string[];
     }): Promise<UsageReportEntry[]>;
     listLegacyUsage(): Promise<{ fetchedAt: string; providers: ProviderUsage[] }>;
+    pluginRpcRequiresScope?(pluginId: string, method: string): boolean;
   };
   orchestrationSkills?: import("./orchestration-skills/index.js").OrchestrationSkills;
   mcpBaseUrl?: string | null;
@@ -2837,10 +2846,7 @@ export class Session {
 
   private dispatchPluginRpcMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugin.rpc.invoke.request") {
-      if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
-      return this.pluginRuntime
-        .invokePluginRpc(msg.pluginId, msg.method, msg.input)
-        .then((output) => this.replyPluginRpc(msg, output));
+      return this.handlePluginRpcInvocation(msg);
     }
     if (msg.type === "plugin.rpc.subscribe.request") return this.subscribePluginRpc(msg);
     return undefined;
@@ -2948,6 +2954,25 @@ export class Session {
     return undefined;
   }
 
+  private handlePluginRpcInvocation(
+    msg: Extract<SessionInboundMessage, { type: "plugin.rpc.invoke.request" }>,
+  ): Promise<void> {
+    const pluginRuntime = this.pluginRuntime;
+    if (!pluginRuntime) throw new Error("Plugin service is unavailable");
+    return resolvePluginInvocation(
+      pluginRuntime.pluginRpcRequiresScope?.(msg.pluginId, msg.method) ? msg.scope : undefined,
+      {
+        authorization: this.authorization,
+        authentication: { kind: "session", sessionId: this.sessionId, clientId: this.clientId },
+        getWorkspace: (id) => this.workspaceRegistry.get(id),
+        getAgent: (id) => this.agentStorage.get(id),
+      },
+    )
+      .then((invocation) =>
+        pluginRuntime.invokePluginRpc(msg.pluginId, msg.method, msg.input, invocation),
+      )
+      .then((output) => this.replyPluginRpc(msg, output));
+  }
   private dispatchPluginDirectoryMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugin.source.install.request") {
       if (!this.pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -3614,6 +3639,7 @@ export class Session {
           pluginId: frame.pluginId,
           method: frame.method,
           input: frame.payload,
+          ...(frame.scope ? { scope: frame.scope } : {}),
         },
         source,
       );
