@@ -390,6 +390,10 @@ function createButtonView({
       installation: entry.installation,
       toast,
       state: createPluginClientStateSource(entry.installation.serverId),
+      scope: {
+        workspaceId: entry.context.workspaceId,
+        ...(entry.context.context === "agent" ? { agentId: entry.context.agentId } : {}),
+      },
     },
     props: {
       ...entry.context,
