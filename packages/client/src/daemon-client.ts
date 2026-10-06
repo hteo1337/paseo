@@ -40,6 +40,7 @@ import {
   ShutdownRequestedStatusPayloadSchema,
   DaemonUpdateResponseSchema,
   SessionInboundMessageSchema,
+  type PluginRpcInvocationScope,
   type ActiveTurnBehavior,
   type ServerInfoStatusPayload,
 } from "@getpaseo/protocol/messages";
@@ -6382,7 +6383,12 @@ export class DaemonClient {
     return payload.plugin;
   }
 
-  async invokePluginRpc(pluginId: string, method: string, input: unknown): Promise<unknown> {
+  async invokePluginRpc(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    scope?: PluginRpcInvocationScope,
+  ): Promise<unknown> {
     const requestId = this.createRequestId();
     const payload = await this.sendCorrelatedSessionRequest({
       requestId,
@@ -6392,6 +6398,7 @@ export class DaemonClient {
         pluginId,
         method,
         input,
+        ...(scope ? { scope } : {}),
       },
       responseType: "plugin.rpc.invoke.response",
     });
