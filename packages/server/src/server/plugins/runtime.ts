@@ -26,6 +26,7 @@ import {
 } from "@getpaseo/plugin/server/provider";
 import type { PluginLogEntry } from "@getpaseo/protocol/messages";
 import { compileDirectoryPlugin } from "./compiler.js";
+import { consumePluginInvocation } from "./invocation-authority.js";
 import type { PluginRequirements } from "@getpaseo/protocol/messages";
 import type {
   PluginProcessMessage,
@@ -75,7 +76,9 @@ interface LoadedPlugin {
   /** Lets a client that already holds this bundle skip downloading it again. */
   clientBundleHash: string;
   methods: ReadonlySet<string>;
+  scopedMethods: ReadonlySet<string>;
   hooks: string[];
+
   providers: readonly PluginProviderMetadata[];
   usageSources: readonly PluginUsageSourceMetadata[];
   child: PluginChild | null;
@@ -608,12 +611,31 @@ export class PluginRuntime {
     this.logTails.delete(pluginId);
   }
 
-  async invoke(pluginId: string, method: string, input: unknown): Promise<unknown> {
+  rpcRequiresScope(pluginId: string, method: string): boolean {
+    const loaded = this.plugins.get(pluginId);
+    if (!loaded || !loaded.methods.has(method)) throw new Error("Plugin RPC unavailable");
+    return loaded.scopedMethods.has(method);
+  }
+
+  async invoke(
+    pluginId: string,
+    method: string,
+    input: unknown,
+    invocation?: import("@getpaseo/plugin/server").PluginInvocationContext,
+  ): Promise<unknown> {
     const loaded = this.plugins.get(pluginId);
     if (!loaded) throw new Error(`Plugin is not available: ${pluginId}`);
     if (!loaded.methods.has(method))
       throw new Error(`Plugin ${pluginId} does not contribute RPC ${method}`);
-    return this.request(loaded, { type: "invoke", requestId: randomUUID(), method, input });
+    const scoped = loaded.scopedMethods.has(method);
+    if (scoped) consumePluginInvocation(invocation);
+    return this.request(loaded, {
+      type: "invoke",
+      requestId: randomUUID(),
+      method,
+      input,
+      ...(scoped && invocation ? { invocation } : {}),
+    });
   }
 
   emit<Name extends keyof PluginHookEvents>(name: Name, event: PluginHookEvents[Name]): void {
@@ -885,7 +907,9 @@ export class PluginRuntime {
         clientBundleHash: hashClientBundle(clientBundle),
         requirements: manifest.requirements,
         methods: new Set(),
+        scopedMethods: new Set(),
         hooks: [],
+
         providers: [],
         usageSources: [],
         child: null,
@@ -1034,7 +1058,9 @@ export class PluginRuntime {
       clientBundleHash: hashClientBundle(clientBundle),
       requirements,
       methods: new Set(ready.methods),
+      scopedMethods: new Set(Object.keys(ready.rpcAuthorizations ?? {})),
       hooks: ready.hooks ?? [],
+
       providers: ready.providers ?? [],
       usageSources: ready.usageSources ?? [],
       child,
