@@ -19,7 +19,14 @@ export {
   type PluginAttachmentItem,
   type PluginAttachmentSearchPayload,
 } from "./attachments.js";
-export { defineRpc, type PluginRpcContract, type RpcInput, type RpcOutput } from "./rpc.js";
+export {
+  defineRpc,
+  type PluginRpcContract,
+  type PluginRpcAuthorization,
+  type PluginRpcWorkspacePermission,
+  type RpcInput,
+  type RpcOutput,
+} from "./rpc.js";
 
 export type { PluginText, PluginMessage } from "./text.js";
 export {
