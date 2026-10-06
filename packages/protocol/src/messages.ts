@@ -1610,12 +1610,22 @@ export const PluginEnableRequestSchema = pluginIdRequest("plugin.enable.request"
 export const PluginDisableRequestSchema = pluginIdRequest("plugin.disable.request");
 export const PluginRemoveRequestSchema = pluginIdRequest("plugin.remove.request");
 
+/** Requested scope is untrusted until the authenticated host authorizes it. */
+export const PluginRpcInvocationScopeSchema = z
+  .object({
+    workspaceId: z.string().min(1),
+    agentId: z.string().min(1).optional(),
+  })
+  .strict();
+export type PluginRpcInvocationScope = z.infer<typeof PluginRpcInvocationScopeSchema>;
+
 export const PluginRpcInvokeRequestSchema = z.object({
   type: z.literal("plugin.rpc.invoke.request"),
   requestId: z.string(),
   pluginId: PluginIdSchema,
   method: z.string().min(1),
   input: z.unknown(),
+  scope: PluginRpcInvocationScopeSchema.optional(),
 });
 
 export const AgentTimelineAppendRequestSchema = z.object({

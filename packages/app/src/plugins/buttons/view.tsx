@@ -78,7 +78,14 @@ function resolvePlatform(): PluginHostProps["layout"]["platform"] {
 function ButtonEnvironment({ view, children }: { view: ButtonView; children: ReactNode }) {
   return (
     <ToastApiProvider api={view.toast}>
-      <PluginRuntimeBoundary plugin={view.entry.installation} client={view.client}>
+      <PluginRuntimeBoundary
+        plugin={view.entry.installation}
+        client={view.client}
+        scope={{
+          workspaceId: view.props.workspaceId,
+          ...(view.props.context === "agent" ? { agentId: view.props.agentId } : {}),
+        }}
+      >
         <PluginClientStateProvider source={view.state}>{children}</PluginClientStateProvider>
       </PluginRuntimeBoundary>
     </ToastApiProvider>

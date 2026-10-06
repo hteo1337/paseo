@@ -2089,3 +2089,55 @@ Use `paseo plugin ls` to read the current status and error.
 | Edited code does not appear                                           | Run `npm run typecheck`, then `paseo plugin reload <id>`.                                                                               |
 | Reload fails                                                          | Read `paseo plugin ls` and `paseo plugin logs <id>`, fix the source error, then reload; Paseo does not restore the previous bundle.     |
 | Plugin exits unexpectedly                                             | Read `paseo plugin logs <id>` for retained initialization, cleanup, stderr, and final crash output.                                     |
+
+## Authenticated RPC invocation scope
+
+Declare `authorization: { scope: "workspace", permission: "workspace.read" }` on
+a `defineRpc` contract that reads workspace records. Use `scope: "agent"` to
+select a canonical agent target, and require `workspace.write` or
+`workspace.manage` for the corresponding mutations. The server handler receives
+`context.invocation: PluginInvocationContext` with `workspaceId`, optional
+`agentId`, the authenticated caller session's explicit workspace permissions,
+and `authentication: { kind: "session", sessionId, clientId }`. The host
+generates `sessionId`. `clientId` is a reported connection identifier, not an
+authenticated principal. Neither field grants permission.
+
+App-owned panel and command bindings send a separate requested scope. The daemon
+resolves the canonical active workspace and agent, rejects missing or archived
+records and agent/workspace mismatch, and rechecks session permissions after
+resolution. The runtime accepts only an immutable context issued by that host
+resolver and consumes its private process marker on admission. Direct internal
+service/runtime calls cannot supply a plain context or replay one. The
+serialized snapshot carries session attribution, not the private marker. Plugin
+payload selectors never establish authority. The trusted subprocess registers
+its contract requirements during startup; the subprocess also checks required
+scope and permission immediately before calling the handler. A handler must
+compare every payload workspace, source agent, or durable job's workspace with
+the validated invocation before returning records or mutating.
+
+The daemon currently grants workspace permissions globally. Validated scope is
+an authorized target under those grants, not proof of the selected UI identity,
+an originating agent, or a per-workspace ACL. A sufficiently privileged caller
+can select any canonical active target. Plugin-specific workspace allowlists
+remain separate plugin policy. The marker protects runtime ingress from
+unverified internal envelopes; it does not sandbox trusted host code, which owns
+the resolver and authorization dependencies. The plugin's `paseo` handle is
+still process-wide; a successful API refresh alone proves existence, not caller
+access. Plugins remain trusted unsandboxed code. Invocation grants are an
+admission-time snapshot, not a reusable token or a guarantee that a previously
+admitted call is cancelled when a grant or record changes. Recheck resource
+state before effects where needed.
+
+Contracts without `authorization` retain global legacy behavior: surface scope
+is ignored and no invocation context is supplied. This includes host-global
+settings read/write/reset, so disabling a preference remains possible when a
+workspace is archived or unavailable. Global callbacks and callbacks captured
+during plugin installation cannot call a scoped contract without an app-owned
+scoped binding; such calls fail closed. Scope changes invalidate the old mounted
+panel runtime.
+
+Do not activate a plugin using this capability on an older host: new contracts
+must also guard missing invocation in their handlers. Deploy the host capability
+before such plugins. Existing unscoped plugin RPCs keep the `daemon.manage`
+permission requirement; scoped calls additionally need their declared explicit
+workspace permission. This patch does not change any session's grants.

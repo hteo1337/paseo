@@ -1,3 +1,6 @@
+/** @vitest-environment jsdom */
+import { renderHook } from "@testing-library/react";
+import type { InstalledPlugin } from "./types";
 import type { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { PaseoApi } from "@getpaseo/client";
 import { PaseoApiProvider } from "@getpaseo/plugin/client/host";
@@ -5,7 +8,7 @@ import { usePaseo } from "@getpaseo/plugin/client";
 import React from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it, vi } from "vitest";
-import { createPluginSurfaceRuntime } from "./surface-runtime";
+import { createPluginSurfaceRuntime, usePluginSurfaceRuntime } from "./surface-runtime";
 
 function clientWithWorkspace(id: string) {
   const createWorkspace = vi.fn(async () => ({
@@ -108,5 +111,51 @@ describe("plugin surface host runtime", () => {
       createPluginSurfaceRuntime(null, { id: "same-plugin", lifetime: new AbortController() }),
     ).toBeNull();
     expect(otherHost.createWorkspace).not.toHaveBeenCalled();
+  });
+  it("binds scope independently of spoofed payloads and follows host/scope switches", async () => {
+    const hostA = clientWithWorkspace("workspace-a");
+    const hostB = clientWithWorkspace("workspace-b");
+    const plugin = { id: "scoped", lifetime: new AbortController() };
+    const scope = { workspaceId: "workspace-a", agentId: "agent-a" };
+    const first = createPluginSurfaceRuntime(hostA.client, plugin, scope)!;
+    scope.workspaceId = "payload-mutation";
+    const payload = { workspace: "forged", scope: { workspaceId: "forged" } };
+    await first.invoke("status", payload);
+    const second = createPluginSurfaceRuntime(hostB.client, plugin, {
+      workspaceId: "workspace-b",
+    })!;
+    await second.invoke("status", payload);
+    await createPluginSurfaceRuntime(hostB.client, plugin)!.invoke("global", {});
+    expect(hostA.invokePluginRpc).toHaveBeenCalledWith("scoped", "status", payload, {
+      workspaceId: "workspace-a",
+      agentId: "agent-a",
+    });
+    expect(hostB.invokePluginRpc).toHaveBeenCalledWith("scoped", "status", payload, {
+      workspaceId: "workspace-b",
+    });
+    expect(hostB.invokePluginRpc).toHaveBeenCalledWith("scoped", "global", {});
+    const observed: Array<string | null> = [];
+    const { result, rerender, unmount } = renderHook(
+      ({ workspaceId, agentId }) => {
+        const runtime = usePluginSurfaceRuntime(hostB.client, plugin as InstalledPlugin, {
+          workspaceId,
+          agentId,
+        });
+        observed.push(runtime ? workspaceId : null);
+        return runtime;
+      },
+      { initialProps: { workspaceId: "workspace-b", agentId: "agent-b" } },
+    );
+    const oldRuntime = result.current;
+    observed.length = 0;
+    rerender({ workspaceId: "workspace-c", agentId: "agent-c" });
+    expect(observed[0]).toBeNull();
+    expect(result.current).not.toBe(oldRuntime);
+    await result.current!.invoke("status", payload);
+    expect(hostB.invokePluginRpc).toHaveBeenLastCalledWith("scoped", "status", payload, {
+      workspaceId: "workspace-c",
+      agentId: "agent-c",
+    });
+    unmount();
   });
 });

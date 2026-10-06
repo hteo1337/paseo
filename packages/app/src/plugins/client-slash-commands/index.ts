@@ -42,7 +42,10 @@ export function usePluginClientSlashCommands(input: {
               description: contribution.description,
               argumentHint: contribution.argumentHint,
               async run(args: string) {
-                const runtime = createPluginSurfaceRuntime(client, plugin);
+                const runtime = createPluginSurfaceRuntime(client, plugin, {
+                  workspaceId,
+                  ...(contribution.context === "agent" ? { agentId: input.agentId } : {}),
+                });
                 if (!runtime) return;
                 try {
                   const context =

@@ -1,3 +1,4 @@
+import type { PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import { QueryClientProvider } from "@tanstack/react-query";
 import { PaseoApiProvider, PluginRpcProvider } from "@getpaseo/plugin/client/host";
 import type { ReactNode } from "react";
@@ -9,12 +10,14 @@ export function PluginRuntimeBoundary({
   plugin,
   client,
   children,
+  scope,
 }: {
   plugin: InstalledPlugin;
   client: DaemonClient;
   children: ReactNode;
+  scope?: PluginRpcInvocationScope;
 }) {
-  const runtime = usePluginSurfaceRuntime(client, plugin);
+  const runtime = usePluginSurfaceRuntime(client, plugin, scope);
   if (!runtime) return null;
   return (
     <QueryClientProvider client={plugin.queryClient}>

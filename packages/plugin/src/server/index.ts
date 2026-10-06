@@ -1,5 +1,6 @@
 export type {
   PluginHandlerContext,
+  PluginInvocationContext,
   PluginServerContext,
   PluginServerContribution,
   PluginSettings,
