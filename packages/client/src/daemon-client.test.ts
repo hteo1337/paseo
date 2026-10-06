@@ -7326,3 +7326,32 @@ test("usage request timeout detaches its update listener", async () => {
     vi.useRealTimers();
   }
 });
+
+test("plugin RPC transport preserves separate strict scope and unscoped compatibility", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "plugin_scope_test",
+    transportFactory: () => mock.transport,
+    reconnect: { enabled: false },
+  });
+  clients.push(client);
+  const connected = client.connect();
+  mock.triggerOpen();
+  await connected;
+  const input = { workspace: "forged", scope: { workspaceId: "forged" } };
+  for (const scope of [undefined, { workspaceId: "workspace-a", agentId: "agent-a" }]) {
+    const result = client.invokePluginRpc("scope-plugin", "status", input, scope);
+    const request = parseSentFrame(mock.sent.at(-1));
+    expect(request.input).toEqual(input);
+    if (scope) expect(request.scope).toEqual(scope);
+    else expect(request).not.toHaveProperty("scope");
+    mock.triggerMessage(
+      wrapSessionMessage({
+        type: "plugin.rpc.invoke.response",
+        payload: { requestId: request.requestId, output: "ok" },
+      }),
+    );
+    await expect(result).resolves.toBe("ok");
+  }
+});
