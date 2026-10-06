@@ -1,7 +1,7 @@
 import type { PluginText } from "@getpaseo/plugin/client";
 import type { PaseoApi } from "@getpaseo/client";
 import type { QueryClient } from "@tanstack/react-query";
-import type { PluginRequirements } from "@getpaseo/protocol/messages";
+import type { PluginRequirements, PluginRpcInvocationScope } from "@getpaseo/protocol/messages";
 import type {
   PluginAttachmentSourceContribution as SDKPluginAttachmentSourceContribution,
   PluginCleanup,
@@ -70,7 +70,7 @@ export interface InstalledPlugin extends EvaluatedPlugin {
   /** The plugin's one Paseo client, `usePaseo()` in every surface; disposed at teardown. */
   paseo: PaseoApi;
   /** Calls one of the plugin's server RPC methods on its host. */
-  invoke(method: string, input: unknown): Promise<unknown>;
+  invoke(method: string, input: unknown, scope?: PluginRpcInvocationScope): Promise<unknown>;
   serverId: string;
   requirements?: PluginRequirements;
   clientBundle: string;
