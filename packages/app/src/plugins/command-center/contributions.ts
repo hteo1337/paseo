@@ -8,6 +8,7 @@ import { createPluginCapabilities, type PluginNavigation } from "../actions";
 
 export interface PluginCommandCenterSource {
   plugins: readonly InstalledPlugin[];
+
   state: PluginClientStateSource;
   workspaceId: string | null;
   agentId: string | null;
@@ -24,7 +25,15 @@ export function buildPluginCommandCenterContributions(
       if (item.context === "workspace" && !source.workspaceId) continue;
       if (item.context === "agent" && (!source.workspaceId || !source.agentId)) continue;
       const run = async () => {
-        const common = createPluginCapabilities(plugin, source.navigation);
+        const scope =
+          item.context !== "global" && source.workspaceId
+            ? {
+                workspaceId: source.workspaceId,
+                ...(item.context === "agent" && source.agentId ? { agentId: source.agentId } : {}),
+              }
+            : undefined;
+        const common = createPluginCapabilities(plugin, source.navigation, scope);
+
         try {
           if (item.context === "global") {
             await item.onSelect({ context: "global", ...common });
