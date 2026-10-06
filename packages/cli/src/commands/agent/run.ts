@@ -12,7 +12,7 @@ import type {
   OutputSchema,
   CommandError,
 } from "../../output/index.js";
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { resolve } from "node:path";
 import { lookup } from "mime-types";
 import { parseDuration } from "../../utils/duration.js";
@@ -525,13 +525,61 @@ export async function resolveExistingRunWorkspace(
   } satisfies CommandError;
 }
 
+function realRunPath(path: string): string {
+  try {
+    return realpathSync(path);
+  } catch {
+    return resolve(path);
+  }
+}
+
+async function findReusableLocalRunWorkspace(
+  client: ConnectedDaemonClient,
+  cwd: string,
+): Promise<RunWorkspace | null> {
+  const target = realRunPath(cwd);
+  const projects = (await client.listProjects()).projects;
+  const project =
+    projects.find((entry) => resolve(entry.projectRootPath) === resolve(cwd)) ??
+    projects.find((entry) => realRunPath(entry.projectRootPath) === target);
+  if (!project) return null;
+
+  let cursor: string | undefined;
+  let oldest: { id: string; cwd: string; createdAt?: string } | undefined;
+  do {
+    const result = await client.fetchWorkspaces({
+      filter: { projectId: project.projectId },
+      page: { limit: 200, ...(cursor ? { cursor } : {}) },
+    });
+    for (const entry of result.entries) {
+      if (
+        entry.projectId !== project.projectId ||
+        entry.archivingAt ||
+        entry.workspaceKind === "worktree" ||
+        realRunPath(entry.workspaceDirectory) !== target
+      ) {
+        continue;
+      }
+      if (
+        !oldest ||
+        (entry.createdAt ?? "~") < (oldest.createdAt ?? "~") ||
+        ((entry.createdAt ?? "~") === (oldest.createdAt ?? "~") && entry.id < oldest.id)
+      ) {
+        oldest = { id: entry.id, cwd: entry.workspaceDirectory, createdAt: entry.createdAt };
+      }
+    }
+    cursor = result.pageInfo.nextCursor ?? undefined;
+  } while (cursor);
+  return oldest ? { id: oldest.id, cwd: oldest.cwd } : null;
+}
+
 // Workspace policy for `paseo run`. Precedence:
 //   1. --workspace <id>            -> run in that existing workspace
 //   2. caller agent                -> daemon resolves the caller's workspace
 //   3. $PASEO_WORKSPACE_ID         -> exported by workspace terminals
 //   4. --new-workspace <kind>      -> mint a new workspace explicitly
-//   5. bare run                    -> mint a new local-backed workspace for cwd
-async function resolveRunWorkspace(
+//   5. bare run                    -> reuse the oldest local workspace for cwd, or mint one
+export async function resolveRunWorkspace(
   client: ConnectedDaemonClient,
   options: AgentRunOptions,
   cwd: string,
@@ -552,6 +600,25 @@ async function resolveRunWorkspace(
   if (ambientWorkspaceId) {
     console.error(`Using workspace ${ambientWorkspaceId}`);
     return resolveExistingRunWorkspace(client, ambientWorkspaceId);
+  }
+
+  const createsSeparateWorkspace =
+    newWorkspace !== undefined ||
+    [
+      options.worktreeMode,
+      options.worktreeSlug,
+      options.newBranch,
+      options.base,
+      options.branch,
+      options.prNumber,
+      options.forge,
+    ].some((value) => value !== undefined);
+  if (!createsSeparateWorkspace) {
+    const reusable = await findReusableLocalRunWorkspace(client, cwd);
+    if (reusable) {
+      console.error(`Using workspace ${reusable.id}`);
+      return reusable;
+    }
   }
 
   // TODO: thread the run `prompt` as firstAgentContext so workspace-level

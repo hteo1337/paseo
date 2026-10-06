@@ -1,8 +1,12 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { mkdtempSync, mkdirSync, realpathSync, rmSync, symlinkSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { DaemonConnectionError } from "@getpaseo/client/internal/daemon-client";
 import {
   resolveExistingRunWorkspace,
   resolveRunCallerAgentId,
+  resolveRunWorkspace,
   runRunCommand,
   type AgentRunOptions,
 } from "./run";
@@ -154,5 +158,106 @@ describe("runRunCommand option validation", () => {
       { newWorkspace: "worktree", worktreeMode: "container" },
       /Unsupported worktree mode/,
     );
+  });
+});
+
+describe("plain run workspace reuse", () => {
+  it("chooses the oldest active local workspace in the same project and real directory", async () => {
+    const root = mkdtempSync(join(tmpdir(), "paseo-cli-reuse-"));
+    const cwd = join(root, "project");
+    const alias = join(root, "alias");
+    mkdirSync(cwd);
+    symlinkSync(cwd, alias, "dir");
+    const entries = [
+      {
+        id: "newer",
+        projectId: "project",
+        projectRootPath: cwd,
+        workspaceDirectory: cwd,
+        workspaceKind: "directory",
+        createdAt: "2026-02-01T00:00:00Z",
+        archivingAt: null,
+      },
+      {
+        id: "archiving",
+        projectId: "project",
+        projectRootPath: cwd,
+        workspaceDirectory: cwd,
+        workspaceKind: "directory",
+        createdAt: "2025-01-01T00:00:00Z",
+        archivingAt: "2026-03-01T00:00:00Z",
+      },
+      {
+        id: "worktree",
+        projectId: "project",
+        projectRootPath: cwd,
+        workspaceDirectory: cwd,
+        workspaceKind: "worktree",
+        createdAt: "2025-01-01T00:00:00Z",
+        archivingAt: null,
+      },
+      {
+        id: "other-project",
+        projectId: "other",
+        projectRootPath: root,
+        workspaceDirectory: cwd,
+        workspaceKind: "directory",
+        createdAt: "2025-01-01T00:00:00Z",
+        archivingAt: null,
+      },
+      {
+        id: "oldest",
+        projectId: "project",
+        projectRootPath: cwd,
+        workspaceDirectory: alias,
+        workspaceKind: "local_checkout",
+        createdAt: "2026-01-01T00:00:00Z",
+        archivingAt: null,
+      },
+    ];
+    const client = {
+      listProjects: vi
+        .fn()
+        .mockResolvedValue({ projects: [{ projectId: "project", projectRootPath: cwd }] }),
+      fetchWorkspaces: vi.fn().mockResolvedValue({ entries, pageInfo: { nextCursor: null } }),
+      createWorkspace: vi.fn().mockResolvedValue({
+        workspace: { id: "created", name: "Created", workspaceDirectory: cwd },
+      }),
+    };
+    const error = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    try {
+      expect(realpathSync(alias)).toBe(realpathSync(cwd));
+      await expect(
+        resolveRunWorkspace(client as never, { daemonTarget }, cwd, undefined),
+      ).resolves.toEqual({ id: "oldest", cwd: alias });
+      expect(client.createWorkspace).not.toHaveBeenCalled();
+      expect(error).toHaveBeenCalledWith("Using workspace oldest");
+      entries.splice(0);
+      await expect(
+        resolveRunWorkspace(client as never, { daemonTarget }, cwd, undefined),
+      ).resolves.toEqual({ id: "created", cwd });
+      expect(client.createWorkspace).toHaveBeenCalledTimes(1);
+      entries.push({
+        id: "oldest",
+        projectId: "project",
+        projectRootPath: cwd,
+        workspaceDirectory: alias,
+        workspaceKind: "local_checkout",
+        createdAt: "2026-01-01T00:00:00Z",
+        archivingAt: null,
+      });
+      await expect(
+        resolveRunWorkspace(
+          client as never,
+          { daemonTarget, newWorkspace: "local" },
+          cwd,
+          undefined,
+        ),
+      ).resolves.toEqual({ id: "created", cwd });
+      expect(client.createWorkspace).toHaveBeenCalledTimes(2);
+    } finally {
+      error.mockRestore();
+      rmSync(root, { recursive: true, force: true });
+    }
   });
 });
