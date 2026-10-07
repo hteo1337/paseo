@@ -38,6 +38,7 @@ publish:
   owner: getpaseo
   repo: paseo
 mac:
+  forceCodeSigning: true
   artifactName: "Paseo-${version}-${arch}.${ext}"
   minimumSystemVersion: "13.0.0"
   category: public.app-category.developer-tools
