@@ -16,6 +16,8 @@ test("signing validation covers every slice and protection while allowing separa
   const binaries = [
     "Contents/MacOS/Paseo",
     "Contents/Frameworks/Paseo Helper.app/Contents/MacOS/Paseo Helper",
+    "Contents/Frameworks/Paseo Helper (GPU).app/Contents/MacOS/Paseo Helper (GPU)",
+    "Contents/Frameworks/Paseo Helper (Renderer).app/Contents/MacOS/Paseo Helper (Renderer)",
     "Contents/Frameworks/Electron Framework.framework/Versions/A/Electron Framework",
     "Contents/Resources/addon.node",
     "Contents/Resources/vendor-tool",
@@ -68,7 +70,28 @@ test("signing validation covers every slice and protection while allowing separa
       let type = "EXECUTE";
       if (framework) type = "DYLIB";
       else if (addon) type = "BUNDLE";
-      return { status: 0, stdout: `magic filetype\nMH_MAGIC_64 ${type}`, stderr: "" };
+      if (!args.includes("-m") && file.endsWith(" (GPU)"))
+        return { status: 1, stdout: "", stderr: "archive(member) filename misinterpretation" };
+      if (flavor === "failed-header")
+        return { status: 1, stdout: "", stderr: "header command failed" };
+      if (flavor === "timeout-header")
+        return { status: null, error: Error("header command timed out"), stdout: "", stderr: "" };
+      const header = "magic cputype cpusubtype caps filetype ncmds sizeofcmds flags";
+      const row = `MH_MAGIC_64 ARM64 ALL 0x00 ${type} 18 2296 NOUNDEFS DYLDLINK`;
+      const outputs: Record<string, string> = {
+        "empty-header": "",
+        "missing-header": `EXECUTE filetype\n${row}`,
+        "truncated-header": `${header}\nMH_MAGIC_64 ARM64`,
+        "duplicate-header": `${header}\n${row}\n${header}\n${row}`,
+        "invalid-magic": `${header}\nNOT_MACHO ARM64 ALL 0x00 EXECUTE 18 2296 FLAGS`,
+        "invalid-size": `${header}\nMH_MAGIC_64 ARM64 ALL 0x00 EXECUTE nope 2296 FLAGS`,
+        "unknown-type": `${header}\nMH_MAGIC_64 ARM64 ALL 0x00 UNKNOWN 18 2296 FLAGS`,
+      };
+      return {
+        status: 0,
+        stdout: outputs[flavor] ?? `${file}:\nMach header\n${header}\n${row}`,
+        stderr: "",
+      };
     }
     if (command === "/usr/bin/plutil")
       return {
@@ -94,10 +117,19 @@ test("signing validation covers every slice and protection while allowing separa
   };
   expect(assertMacSigningTeam(app, run)).toEqual({
     teamIdentifier: "VALIDTEAM1",
-    checkedBinaries: 4,
-    checkedSlices: 8,
+    checkedBinaries: 6,
+    checkedSlices: 12,
   });
   for (const [mode, error] of [
+    ["empty-header", /Invalid Mach-O header/],
+    ["missing-header", /Invalid Mach-O header/],
+    ["truncated-header", /Invalid Mach-O header/],
+    ["duplicate-header", /Invalid Mach-O header/],
+    ["invalid-magic", /Invalid Mach-O header/],
+    ["invalid-size", /Invalid Mach-O header/],
+    ["unknown-type", /Invalid Mach-O file type/],
+    ["failed-header", /header command failed/],
+    ["timeout-header", /header command timed out/],
     ["adhoc", /real macOS signing identity/],
     ["mismatch", /team mismatch/],
     ["no-runtime", /Hardened runtime/],
@@ -110,5 +142,5 @@ test("signing validation covers every slice and protection while allowing separa
     expect(() => assertMacSigningTeam(app, run)).toThrow(error);
   }
   flavor = "apple-platform";
-  expect(assertMacSigningTeam(app, run).checkedSlices).toBe(8);
+  expect(assertMacSigningTeam(app, run).checkedSlices).toBe(12);
 });
