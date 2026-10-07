@@ -56,10 +56,24 @@ function architectures(binary, inspect) {
 }
 
 function fileType(binary, arch, inspect) {
-  const lines = inspect("/usr/bin/otool", ["-hv", "-arch", arch, binary]).stdout.split(/\r?\n/);
-  const header = lines.findIndex((line) => line.trim().split(/\s+/).includes("filetype"));
-  const column = lines[header]?.trim().split(/\s+/).indexOf("filetype");
-  const type = lines[header + 1]?.trim().split(/\s+/)[column];
+  // -m disables archive(member) interpretation of actual helper filenames such as "Paseo Helper (GPU)".
+  const lines = inspect("/usr/bin/otool", ["-m", "-hv", "-arch", arch, binary]).stdout.split(
+    /\r?\n/,
+  );
+  const columns = "magic cputype cpusubtype caps filetype ncmds sizeofcmds flags";
+  const headers = lines.flatMap((line, index) =>
+    line.trim().split(/\s+/).join(" ") === columns ? [index] : [],
+  );
+  const values = headers.length === 1 ? lines[headers[0] + 1]?.trim().split(/\s+/) : undefined;
+  if (
+    !values ||
+    values.length < 8 ||
+    !["MH_MAGIC", "MH_CIGAM", "MH_MAGIC_64", "MH_CIGAM_64"].includes(values[0]) ||
+    !/^\d+$/.test(values[5]) ||
+    !/^\d+$/.test(values[6])
+  )
+    throw new Error(`Invalid Mach-O header metadata for ${binary} (${arch})`);
+  const type = values[4];
   if (
     ![
       "EXECUTE",
