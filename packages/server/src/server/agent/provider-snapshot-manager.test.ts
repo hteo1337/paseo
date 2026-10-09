@@ -61,6 +61,50 @@ const CLOSED_PARENT: ManagedAgent = {
 };
 const TEST_REFRESH_TIMEOUT_MS = 120_000;
 
+test("cached snapshots neither create targets nor invoke provider availability/catalog discovery", async () => {
+  const isAvailable = vi.fn(async () => true);
+  const fetchCatalog = vi.fn(async () => ({ models: [], modes: [] }));
+  const getCatalogCacheKey = vi.fn(async () => "fixture");
+  const manager = new ProviderSnapshotManager({
+    logger: createTestLogger(),
+    extraClients: {
+      codex: createExtraClient("codex", { isAvailable, fetchCatalog, getCatalogCacheKey }),
+    },
+  });
+  try {
+    for (let i = 0; i < 2; i++) {
+      const absent = manager.getCachedSnapshot("/tmp/cache-only-fixture");
+      expect(absent.cacheState).toBe("missing");
+      expect(absent.snapshot.records).toEqual([]);
+      expect(manager.getCachedSnapshot().cacheState).toBe("missing");
+    }
+    await Promise.resolve();
+    expect(isAvailable).not.toHaveBeenCalled();
+    expect(fetchCatalog).not.toHaveBeenCalled();
+    expect(getCatalogCacheKey).not.toHaveBeenCalled();
+    await manager.warmUpSnapshotForCwd({ cwd: "/tmp/cache-only-fixture", providers: ["codex"] });
+    const calls = [
+      isAvailable.mock.calls.length,
+      fetchCatalog.mock.calls.length,
+      getCatalogCacheKey.mock.calls.length,
+    ];
+    const cached = manager.getCachedSnapshot("/tmp/cache-only-fixture");
+    expect(cached.cacheState).toBe("available");
+    expect(
+      cached.snapshot.records.find((row) => row.entry.provider === "codex")?.entry.status,
+    ).toBe("ready");
+    expect(manager.getCachedSnapshot("/tmp/cache-only-fixture").snapshot).toBe(cached.snapshot);
+    await Promise.resolve();
+    expect([
+      isAvailable.mock.calls.length,
+      fetchCatalog.mock.calls.length,
+      getCatalogCacheKey.mock.calls.length,
+    ]).toEqual(calls);
+  } finally {
+    manager.destroy();
+  }
+});
+
 // Builds an AgentClient that can be injected via the public extraClients option.
 // extraClients is the only injection surface the manager exposes for tests.
 function createExtraClient(

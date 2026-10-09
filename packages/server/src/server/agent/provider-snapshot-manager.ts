@@ -291,6 +291,18 @@ export class ProviderSnapshotManager {
     return this.getSnapshotForTarget(target);
   }
 
+  /** Cache-only inspection: never creates targets/clients or schedules discovery. */
+  getCachedSnapshot(cwd?: string): {
+    snapshot: ProviderSnapshot;
+    cacheState: "available" | "missing";
+  } {
+    const target = resolveProviderSnapshotTarget(cwd);
+    const existing = this.targets.get(target.snapshotCwd);
+    return existing
+      ? { snapshot: existing.snapshot, cacheState: "available" }
+      : { snapshot: { cwd: target.snapshotCwd, records: [] }, cacheState: "missing" };
+  }
+
   async refreshSnapshotForCwd(options: ProviderSnapshotRefreshOptions): Promise<void> {
     const snapshotCwd = resolveSnapshotCwd(options.cwd);
     const target = createWorkspaceSnapshotTarget(snapshotCwd);

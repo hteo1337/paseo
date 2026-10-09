@@ -5404,6 +5404,53 @@ test("lists available providers via RPC", async () => {
   });
 });
 
+test("cache-only provider metadata is capability gated before sending and requires host confirmation", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "cache-test",
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connecting = client.connect();
+  mock.triggerOpen();
+  await connecting;
+  await expect(client.getProvidersSnapshot({ cachedOnly: true })).rejects.toThrow(
+    "Update the host",
+  );
+  expect(mock.sent).toHaveLength(0);
+  mock.triggerOpen({ features: { providerSnapshotCacheOnly: true } });
+  const reading = client.getProvidersSnapshot({ cachedOnly: true, cwd: "/repo" });
+  const request = parseSentFrame(mock.sent[0]);
+  expect(request).toMatchObject({
+    type: "get_providers_snapshot_request",
+    cachedOnly: true,
+    cwd: "/repo",
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "get_providers_snapshot_response",
+      payload: {
+        entries: [],
+        cacheState: "missing",
+        generatedAt: "2026-10-09T00:00:00Z",
+        requestId: request.requestId,
+      },
+    }),
+  );
+  await expect(reading).resolves.toMatchObject({ entries: [], cacheState: "missing" });
+  const unconfirmed = client.getProvidersSnapshot({ cachedOnly: true });
+  const request2 = parseSentFrame(mock.sent.at(-1));
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "get_providers_snapshot_response",
+      payload: { entries: [], generatedAt: "2026-10-09T00:00:00Z", requestId: request2.requestId },
+    }),
+  );
+  await expect(unconfirmed).rejects.toThrow("did not confirm");
+});
+
 test("requests provider snapshots conditionally and expands the compact response", async () => {
   const mock = createMockTransport();
   const client = new DaemonClient({

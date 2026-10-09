@@ -87,6 +87,40 @@ function makeSubsystem(options: MakeOptions = {}) {
 }
 
 describe("ProviderCatalogSession", () => {
+  it("cache-only pulls never call the warming getter and distinguish absent from available cache", async () => {
+    const getSnapshot = vi.fn(() => {
+      throw Error("warming getter forbidden");
+    });
+    const getCachedSnapshot = vi.fn(() => ({
+      snapshot: createProviderSnapshot([]),
+      cacheState: "missing" as const,
+    }));
+    const { subsystem, emitted } = makeSubsystem({ snapshot: { getSnapshot, getCachedSnapshot } });
+    await subsystem.handleGetProvidersSnapshotRequest({
+      type: "get_providers_snapshot_request",
+      requestId: "cached",
+      cachedOnly: true,
+    });
+    expect(getSnapshot).not.toHaveBeenCalled();
+    expect(getCachedSnapshot).toHaveBeenCalledWith(undefined);
+    expect(findByType(emitted, "get_providers_snapshot_response")?.payload).toMatchObject({
+      entries: [],
+      cacheState: "missing",
+    });
+  });
+  it("ordinary pulls retain the existing warming path", async () => {
+    const getSnapshot = vi.fn(() => createProviderSnapshot(makeEntries()));
+    const getCachedSnapshot = vi.fn(() => {
+      throw Error("cache path not requested");
+    });
+    const { subsystem } = makeSubsystem({ snapshot: { getSnapshot, getCachedSnapshot } });
+    await subsystem.handleGetProvidersSnapshotRequest({
+      type: "get_providers_snapshot_request",
+      requestId: "ordinary",
+    });
+    expect(getSnapshot).toHaveBeenCalledWith(undefined);
+    expect(getCachedSnapshot).not.toHaveBeenCalled();
+  });
   it("PUSH gates invisible providers and downgrades unknown mode icons for legacy clients", () => {
     const { subsystem, emitted, pushSnapshotChange } = makeSubsystem({
       visibleProviders: new Set(["codex"]),
