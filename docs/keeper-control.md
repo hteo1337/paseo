@@ -16,10 +16,28 @@ toggle. When on, `server_info.features.keeperControl` is `true`. When off, every
 | ------------------------------------------ | ----------------- | ------------------------------------------------------ |
 | `keeper.agent.get_snapshot.request`        | `workspace.read`  | Incarnation, generation, pending ids and kinds, cursor |
 | `keeper.agent.send_message.request`        | `workspace.write` | Guarded send                                           |
+| `keeper.agent.answer_question.request`     | `workspace.write` | Guarded answer of one AskUserQuestion gate             |
 | `keeper.agent.get_pending_request.request` | `workspace.write` | Bounded detail of one pending permission or question   |
 | `keeper.events.read.request`               | `workspace.read`  | Cursor read of the event feed, optional long-poll      |
 
 All take the full agent ID; prefixes and titles are never resolved.
+
+## Guarded question answer
+
+`keeper.agent.answer_question.request` takes the exact pending request ID, the expected session
+incarnation and permission generation from a snapshot, an idempotency key, and either an exact
+option label or bounded free text. Only a single-question `AskUserQuestion` request is supported;
+the daemon checks the stored request kind and name. A tool approval cannot be answered through this
+RPC. Text is limited to 400 characters and requires the question's `allowOther` path. A question with
+several prompts or a multi-select prompt is refused.
+
+The daemon compares, validates, reserves a durable receipt, rechecks, and answers while holding the
+same lifecycle and foreground lane used by guarded sends. Ordinary human answers enter that lane
+too. The first answer removes the pending request; the other sees a stale generation or missing ID.
+Completed receipt retries return `duplicate` and the original receipt ID without a second provider
+call. Pending receipts return `outcome_unknown` and are never retried automatically. Rejected
+attempts write `answer.rejected` with a typed reason and hashed answer key to the durable event feed;
+answer text is never in the event. If the event cannot flush, the result is `outcome_unknown`.
 
 ## State the guard compares
 
