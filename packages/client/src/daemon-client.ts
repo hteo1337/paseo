@@ -1238,6 +1238,7 @@ function buildFetchAgentsRequest(
 type KeeperResponseType =
   | "keeper.agent.get_snapshot.response"
   | "keeper.agent.send_message.response"
+  | "keeper.agent.answer_question.response"
   | "keeper.agent.get_pending_request.response"
   | "keeper.events.read.response";
 type KeeperPayload<T extends KeeperResponseType> = Extract<
@@ -3589,6 +3590,21 @@ export class DaemonClient {
     return this.keeperRequest(
       { type: "keeper.agent.send_message.request", ...params },
       "keeper.agent.send_message.response",
+      { skipQueue: true },
+    );
+  }
+
+  async keeperAnswerQuestion(params: {
+    agentId: string;
+    permissionRequestId: string;
+    idempotencyKey: string;
+    expectedSessionIncarnation: string;
+    expectedPermissionGeneration: number;
+    answer: { kind: "option"; label: string } | { kind: "text"; text: string };
+  }) {
+    return this.keeperRequest(
+      { type: "keeper.agent.answer_question.request", ...params },
+      "keeper.agent.answer_question.response",
       { skipQueue: true },
     );
   }
