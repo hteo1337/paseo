@@ -424,11 +424,16 @@ export class ProviderCatalogSession {
     msg: Extract<SessionInboundMessage, { type: "get_providers_snapshot_request" }>,
   ): Promise<void> {
     const cwd = msg.cwd?.trim() ? resolveSnapshotCwd(expandTilde(msg.cwd)) : undefined;
-    const snapshot = this.visibleSnapshot(this.providerSnapshotManager.getSnapshot(cwd));
+    const result =
+      msg.cachedOnly === true
+        ? this.providerSnapshotManager.getCachedSnapshot(cwd)
+        : { snapshot: this.providerSnapshotManager.getSnapshot(cwd), cacheState: undefined };
+    const snapshot = this.visibleSnapshot(result.snapshot);
     this.host.emit({
       type: "get_providers_snapshot_response",
       payload: {
         ...this.snapshotPayload(snapshot, { ifNoneMatch: msg.ifNoneMatch }),
+        cacheState: result.cacheState,
         requestId: msg.requestId,
       },
     });

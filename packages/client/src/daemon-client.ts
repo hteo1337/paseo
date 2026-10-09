@@ -5146,15 +5146,26 @@ export class DaemonClient {
 
   async getProvidersSnapshot(options?: {
     cwd?: string;
+    cachedOnly?: boolean;
     ifNoneMatch?: string;
     requestId?: string;
   }): Promise<GetProvidersSnapshotPayload> {
+    if (
+      options?.cachedOnly === true &&
+      this.lastServerInfoMessage?.features?.providerSnapshotCacheOnly !== true
+    ) {
+      throw new Error("Update the host to inspect cached provider metadata without discovery.");
+    }
     const payload = await this.requestProvidersSnapshot(options);
+    if (options?.cachedOnly === true && payload.cacheState === undefined) {
+      throw new Error("Host did not confirm a cache-only provider metadata read.");
+    }
     return normalizeProvidersSnapshotPayload(payload, this.config.providerSnapshots !== "wire");
   }
 
   private requestProvidersSnapshot(options?: {
     cwd?: string;
+    cachedOnly?: boolean;
     ifNoneMatch?: string;
     requestId?: string;
   }): Promise<GetProvidersSnapshotPayload> {
@@ -5163,6 +5174,7 @@ export class DaemonClient {
       message: {
         type: "get_providers_snapshot_request",
         cwd: options?.cwd,
+        ...(options?.cachedOnly === true ? { cachedOnly: true } : {}),
         ifNoneMatch: options?.ifNoneMatch,
       },
       responseType: "get_providers_snapshot_response",

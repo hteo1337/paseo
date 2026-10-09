@@ -454,6 +454,8 @@ export interface PaseoProviderActions {
   ): Promise<PaseoProviderFeaturesResult>;
   listAvailable(options?: { requestId?: string }): Promise<PaseoProviderAvailabilityResult>;
   snapshot(options?: PaseoProviderListOptions): Promise<PaseoProviderSnapshotResult>;
+  /** Existing published cache only. Requires host capability; never warms providers. */
+  cachedSnapshot(options?: PaseoProviderListOptions): Promise<PaseoProviderSnapshotResult>;
   /** Resolves after the daemon's lazy provider discovery has finished. */
   waitForReady(options?: PaseoProviderWaitOptions): Promise<PaseoProviderSnapshotResult>;
   refresh(options?: PaseoProviderRefreshOptions): Promise<PaseoProviderRefreshResult>;
@@ -741,6 +743,8 @@ export function createPaseoApi(
       },
       listAvailable: (options) => daemonClient.listAvailableProviders(options),
       snapshot: (options) => daemonClient.getProvidersSnapshot(options),
+      cachedSnapshot: (options) =>
+        daemonClient.getProvidersSnapshot({ ...options, cachedOnly: true }),
       waitForReady: (options) =>
         waitForProvidersReady(
           daemonClient,
