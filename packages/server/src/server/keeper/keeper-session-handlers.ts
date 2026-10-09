@@ -48,6 +48,31 @@ export function dispatchKeeperMessage(
             };
         emit({ type: "keeper.agent.send_message.response", payload });
       })();
+    case "keeper.agent.answer_question.request":
+      return (async () => {
+        const payload = control?.enabled
+          ? await control.answerQuestion(msg).catch((error: unknown) => ({
+              requestId: msg.requestId,
+              agentId: msg.agentId,
+              permissionRequestId: msg.permissionRequestId,
+              result: "outcome_unknown" as const,
+              reason: null,
+              receiptId: null,
+              current: null,
+              error: error instanceof Error ? error.message : String(error),
+            }))
+          : {
+              requestId: msg.requestId,
+              agentId: msg.agentId,
+              permissionRequestId: msg.permissionRequestId,
+              result: "rejected" as const,
+              reason: "disabled" as const,
+              receiptId: null,
+              current: null,
+              error: null,
+            };
+        emit({ type: "keeper.agent.answer_question.response", payload });
+      })();
     case "keeper.agent.get_pending_request.request":
       return (async () => {
         const payload = control?.enabled
