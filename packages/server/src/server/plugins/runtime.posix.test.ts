@@ -1600,6 +1600,41 @@ export default function contribute(server: { registerProvider(provider: Provider
     }
   });
 
+  it("bounds shutdown even when the IPC send callback never arrives", async () => {
+    vi.useFakeTimers();
+    try {
+      const directory = await createPlugin(
+        "blocked-ipc",
+        `export default function contribute(plugin: unknown) { void plugin; return () => undefined; }`,
+      );
+      const child = createReloadChild("blocked-ipc", []);
+      const originalSend = child.send.bind(child);
+      child.send = (message, callback) => {
+        if (message.type !== "shutdown") return originalSend(message, callback);
+        return false;
+      };
+      const signals: Array<NodeJS.Signals | undefined> = [];
+      const originalKill = child.kill.bind(child);
+      child.kill = (signal?: NodeJS.Signals) => {
+        signals.push(signal);
+        if (signal === "SIGKILL") return originalKill();
+        child.killed = true;
+        return true;
+      };
+      const runtime = createTestRuntime({ spawnChild: () => child });
+      await runtime.startPlugin("blocked-ipc", directory);
+      const stopping = runtime.stopPluginById("blocked-ipc");
+      await vi.advanceTimersByTimeAsync(2_000);
+      expect(signals).toEqual(["SIGTERM"]);
+      await vi.advanceTimersByTimeAsync(2_000);
+      await stopping;
+      expect(signals).toEqual(["SIGTERM", "SIGKILL"]);
+      expect(pluginMessages(runtime, "blocked-ipc")).toContain("[paseo] Plugin stopped");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it("escalates a plugin that ignores graceful shutdown from TERM to KILL", async () => {
     vi.useFakeTimers();
     try {
