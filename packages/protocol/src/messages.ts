@@ -1433,6 +1433,20 @@ export const KeeperSendMessageRequestSchema = z.object({
   allowPendingPermissions: z.boolean().optional(),
 });
 
+export const KeeperAnswerQuestionRequestSchema = z.object({
+  type: z.literal("keeper.agent.answer_question.request"),
+  requestId: z.string(),
+  agentId: z.string(),
+  permissionRequestId: z.string().min(1),
+  idempotencyKey: z.string().min(1).max(200),
+  expectedSessionIncarnation: z.string().min(1),
+  expectedPermissionGeneration: z.number().int().nonnegative(),
+  answer: z.discriminatedUnion("kind", [
+    z.object({ kind: z.literal("option"), label: z.string().min(1).max(400) }),
+    z.object({ kind: z.literal("text"), text: z.string().min(1).max(400) }),
+  ]),
+});
+
 export const KeeperGetPendingRequestRequestSchema = z.object({
   type: z.literal("keeper.agent.get_pending_request.request"),
   requestId: z.string(),
@@ -3306,6 +3320,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   SendAgentMessageRequestSchema,
   KeeperGetSnapshotRequestSchema,
   KeeperSendMessageRequestSchema,
+  KeeperAnswerQuestionRequestSchema,
   KeeperGetPendingRequestRequestSchema,
   KeeperReadEventsRequestSchema,
   WaitForFinishRequestSchema,
@@ -5127,6 +5142,34 @@ export const KeeperSendMessageResponseSchema = z.object({
   }),
 });
 
+export const KEEPER_ANSWER_REJECTION_REASONS = [
+  "disabled",
+  "agent_not_live",
+  "agent_archived",
+  "stale_incarnation",
+  "stale_generation",
+  "question_not_found",
+  "not_question",
+  "unsupported_question",
+  "invalid_answer",
+  "admission_busy",
+  "idempotency_conflict",
+] as const;
+
+export const KeeperAnswerQuestionResponseSchema = z.object({
+  type: z.literal("keeper.agent.answer_question.response"),
+  payload: z.object({
+    requestId: z.string(),
+    agentId: z.string(),
+    permissionRequestId: z.string(),
+    result: z.enum(["accepted", "duplicate", "rejected", "outcome_unknown"]),
+    reason: z.enum(KEEPER_ANSWER_REJECTION_REASONS).nullable(),
+    receiptId: z.string().nullable(),
+    current: KeeperStateSummarySchema.nullable(),
+    error: z.string().nullable(),
+  }),
+});
+
 export const KeeperGetPendingRequestResponseSchema = z.object({
   type: z.literal("keeper.agent.get_pending_request.response"),
   payload: z.object({
@@ -5167,6 +5210,8 @@ export const KeeperEventSchema = z.object({
   /** send.rejected only: the reject reason and sha256("sendkey", agentId, idempotencyKey). */
   reason: z.string().nullable().optional(),
   sendKey: z.string().nullable().optional(),
+  /** answer.rejected only; sha256 of the scoped answer idempotency key. */
+  answerKey: z.string().nullable().optional(),
 });
 
 export const KeeperReadEventsResponseSchema = z.object({
@@ -7096,6 +7141,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   SendAgentMessageResponseMessageSchema,
   KeeperGetSnapshotResponseSchema,
   KeeperSendMessageResponseSchema,
+  KeeperAnswerQuestionResponseSchema,
   KeeperGetPendingRequestResponseSchema,
   KeeperReadEventsResponseSchema,
   SetVoiceModeResponseMessageSchema,
@@ -7414,6 +7460,8 @@ export type AgentForkContextRequestMessage = z.infer<typeof AgentForkContextRequ
 export type SendAgentMessageRequest = z.infer<typeof SendAgentMessageRequestSchema>;
 export type KeeperGetSnapshotRequest = z.infer<typeof KeeperGetSnapshotRequestSchema>;
 export type KeeperSendMessageRequest = z.infer<typeof KeeperSendMessageRequestSchema>;
+export type KeeperAnswerQuestionRequest = z.infer<typeof KeeperAnswerQuestionRequestSchema>;
+export type KeeperAnswerQuestionResponse = z.infer<typeof KeeperAnswerQuestionResponseSchema>;
 export type KeeperGetPendingRequestRequest = z.infer<typeof KeeperGetPendingRequestRequestSchema>;
 export type KeeperReadEventsRequest = z.infer<typeof KeeperReadEventsRequestSchema>;
 export type KeeperEvent = z.infer<typeof KeeperEventSchema>;

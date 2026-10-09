@@ -35,6 +35,7 @@ const EventLineSchema = z.object({
   lifecycle: z.string().nullable(),
   reason: z.string().nullable().optional(),
   sendKey: z.string().nullable().optional(),
+  answerKey: z.string().nullable().optional(),
 });
 
 // Durable event log addressed by `<epoch>.<seq>` cursors; reads return only events already on

@@ -123,6 +123,19 @@ export function sendFingerprint(text: string, onActiveTurn: string): string {
   return digest("send", text, onActiveTurn);
 }
 
+/** Public answer receipt identity uses a domain distinct from send receipt identity. */
+export function answerKey(agentId: string, key: string): string {
+  return digest("answerkey", agentId, key);
+}
+
+export function answerFingerprint(
+  permissionRequestId: string,
+  kind: string,
+  value: string,
+): string {
+  return digest("answer", permissionRequestId, kind, value);
+}
+
 function digest(...parts: string[]): string {
   const hash = createHash("sha256");
   for (const part of parts) hash.update(`${part.length}:${part}`);

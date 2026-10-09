@@ -3597,7 +3597,37 @@ export class AgentManager {
     requestId: string,
     response: AgentPermissionResponse,
   ): Promise<AgentPermissionResult | void> {
-    const agent = this.requireAgent(agentId);
+    // Human responses use the same lifecycle/foreground lane as guarded keeper admission.
+    // The first responder removes the pending request and increments its generation.
+    return this.runLifecycleMutation(agentId, () =>
+      this.runForegroundMutation(agentId, async () => {
+        await this.drainSessionEvents(agentId);
+        const agent = this.requireSessionAgent(agentId);
+        if (!agent.pendingPermissions.has(requestId)) {
+          throw new Error(`No pending permission request with id '${requestId}'`);
+        }
+        return this.respondToPermissionNow(agent, requestId, response);
+      }),
+    );
+  }
+
+  /** Called only by an admission that already owns both lanes. */
+  async respondToPermissionHeld(
+    context: AgentAdmissionContext,
+    requestId: string,
+    response: AgentPermissionResponse,
+  ): Promise<AgentPermissionResult | void> {
+    if (!context.agent.pendingPermissions.has(requestId)) {
+      throw new AdmissionRefused("question_not_found");
+    }
+    return this.respondToPermissionNow(context.agent, requestId, response);
+  }
+
+  private async respondToPermissionNow(
+    agent: ActiveManagedAgent,
+    requestId: string,
+    response: AgentPermissionResponse,
+  ): Promise<AgentPermissionResult | void> {
     if (agent.inFlightPermissionResponses.has(requestId)) {
       throw new Error("A response to this permission request is already being submitted");
     }

@@ -63,6 +63,172 @@ function expectNoSideEffects(h: Harness): void {
   expect(h.provider.callsOf("respondToPermission")).toEqual([]);
 }
 
+function question(h: Harness, id = "question-full-id", kind = "question") {
+  h.provider.session.raise({
+    id,
+    kind: kind as "question",
+    name: kind === "question" ? "AskUserQuestion" : "Bash",
+    input: {
+      questions: [
+        {
+          question: "Choose a provider?",
+          options: [{ label: "Claude" }, { label: "Codex" }],
+          multiSelect: false,
+        },
+      ],
+    },
+  });
+  return until(
+    async () => (await observe(h)).pending.some((p) => p.permissionRequestId === id),
+    id,
+  );
+}
+
+function answerParams(h: Harness, seen: Awaited<ReturnType<typeof observe>>, key: string) {
+  return {
+    agentId: h.agentId,
+    permissionRequestId: "question-full-id",
+    idempotencyKey: key,
+    expectedSessionIncarnation: seen.incarnation,
+    expectedPermissionGeneration: seen.permissionGeneration,
+    answer: { kind: "option" as const, label: "Claude" },
+  };
+}
+
+describe("keeper guarded question answer", () => {
+  test("answers one exact question and returns a durable receipt", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion(answerParams(h, seen, "answer-ok"));
+    expect(reply).toMatchObject({ result: "accepted", reason: null });
+    const directory = path.join(h.ctx.daemon.paseoHome, "keeper-answer-receipts");
+    const receipt = JSON.parse(
+      readFileSync(path.join(directory, readdirSync(directory)[0]), "utf8"),
+    );
+    expect(receipt).toMatchObject({ state: "completed", delivery: "answered" });
+    expect(reply.receiptId).toEqual(expect.any(String));
+    expect(h.provider.callsOf("respondToPermission")).toEqual([
+      { kind: "respondToPermission", requestId: "question-full-id" },
+    ]);
+    expect((await observe(h)).pending).toEqual([]);
+  });
+
+  test("rejects stale incarnation without touching the question", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion({
+      ...answerParams(h, seen, "answer-inc"),
+      expectedSessionIncarnation: "old-incarnation",
+    });
+    expect(reply).toMatchObject({ result: "rejected", reason: "stale_incarnation" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+    expect((await observe(h)).pending).toHaveLength(1);
+    const page = await h.ctx.client.keeperReadEvents({ cursor: null });
+    expect(page.events).toContainEqual(
+      expect.objectContaining({
+        type: "answer.rejected",
+        reason: "stale_incarnation",
+        permissionRequestId: "question-full-id",
+      }),
+    );
+  });
+
+  test("rejects stale generation without touching the question", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion({
+      ...answerParams(h, seen, "answer-gen"),
+      expectedPermissionGeneration: seen.permissionGeneration - 1,
+    });
+    expect(reply).toMatchObject({ result: "rejected", reason: "stale_generation" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+    expect((await observe(h)).pending).toHaveLength(1);
+  });
+
+  test("does not resolve an ID prefix", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion({
+      ...answerParams(h, seen, "answer-prefix"),
+      permissionRequestId: "question-full",
+    });
+    expect(reply).toMatchObject({ result: "rejected", reason: "question_not_found" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+    expect((await observe(h)).pending.map((p) => p.permissionRequestId)).toEqual([
+      "question-full-id",
+    ]);
+  });
+
+  test("refuses a tool permission gate", async () => {
+    const h = await setup();
+    await question(h, "question-full-id", "tool");
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion(answerParams(h, seen, "answer-tool"));
+    expect(reply).toMatchObject({ result: "rejected", reason: "not_question" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+    expect((await observe(h)).pending).toHaveLength(1);
+  });
+
+  test("repeated idempotency key returns one receipt and answers once", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const params = answerParams(h, seen, "answer-repeat");
+    const first = await h.ctx.client.keeperAnswerQuestion(params);
+    const second = await h.ctx.client.keeperAnswerQuestion(params);
+    expect(first).toMatchObject({ result: "accepted" });
+    expect(second).toMatchObject({ result: "duplicate", receiptId: first.receiptId });
+    expect(h.provider.callsOf("respondToPermission")).toHaveLength(1);
+  });
+
+  test("disabled flag refuses without answering", async () => {
+    const h = await setup(false);
+    h.provider.session.raise({ id: "question-full-id", kind: "question", name: "AskUserQuestion" });
+    const reply = await h.ctx.client.keeperAnswerQuestion({
+      agentId: h.agentId,
+      permissionRequestId: "question-full-id",
+      idempotencyKey: "answer-off",
+      expectedSessionIncarnation: "any",
+      expectedPermissionGeneration: 0,
+      answer: { kind: "option", label: "Claude" },
+    });
+    expect(reply).toMatchObject({ result: "rejected", reason: "disabled" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+  });
+
+  test("human answer wins the lane and the keeper cannot answer twice", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const manager = h.ctx.daemon.daemon.agentManager;
+    const human = manager.respondToPermission(h.agentId, "question-full-id", {
+      behavior: "allow",
+      updatedInput: { answers: { "Choose a provider?": "Codex" } },
+    });
+    const keeper = h.ctx.client.keeperAnswerQuestion(answerParams(h, seen, "answer-human-race"));
+    await human;
+    expect(await keeper).toMatchObject({ result: "rejected", reason: "stale_generation" });
+    expect(h.provider.callsOf("respondToPermission")).toHaveLength(1);
+  });
+
+  test("rejects an option absent from the pending question", async () => {
+    const h = await setup();
+    await question(h);
+    const seen = await observe(h);
+    const reply = await h.ctx.client.keeperAnswerQuestion({
+      ...answerParams(h, seen, "answer-invalid"),
+      answer: { kind: "option", label: "Bash" },
+    });
+    expect(reply).toMatchObject({ result: "rejected", reason: "invalid_answer" });
+    expect(h.provider.callsOf("respondToPermission")).toEqual([]);
+    expect((await observe(h)).pending).toHaveLength(1);
+  });
+});
+
 describe("keeper atomic send", () => {
   test("an exact-match send starts one turn and reports what was acknowledged", async () => {
     const h = await setup();

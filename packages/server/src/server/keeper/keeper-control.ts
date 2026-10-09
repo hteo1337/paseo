@@ -1,6 +1,8 @@
 import type { Logger } from "pino";
 import type {
   KeeperEvent,
+  KeeperAnswerQuestionRequest,
+  KeeperAnswerQuestionResponse,
   KeeperGetPendingRequestRequest,
   KeeperGetPendingRequestResponse,
   KeeperGetSnapshotResponse,
@@ -22,6 +24,8 @@ import type { KeeperEventInput, KeeperEventOutbox } from "./event-outbox.js";
 import {
   type KeeperSendReceipts,
   type ReceiptOutcome,
+  answerFingerprint,
+  answerKey,
   sendFingerprint,
   sendKey,
 } from "./send-receipts.js";
@@ -32,12 +36,15 @@ const DEFAULT_EVENT_LIMIT = 100;
 const START_TIMEOUT_MS = 60_000;
 
 type SendPayload = KeeperSendMessageResponse["payload"];
+type AnswerPayload = KeeperAnswerQuestionResponse["payload"];
+type AnswerReason = NonNullable<AnswerPayload["reason"]>;
 
 export interface KeeperControlDeps {
   enabled: boolean;
   agentManager: AgentManager;
   agentStorage: AgentStorage;
   receipts: KeeperSendReceipts;
+  answerReceipts: KeeperSendReceipts;
   outbox: KeeperEventOutbox;
   logger: Logger;
 }
@@ -175,6 +182,146 @@ export class KeeperControl {
       await this.recordRejected(req, outcome.reason, compared.state);
     }
     return outcome;
+  }
+
+  async answerQuestion(req: KeeperAnswerQuestionRequest): Promise<AnswerPayload> {
+    const key = req.idempotencyKey;
+    const receiptId = answerKey(req.agentId, key);
+    const value = req.answer.kind === "option" ? req.answer.label : req.answer.text;
+    const fingerprint = answerFingerprint(req.permissionRequestId, req.answer.kind, value);
+    const reply = (
+      result: AnswerPayload["result"],
+      reason: AnswerReason | null,
+      extra: Partial<AnswerPayload> = {},
+    ): AnswerPayload => ({
+      requestId: req.requestId,
+      agentId: req.agentId,
+      permissionRequestId: req.permissionRequestId,
+      result,
+      reason,
+      receiptId: null,
+      current: null,
+      error: null,
+      ...extra,
+    });
+    let compared: AgentControlState | null = null;
+    const reject = (reason: AnswerReason, state: AgentControlState | null = null) => {
+      compared = state;
+      return reply("rejected", reason, { current: state ? summarize(state) : null });
+    };
+    if (!this.deps.enabled) return reject("disabled");
+    const { agentManager, answerReceipts } = this.deps;
+    const outcome = await answerReceipts.serialize(req.agentId, key, async () => {
+      const prior = await answerReceipts.lookup(req.agentId, key, fingerprint);
+      if (prior.kind === "duplicate") return reply("duplicate", null, { receiptId });
+      if (prior.kind === "outcome_unknown") return reply("outcome_unknown", null, { receiptId });
+      if (prior.kind === "idempotency_conflict") return reject("idempotency_conflict");
+      const record = await this.deps.agentStorage.get(req.agentId);
+      if (record?.archivedAt) return reject("agent_archived");
+
+      let reserved: ReceiptOutcome | null = null;
+      try {
+        const admitted = await agentManager.admitGuarded(
+          req.agentId,
+          {
+            expectedSessionIncarnation: req.expectedSessionIncarnation,
+            expectedPermissionGeneration: req.expectedPermissionGeneration,
+            allowPendingPermissions: true,
+            reserve: async (seen) => {
+              const validation = validateQuestion(seen, req);
+              if (validation) return { ok: false, reason: validation };
+              const found = await answerReceipts.reserve(req.agentId, key, fingerprint, {
+                bootId: this.bootId,
+                sessionIncarnation: seen.sessionIncarnation,
+                permissionGeneration: seen.permissionGeneration,
+              });
+              if (found.kind !== "none") {
+                reserved = found;
+                return { ok: false, reason: `receipt_${found.kind}` };
+              }
+              const latest = await this.deps.agentStorage.get(req.agentId);
+              if (!latest?.archivedAt) return { ok: true };
+              await this.releaseAnswerReceipt(req.agentId, key);
+              return { ok: false, reason: "agent_archived" };
+            },
+            release: () => this.releaseAnswerReceipt(req.agentId, key),
+          },
+          async (context) => {
+            const validation = validateQuestion(context.state, req);
+            if (validation) throw new AdmissionRefused(validation);
+            await agentManager.respondToPermissionHeld(context, req.permissionRequestId, {
+              behavior: "allow",
+              updatedInput: {
+                answers: { [questionText(context.state, req.permissionRequestId)]: value },
+              },
+            });
+            await answerReceipts.complete(req.agentId, key, fingerprint, "answered", {
+              bootId: this.bootId,
+              sessionIncarnation: context.state.sessionIncarnation,
+              permissionGeneration: context.state.permissionGeneration,
+            });
+            return agentManager.getControlState(req.agentId);
+          },
+        );
+        if ("rejected" in admitted) {
+          const reserveOutcome = reserved as ReceiptOutcome | null;
+          if (reserveOutcome?.kind === "duplicate") return reply("duplicate", null, { receiptId });
+          if (reserveOutcome?.kind === "outcome_unknown")
+            return reply("outcome_unknown", null, { receiptId });
+          if (reserveOutcome?.kind === "idempotency_conflict")
+            return reject("idempotency_conflict");
+          return reject(admitted.rejected as AnswerReason, admitted.state);
+        }
+        return reply("accepted", null, {
+          receiptId,
+          current: admitted.value ? summarize(admitted.value) : null,
+        });
+      } catch (error) {
+        return reply("outcome_unknown", null, { receiptId, error: messageOf(error) });
+      }
+    });
+    if (outcome.result === "rejected") {
+      try {
+        await this.recordAnswerRejected(req, outcome.reason, compared);
+      } catch (error) {
+        return reply("outcome_unknown", null, { error: messageOf(error) });
+      }
+    }
+    return outcome;
+  }
+
+  private async releaseAnswerReceipt(agentId: string, key: string): Promise<void> {
+    let last: unknown;
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      try {
+        await this.deps.answerReceipts.release(agentId, key);
+        return;
+      } catch (error) {
+        last = error;
+      }
+    }
+    throw last;
+  }
+
+  private async recordAnswerRejected(
+    req: KeeperAnswerQuestionRequest,
+    reason: AnswerReason | null,
+    state: AgentControlState | null,
+  ): Promise<void> {
+    this.deps.outbox.append({
+      category: "answer",
+      type: "answer.rejected",
+      agentId: req.agentId,
+      bootId: this.bootId,
+      sessionIncarnation: state?.sessionIncarnation ?? null,
+      permissionGeneration: state?.permissionGeneration ?? null,
+      permissionRequestId: req.permissionRequestId,
+      turnId: null,
+      lifecycle: null,
+      reason,
+      answerKey: answerKey(req.agentId, req.idempotencyKey),
+    });
+    await this.deps.outbox.flush();
   }
 
   /** Daemon-side proof that a rejected send was attempted; durable before the reply goes out. */
@@ -374,6 +521,63 @@ function summarize(state: AgentControlState): KeeperStateSummary {
     lifecycle: state.lifecycle,
     hasActiveTurn: state.hasActiveTurn,
   };
+}
+
+function questionText(state: AgentControlState, requestId: string): string {
+  const request = state.pending.find((pending) => pending.id === requestId);
+  const input = request?.input;
+  const questions = input && Array.isArray(input.questions) ? input.questions : [];
+  const first = questions[0];
+  if (!first || typeof first !== "object" || typeof first.question !== "string") {
+    throw new AdmissionRefused("unsupported_question");
+  }
+  return first.question;
+}
+
+function validateQuestion(
+  state: AgentControlState,
+  req: KeeperAnswerQuestionRequest,
+): AnswerReason | null {
+  const pending = state.pending.find((item) => item.id === req.permissionRequestId);
+  if (!pending) return "question_not_found";
+  if (pending.kind !== "question" || pending.name !== "AskUserQuestion") return "not_question";
+  const input = pending.input;
+  const questions = input && Array.isArray(input.questions) ? input.questions : [];
+  if (questions.length !== 1) return "unsupported_question";
+  const question = questions[0];
+  if (
+    !question ||
+    typeof question !== "object" ||
+    typeof question.question !== "string" ||
+    !question.question.trim() ||
+    question.multiSelect === true
+  ) {
+    return "unsupported_question";
+  }
+  const value = req.answer.kind === "option" ? req.answer.label : req.answer.text;
+  if (
+    !value.trim() ||
+    value.trim() !== value ||
+    [...value].some((character) => {
+      const code = character.codePointAt(0) ?? 0;
+      return code < 32 || code === 127;
+    })
+  )
+    return "invalid_answer";
+  const options = Array.isArray(question.options) ? question.options : [];
+  if (req.answer.kind === "option") {
+    if (
+      !options.some(
+        (option: unknown) =>
+          option && typeof option === "object" && "label" in option && option.label === value,
+      )
+    ) {
+      return "invalid_answer";
+    }
+  } else if (question.allowOther !== true) {
+    return "invalid_answer";
+  }
+  return null;
 }
 
 async function drain(
