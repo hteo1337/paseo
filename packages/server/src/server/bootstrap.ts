@@ -1807,6 +1807,9 @@ export async function createPaseoDaemon(
           agentManager,
           agentStorage,
           receipts: new KeeperSendReceipts(path.join(config.paseoHome, "keeper-send-receipts")),
+          answerReceipts: new KeeperSendReceipts(
+            path.join(config.paseoHome, "keeper-answer-receipts"),
+          ),
           outbox,
           logger: logger.child({ module: "keeper" }),
         });
