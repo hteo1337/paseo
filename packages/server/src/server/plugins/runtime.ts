@@ -1252,15 +1252,17 @@ export class PluginRuntime {
         resolve();
       }),
     );
-    if (child.connected) {
-      await send(child, { type: "shutdown" }).catch(() => undefined);
-    }
     let forceTimer: ReturnType<typeof setTimeout> | null = setTimeout(() => {
       if (!child.killed) child.kill("SIGTERM");
       forceTimer = setTimeout(() => {
         child.kill("SIGKILL");
       }, SOFT_SHUTDOWN_TIMEOUT_MS);
     }, SOFT_SHUTDOWN_TIMEOUT_MS);
+    // IPC backpressure can leave the send callback pending. Shutdown escalation
+    // must depend on process exit, not acknowledgement of the shutdown message.
+    if (child.connected) {
+      void send(child, { type: "shutdown" }).catch(() => undefined);
+    }
     await closed.finally(() => {
       if (forceTimer) clearTimeout(forceTimer);
     });
