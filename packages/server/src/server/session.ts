@@ -2656,6 +2656,7 @@ export class Session {
         return this.handleAgentTimelineSearchRequest(msg, source);
       case "keeper.agent.get_snapshot.request":
       case "keeper.agent.send_message.request":
+      case "keeper.agent.answer_question.request":
       case "keeper.agent.get_pending_request.request":
       case "keeper.events.read.request":
         return dispatchKeeperMessage(this.keeperControl, msg, (out) => this.emit(out));
