@@ -87,6 +87,7 @@ function build(options: {
     agentManager: manager,
     agentStorage: { get: async () => ({ archivedAt: null }) },
     receipts,
+    answerReceipts: receipts,
     outbox,
     logger: {
       error: () => {
