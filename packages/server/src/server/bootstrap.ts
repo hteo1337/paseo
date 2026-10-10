@@ -1048,7 +1048,9 @@ export async function createPaseoDaemon(
     cwd: string,
     firstAgentContext?: FirstAgentContext,
   ): Promise<string> => {
-    const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
+    // Reuse the active workspace for this directory; minting a row per create
+    // left hundreds of duplicate workspaces sharing one cwd.
+    const workspace = await workspaceProvisioning.findOrCreateWorkspaceForDirectory(
       cwd,
       resolveFirstAgentPromptTitle(firstAgentContext),
     );
@@ -1326,7 +1328,7 @@ export async function createPaseoDaemon(
     cwd: string;
     firstAgentContext: FirstAgentContext;
   }) => {
-    const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
+    const workspace = await workspaceProvisioning.findOrCreateWorkspaceForDirectory(
       input.cwd,
       resolveFirstAgentPromptTitle(input.firstAgentContext),
     );
