@@ -11,6 +11,7 @@ import { createToolHosts } from "./agent/host-operations/index.js";
 import { HOST_ROUTE_OPCODE } from "@getpaseo/protocol/binary-frames/index";
 import { DaemonLinkEndpoint, VirtualHostSocket } from "./connected-hosts/index.js";
 import { ConnectedHosts } from "./connected-hosts/index.js";
+import { bindOwnerUnixOrigin } from "./owner-unix-origin.js";
 import { stat } from "node:fs/promises";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import { CreationService } from "./creation/index.js";
@@ -898,6 +899,22 @@ export class VoiceAssistantWebSocketServer {
       void this.attachAuthenticatedSocket(ws, request, password);
     });
     return wss;
+  }
+
+  public attachOwnerUnixUpgrade(
+    request: IncomingMessage,
+    socket: import("node:stream").Duplex,
+    head: Buffer,
+  ): void {
+    this.wss.handleUpgrade(request, socket, head, (ws) => {
+      try {
+        bindOwnerUnixOrigin(ws, request.socket, this.serverId);
+      } catch {
+        ws.close(1008, "Owner Unix peer denied");
+        return;
+      }
+      void this.attachAuthenticatedSocket(ws, request, this.passwordHash);
+    });
   }
 
   private startRuntimeMetricsInterval(): void {

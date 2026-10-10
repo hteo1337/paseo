@@ -258,6 +258,16 @@ export const PluginProcessRequestSchema: z.ZodType<PluginProcessRequest> = z.dis
                 clientId: z.string(),
               })
               .strict(),
+            origin: z
+              .object({
+                kind: z.literal("owner-unix"),
+                serverId: z.string().min(1).max(200),
+                ownerUid: z.number().int().nonnegative(),
+                peerUid: z.number().int().nonnegative(),
+              })
+              .strict()
+              .refine((value) => value.ownerUid === value.peerUid)
+              .optional(),
             workspaceId: z.string().min(1).max(200),
             agentId: z.string().min(1).max(200).optional(),
             permissions: z.array(z.enum(["workspace.read", "workspace.write", "workspace.manage"])),
