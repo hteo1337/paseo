@@ -5,10 +5,12 @@ import type { SessionAuthorization } from "../authorization/index.js";
 
 // Only a resolved host context can cross runtime ingress. Never serialize this
 // marker: IPC carries the verified snapshot, not a caller-supplied credential.
-const issuedInvocations = new WeakSet<PluginInvocationContext>();
+const issuedInvocations = new WeakMap<PluginInvocationContext, () => boolean>();
 
 export function consumePluginInvocation(invocation: PluginInvocationContext | undefined): void {
-  if (!invocation || !issuedInvocations.delete(invocation)) {
+  const live = invocation && issuedInvocations.get(invocation);
+  if (invocation) issuedInvocations.delete(invocation);
+  if (!live || !live()) {
     throw new Error("Plugin invocation access denied");
   }
 }
@@ -28,6 +30,7 @@ export async function resolvePluginInvocation(
   dependencies: {
     authorization: Pick<SessionAuthorization, "allowsPermission">;
     authentication: PluginInvocationContext["authentication"];
+    origin?(): PluginInvocationContext["origin"];
     getWorkspace(id: string): Promise<{ workspaceId: string; archivedAt?: string | null } | null>;
     getAgent(id: string): Promise<{
       id: string;
@@ -38,6 +41,7 @@ export async function resolvePluginInvocation(
 ): Promise<PluginInvocationContext | undefined> {
   if (!scope) return undefined;
   const { authorization } = dependencies;
+  const origin = dependencies.origin?.();
   // Never use the plugin process's global client to establish caller grants.
   if (
     !authorization.allowsPermission("daemon.manage") ||
@@ -69,7 +73,10 @@ export async function resolvePluginInvocation(
     authorization.allowsPermission(permission),
   );
   if (!permissions.length) throw new Error("Plugin invocation access denied");
+  if (origin && dependencies.origin?.() !== origin)
+    throw new Error("Plugin origin changed during authorization");
   const invocation: PluginInvocationContext = Object.freeze({
+    ...(origin ? { origin } : {}),
     authentication: Object.freeze({
       kind: "session" as const,
       sessionId: dependencies.authentication.sessionId,
@@ -79,7 +86,7 @@ export async function resolvePluginInvocation(
     ...(scope.agentId ? { agentId: scope.agentId } : {}),
     permissions: Object.freeze(permissions),
   });
-  issuedInvocations.add(invocation);
+  issuedInvocations.set(invocation, () => !origin || dependencies.origin?.() === origin);
   return invocation;
 }
 
