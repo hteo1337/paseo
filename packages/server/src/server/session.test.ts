@@ -6079,22 +6079,75 @@ export default function contribute(server) {
       method: string,
       scope?: { workspaceId: string; agentId?: string },
       input: unknown = {},
+      source?: object,
     ) {
       messages.length = 0;
-      await session.handleMessage({
-        type: "plugin.rpc.invoke.request",
-        requestId: "invoke",
-        pluginId: "authority-test",
-        method,
-        input,
-        ...(scope ? { scope } : {}),
-      });
+      await session.handleMessage(
+        {
+          type: "plugin.rpc.invoke.request",
+          requestId: "invoke",
+          pluginId: "authority-test",
+          method,
+          input,
+          ...(scope ? { scope } : {}),
+        },
+        source,
+      );
       return messages.find(
         (message) => message.type === "plugin.rpc.invoke.response" || message.type === "rpc_error",
       );
     }
     return { session, invoke };
   }
+
+  test.skipIf(process.platform !== "darwin")(
+    "passes per-request Unix origin through real plugin IPC without lending it to another source in the same Session",
+    async () => {
+      const { createServer, connect } = await import("node:net");
+      const { bindOwnerUnixOrigin } = await import("./owner-unix-origin.js");
+      const root = mkdtempSync(join(tmpdir(), "paseo-origin-session-"));
+      const socketPath = join(root, "peer.sock"),
+        server = createServer();
+      const accepted = new Promise<import("node:net").Socket>((resolve) =>
+        server.once("connection", resolve),
+      );
+      await new Promise<void>((resolve) => server.listen(socketPath, resolve));
+      const client = connect(socketPath),
+        socket = await accepted;
+      try {
+        const local = {},
+          remote = {};
+        bindOwnerUnixOrigin(local, socket, "fixture-server");
+        const c = caller(),
+          scope = { workspaceId: "workspace-a", agentId: "agent-a" };
+        expect(await c.invoke("agent", scope, {}, local)).toMatchObject({
+          type: "plugin.rpc.invoke.response",
+          payload: {
+            output: {
+              invocation: {
+                origin: {
+                  kind: "owner-unix",
+                  serverId: "fixture-server",
+                  peerUid: process.getuid!(),
+                },
+              },
+            },
+          },
+        });
+        const b = await c.invoke("agent", scope, {}, remote);
+        expect(b).toMatchObject({ type: "plugin.rpc.invoke.response" });
+        if (b?.type !== "plugin.rpc.invoke.response") throw Error("Expected response");
+        expect(
+          (b.payload.output as { invocation: { origin?: unknown } }).invocation.origin,
+        ).toBeUndefined();
+      } finally {
+        client.destroy();
+        socket.destroy();
+        await new Promise<void>((resolve) => server.close(() => resolve()));
+        rmSync(root, { recursive: true, force: true });
+      }
+    },
+  );
 
   test("preserves unscoped legacy calls and carries canonical host context through the real child", async () => {
     const { invoke, session } = caller({

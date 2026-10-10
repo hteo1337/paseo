@@ -6,6 +6,7 @@ import {
 } from "./agent/finish-subscriptions/index.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import type { PluginRegistries } from "@getpaseo/protocol/plugin-registry";
+import { startOwnerUnixListener } from "./owner-unix-listener.js";
 import { describeHookWorkspace } from "./plugins/lifecycle/index.js";
 import express from "express";
 import { createServer as createHTTPServer, type IncomingMessage, type ServerResponse } from "http";
@@ -743,6 +744,7 @@ export async function createPaseoDaemon(
     appBaseUrl = typeof value === "string" ? value : "https://app.paseo.sh";
   });
   let wsServer: VoiceAssistantWebSocketServer | null = null;
+  let stopOwnerUnix: (() => Promise<void>) | undefined;
   let keeperControl: KeeperControl | null = null;
   let serviceProxyListenTarget: ListenTarget | null = null;
   const scriptHealthMonitor = new ScriptHealthMonitor({
@@ -1967,11 +1969,19 @@ export async function createPaseoDaemon(
         }
       });
 
+      // Explicit additional endpoint; default TCP/relay and auth stay unchanged.
+      const ownerUnixPath = process.env.PASEO_OWNER_UNIX_SOCKET;
+      if (ownerUnixPath)
+        stopOwnerUnix = await startOwnerUnixListener(ownerUnixPath, (request, socket, head) =>
+          wsServer!.attachOwnerUnixUpgrade(request, socket, head),
+        );
+
       // Start speech service after listening so synchronous Sherpa native
       // model loading doesn't block the server from accepting connections.
       speechService.start();
       scriptHealthMonitor.start();
     } catch (error) {
+      await stopOwnerUnix?.();
       localCredential = null;
       await deleteLocalCredential(config.paseoHome);
       unsubscribePluginProviders();
@@ -1988,6 +1998,7 @@ export async function createPaseoDaemon(
   };
 
   const stop = async () => {
+    await stopOwnerUnix?.();
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
     promptSuggestions.stop();
