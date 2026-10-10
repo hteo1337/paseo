@@ -2418,7 +2418,7 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
+    if (this.closed && !this.child && this.terminalEntries.size === 0) {
       return;
     }
     this.closed = true;
@@ -2447,23 +2447,42 @@ export class ACPAgentSession implements AgentSession, ACPClient {
       }
     }
 
-    const terminalTerminations = Array.from(this.terminalEntries.values(), (terminal) =>
+    const terminals = Array.from(this.terminalEntries);
+    const terminalTerminations = terminals.map(([, terminal]) =>
       this.terminateProcess(terminal.child, {
         gracefulTimeoutMs: 2_000,
         forceTimeoutMs: 2_000,
       }),
     );
-    await Promise.all(terminalTerminations);
-    this.terminalEntries.clear();
+    const terminalResults = await Promise.all(terminalTerminations);
+    for (const [index, [id]] of terminals.entries()) {
+      if (terminalResults[index] !== "kill-timeout") this.terminalEntries.delete(id);
+    }
 
     if (this.child) {
-      await this.terminateProcess(this.child, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+      const result = await this.terminateProcess(this.child, {
+        gracefulTimeoutMs: 2_000,
+        forceTimeoutMs: 2_000,
+      });
+      if (result === "kill-timeout") {
+        throw new Error("ACP process did not report exit after SIGKILL");
+      }
+      this.child = null;
+    }
+    if (terminalResults.includes("kill-timeout")) {
+      throw new Error("ACP terminal process did not report exit after SIGKILL");
     }
 
     this.subscribers.clear();
     this.connection = null;
-    this.child = null;
     this.activeForegroundTurnId = null;
+  }
+
+  getOwnedProcessIds(): number[] {
+    return [
+      this.child?.pid,
+      ...Array.from(this.terminalEntries.values(), (entry) => entry.child.pid),
+    ].filter((pid): pid is number => typeof pid === "number" && pid > 0);
   }
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {

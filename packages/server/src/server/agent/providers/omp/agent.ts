@@ -906,6 +906,7 @@ export class OmpAgentSession implements AgentSession {
   private readonly noTurnScheduler: OmpNoTurnScheduler;
   private readonly usagePoller: OmpUsagePoller;
   private closed = false;
+  private closeSucceeded = false;
   private live: boolean;
   private readonly emittedUserMessageIds = new Set<string>();
 
@@ -1187,7 +1188,7 @@ export class OmpAgentSession implements AgentSession {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
+    if (this.closeSucceeded) {
       return;
     }
     this.closed = true;
@@ -1195,9 +1196,14 @@ export class OmpAgentSession implements AgentSession {
     this.cancelNoTurnPromptCompletion();
     try {
       await this.runtimeSession.close();
+      this.closeSucceeded = true;
     } finally {
       this.clearOmpSessionState();
     }
+  }
+
+  getOwnedProcessIds(): number[] {
+    return this.runtimeSession.processId ? [this.runtimeSession.processId] : [];
   }
 
   private clearOmpSessionState(): void {

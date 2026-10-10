@@ -9757,6 +9757,50 @@ test("subscribe does not emit state events for internal agents to global subscri
   expect(receivedEvents.filter((id) => id === generatedAgentIds[1]).length).toBe(0);
 });
 
+test("idle runtime unloads after the threshold and the next access resumes it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-unload-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  const manager = new AgentManager({ clients: { codex: client }, registry: storage, logger });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const originalSession = agent.session;
+    const close = vi.spyOn(originalSession!, "close");
+    const now = Date.now();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 30_000)).toBe(0);
+    expect(manager.getAgent(agent.id)?.session).toBe(originalSession);
+    expect(close).not.toHaveBeenCalled();
+
+    const releaseStream = manager.holdClientStream(agent.id);
+    expect(await manager.unloadIdleAgents(60_000, now + 60_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseStream();
+
+    const releaseLegacyStream = manager.holdGlobalClientStream();
+    expect(await manager.unloadIdleAgents(60_000, now + 90_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseLegacyStream();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 120_001)).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(close).toHaveBeenCalledOnce();
+    expect((await storage.get(agent.id))?.lastStatus).toBe("closed");
+
+    const resumed = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(resumed.id).toBe(agent.id);
+    expect(resumed.session).not.toBe(originalSession);
+    expect(client.resumeOverrides).toHaveLength(1);
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("subscribe hides provider subagents of internal parents from global subscribers", async () => {
   const internalAgentId = "00000000-0000-4000-8000-000000000117";
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-internal-provider-child-"));

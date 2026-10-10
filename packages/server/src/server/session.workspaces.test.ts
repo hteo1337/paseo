@@ -583,6 +583,8 @@ function createSessionForWorkspaceTests(
   };
   const agentManager = asAgentManager({
     subscribe: () => () => {},
+    holdClientStream: () => () => {},
+    holdGlobalClientStream: () => () => {},
     listAgents: () => [],
     listProviderSubagentActivity: () => [],
     getAgent: () => null,

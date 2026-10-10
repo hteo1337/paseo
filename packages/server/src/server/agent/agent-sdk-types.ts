@@ -693,6 +693,9 @@ export interface AgentSession {
   interrupt(): Promise<void>;
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;
+  /** Root PIDs owned by this runtime; used to count processes reaped on idle unload. */
+  getOwnedProcessIds?(): number[];
+  getReapedProcessCount?(): number;
   listCommands?(): Promise<AgentSlashCommand[]>;
   setModel?(modelId: string | null): Promise<void>;
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;

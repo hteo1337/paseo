@@ -2712,10 +2712,7 @@ class ClaudeAgentSession implements AgentSession {
         forceTimeoutMs: 2_000,
       });
       if (result === "kill-timeout") {
-        this.logger.warn(
-          { pid: this.childProcess.pid, agentId: this.agentId },
-          "Claude process tree did not report exit after SIGKILL",
-        );
+        throw new Error("Claude process tree did not report exit after SIGKILL");
       }
       this.childProcess = null;
     }
@@ -2745,6 +2742,10 @@ class ClaudeAgentSession implements AgentSession {
       },
       "provider.claude.session_close.complete",
     );
+  }
+
+  getOwnedProcessIds(): number[] {
+    return this.childProcess?.pid ? [this.childProcess.pid] : [];
   }
 
   async listCommands(): Promise<AgentSlashCommand[]> {
