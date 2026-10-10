@@ -695,6 +695,7 @@ export interface AgentSession {
   close(): Promise<void>;
   /** Root PIDs owned by this runtime; used to count processes reaped on idle unload. */
   getOwnedProcessIds?(): number[];
+  getReapedProcessCount?(): number;
   listCommands?(): Promise<AgentSlashCommand[]>;
   setModel?(modelId: string | null): Promise<void>;
   setThinkingOption?(thinkingOptionId: string | null): Promise<void | AgentProviderNotice>;

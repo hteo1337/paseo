@@ -1374,20 +1374,15 @@ export class AgentManager {
         for (const [pid, started] of await snapshotProcessTree(
           agent.session.getOwnedProcessIds?.() ?? [],
         )) {
-          ownedProcesses.set(pid, started);
+          if (!ownedProcesses.has(pid)) ownedProcesses.set(pid, started);
         }
         this.idleProcessSnapshots.set(agentId, ownedProcesses);
-        let reapedProcesses = 0;
-        await this.closeAgentRuntime(agentId, {
+        const reapedProcesses = await this.closeAgentRuntime(agentId, {
           onBeforeClose: () => {
             if (!this.canUnloadIdleAgent(agentId, agent))
               throw new Error("Agent became active during idle unload");
           },
-          onAfterSessionClose: async () => {
-            reapedProcesses = await reapProcessTree(ownedProcesses);
-          },
         });
-        this.idleProcessSnapshots.delete(agentId);
         unloaded += 1;
         this.logger.info(
           { agentId, provider: agent.provider, idleDurationMs, reapedProcesses },
@@ -2058,8 +2053,8 @@ export class AgentManager {
 
   private async closeAgentRuntime(
     agentId: string,
-    options?: { onBeforeClose?: () => void; onAfterSessionClose?: () => Promise<void> },
-  ): Promise<void> {
+    options?: { onBeforeClose?: () => void },
+  ): Promise<number> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -2082,7 +2077,11 @@ export class AgentManager {
     // Retain ownership until shutdown succeeds. A failed close may still own a
     // native writer, so publishing a resumable closed snapshot would orphan it.
     await agent.session.close();
-    await options?.onAfterSessionClose?.();
+    const idleSnapshot = this.idleProcessSnapshots.get(agentId);
+    const reapedProcesses =
+      (idleSnapshot ? await reapProcessTree(idleSnapshot) : 0) +
+      (agent.session.getReapedProcessCount?.() ?? 0);
+    this.idleProcessSnapshots.delete(agentId);
     this.cancelRunningProviderSubagents(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
 
@@ -2105,6 +2104,7 @@ export class AgentManager {
     if (persistError !== undefined) {
       throw persistError;
     }
+    return reapedProcesses;
   }
 
   private cancelRunningProviderSubagents(parentAgentId: string): void {

@@ -231,8 +231,8 @@ export class JsonlRpcProcess {
       try {
         await this.closing;
         return;
-      } catch (closeError) {
-        if (this.exited) throw closeError;
+      } catch {
+        if (this.exited) return;
         // Retry a previous shutdown whose SIGKILL did not confirm an exit.
       }
     }

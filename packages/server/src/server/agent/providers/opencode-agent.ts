@@ -1501,6 +1501,7 @@ export class OpenCodeAgentClient implements AgentClient {
         unbindBridge,
         connectServer,
         connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1556,6 +1557,7 @@ export class OpenCodeAgentClient implements AgentClient {
         unbindBridge,
         connectServer,
         connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1598,6 +1600,7 @@ export class OpenCodeAgentClient implements AgentClient {
       url: acquisition.server.url,
       pid: acquisition.server.pid,
       release: acquisition.release,
+      getReapedProcessCount: acquisition.getReapedProcessCount,
     };
   }
 
@@ -3362,6 +3365,7 @@ interface OpenCodeServerConnection {
   url: string;
   pid?: number;
   release: () => Promise<void>;
+  getReapedProcessCount?: () => number;
 }
 
 class OpenCodeAgentSession implements AgentSession {
@@ -3453,9 +3457,17 @@ class OpenCodeAgentSession implements AgentSession {
     releaseBridge?: () => void,
     connectServer?: () => Promise<OpenCodeServerConnection>,
     serverPid?: number,
+    getReapedProcessCount?: () => number,
   ) {
     this.config = config;
-    this.server = { client, events, url: serverUrl ?? "", release: releaseServer, pid: serverPid };
+    this.server = {
+      client,
+      events,
+      url: serverUrl ?? "",
+      release: releaseServer,
+      pid: serverPid,
+      getReapedProcessCount,
+    };
     this.connectServer = connectServer ?? null;
     this.sessionId = sessionId;
     this.logger = logger.child({ agentId: this.agentId });
@@ -5059,7 +5071,13 @@ class OpenCodeAgentSession implements AgentSession {
   }
 
   getOwnedProcessIds(): number[] {
-    return this.server.pid ? [this.server.pid] : [];
+    // The server may be shared by other agents. Its reference-counted owner
+    // performs tree cleanup when the last acquisition is released.
+    return [];
+  }
+
+  getReapedProcessCount(): number {
+    return this.server.getReapedProcessCount?.() ?? 0;
   }
 
   private async deleteProviderSessionIfEphemeral(): Promise<void> {

@@ -59,6 +59,13 @@ interface SessionInternals {
 class InMemoryAgentManager {
   private readonly timeline = new InMemoryAgentTimelineStore();
 
+  holdClientStream(): () => void {
+    return () => undefined;
+  }
+  holdGlobalClientStream(): () => void {
+    return () => undefined;
+  }
+
   constructor(rows: AgentTimelineRow[]) {
     this.timeline.initialize("agent-1", {
       epoch: "epoch-1",
