@@ -102,3 +102,6 @@ app.json
 
 # Project-local Serena configuration and memories.
 .serena/
+
+# Locally compiled owner-Unix credential capability.
+packages/server/src/server/native/*.node
