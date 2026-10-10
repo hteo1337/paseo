@@ -63,7 +63,10 @@ export interface WorkspaceProvisioningService {
     input: ImportWorkspaceInput,
     operation: (workspace: PersistedWorkspaceRecord) => Promise<T>,
   ): Promise<ImportWorkspaceResult<T>>;
-  findOrCreateWorkspaceForDirectory(cwd: string): Promise<PersistedWorkspaceRecord>;
+  findOrCreateWorkspaceForDirectory(
+    cwd: string,
+    title?: string | null,
+  ): Promise<PersistedWorkspaceRecord>;
   resolveOrCreateWorkspaceIdForCreateAgent(input: ResolveOrCreateWorkspaceIdInput): Promise<string>;
   createWorkspaceForDirectory(
     cwd: string,
@@ -354,7 +357,10 @@ export function createWorkspaceProvisioningService(deps: {
     return refreshProjectKind(project);
   }
 
-  async function findOrCreateWorkspaceForDirectory(cwd: string): Promise<PersistedWorkspaceRecord> {
+  async function findOrCreateWorkspaceForDirectory(
+    cwd: string,
+    title?: string | null,
+  ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     // Path-based discovery selects public work; explicit-ID recovery bypasses this selector.
     const workspaces = (await workspaceRegistry.list())
@@ -373,7 +379,7 @@ export function createWorkspaceProvisioningService(deps: {
       const project = await projectRegistry.get(archived.projectId);
       if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
     }
-    return createWorkspaceForDirectory(normalizedCwd);
+    return createWorkspaceForDirectory(normalizedCwd, title);
   }
 
   async function resolveOrCreateWorkspaceIdForCreateAgent(
