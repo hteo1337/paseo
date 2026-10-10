@@ -30,6 +30,28 @@ describe("plugin invocation IPC authority", () => {
     }
   });
 
+  it("accepts only bounded owner Unix evidence at trusted IPC ingress", () => {
+    const origin = { kind: "owner-unix", serverId: "server", ownerUid: 501, peerUid: 501 };
+    const invocation = {
+      authentication: {
+        kind: "session",
+        sessionId: "11111111-1111-4111-8111-111111111111",
+        clientId: "c",
+      },
+      workspaceId: "w",
+      permissions: ["workspace.read"],
+      origin,
+    };
+    const invoke = { type: "invoke", requestId: "r", method: "read", input: {}, invocation };
+    expect(PluginProcessRequestSchema.safeParse(invoke).success).toBe(true);
+    for (const edit of [{ peerUid: 502 }, { ownerUid: -1 }, { kind: "tcp" }, { extra: true }])
+      expect(
+        PluginProcessRequestSchema.safeParse({
+          ...invoke,
+          invocation: { ...invocation, origin: { ...origin, ...edit } },
+        }).success,
+      ).toBe(false);
+  });
   it("rejects malformed authority envelopes instead of stripping extra claims", () => {
     const invoke = {
       type: "invoke",
