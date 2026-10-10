@@ -3,6 +3,7 @@ import type { AgentMessageDelivery } from "./agent/agent-messages/index.js";
 import { AgentDirectory } from "./agent/directory.js";
 import { ConnectedHostSession } from "./connected-hosts/index.js";
 import type { ConnectedHosts } from "./connected-hosts/index.js";
+import { ownerUnixOrigin } from "./owner-unix-origin.js";
 import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
@@ -2442,7 +2443,7 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
       this.dispatchPluginDirectoryMessage(msg) ??
-      this.dispatchPluginMessage(msg) ??
+      this.dispatchPluginMessage(msg, source) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchScheduleMessage(msg) ??
       this.dispatchMiscMessage(msg);
@@ -2529,7 +2530,10 @@ export class Session {
     }
   }
 
-  private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchPluginMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     if (msg.type === "plugin.list.request") {
       return (this.pluginRuntime?.listPlugins() ?? Promise.resolve([])).then((plugins) => {
         this.emit({
@@ -2599,13 +2603,14 @@ export class Session {
       return undefined;
     }
     if (msg.type === "plugin.rpc.invoke.request") {
-      return this.handlePluginRpcInvocation(msg);
+      return this.handlePluginRpcInvocation(msg, source);
     }
     return undefined;
   }
 
   private handlePluginRpcInvocation(
     msg: Extract<SessionInboundMessage, { type: "plugin.rpc.invoke.request" }>,
+    source?: object,
   ): Promise<void> {
     const pluginRuntime = this.pluginRuntime;
     if (!pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2613,6 +2618,7 @@ export class Session {
       pluginRuntime.pluginRpcRequiresScope?.(msg.pluginId, msg.method) ? msg.scope : undefined,
       {
         authorization: this.authorization,
+        origin: () => ownerUnixOrigin(source),
         authentication: { kind: "session", sessionId: this.sessionId, clientId: this.clientId },
         getWorkspace: (id) => this.workspaceRegistry.get(id),
         getAgent: (id) => this.agentStorage.get(id),
