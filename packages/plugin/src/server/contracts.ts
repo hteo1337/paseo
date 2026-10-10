@@ -18,6 +18,14 @@ export interface PluginInvocationContext {
     /** Reported client identifier; not an authenticated principal identity. */
     readonly clientId: string;
   };
+  /** Kernel-verified owner-UID Unix origin of this individual request. Omission
+   * grants no local authority; session/client IDs are never locality evidence. */
+  readonly origin?: {
+    readonly kind: "owner-unix";
+    readonly serverId: string;
+    readonly ownerUid: number;
+    readonly peerUid: number;
+  };
   readonly workspaceId: string;
   readonly agentId?: string;
   readonly permissions: readonly PluginRpcWorkspacePermission[];
