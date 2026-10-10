@@ -1500,6 +1500,7 @@ export class OpenCodeAgentClient implements AgentClient {
         false,
         unbindBridge,
         connectServer,
+        connection.pid,
       );
     } catch (error) {
       await connection.release();
@@ -1554,6 +1555,7 @@ export class OpenCodeAgentClient implements AgentClient {
         registeredAcquisition !== null,
         unbindBridge,
         connectServer,
+        connection.pid,
       );
     } catch (error) {
       await connection.release();
@@ -1594,6 +1596,7 @@ export class OpenCodeAgentClient implements AgentClient {
       client: this.createOpenCodeClient({ baseUrl: acquisition.server.url, directory }),
       events: acquisition.events,
       url: acquisition.server.url,
+      pid: acquisition.server.pid,
       release: acquisition.release,
     };
   }
@@ -3357,6 +3360,7 @@ interface OpenCodeServerConnection {
   client: OpencodeClient;
   events: OpenCodeEventSource;
   url: string;
+  pid?: number;
   release: () => Promise<void>;
 }
 
@@ -3448,9 +3452,10 @@ class OpenCodeAgentSession implements AgentSession {
     private readonly externallyDriven = false,
     releaseBridge?: () => void,
     connectServer?: () => Promise<OpenCodeServerConnection>,
+    serverPid?: number,
   ) {
     this.config = config;
-    this.server = { client, events, url: serverUrl ?? "", release: releaseServer };
+    this.server = { client, events, url: serverUrl ?? "", release: releaseServer, pid: serverPid };
     this.connectServer = connectServer ?? null;
     this.sessionId = sessionId;
     this.logger = logger.child({ agentId: this.agentId });
@@ -5051,6 +5056,10 @@ class OpenCodeAgentSession implements AgentSession {
       this.releaseBridge = null;
       await this.server.release();
     }
+  }
+
+  getOwnedProcessIds(): number[] {
+    return this.server.pid ? [this.server.pid] : [];
   }
 
   private async deleteProviderSessionIfEphemeral(): Promise<void> {

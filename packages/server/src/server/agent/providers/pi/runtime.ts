@@ -40,6 +40,7 @@ export interface PiStartSessionInput {
 }
 
 export interface PiRuntimeSession {
+  readonly processId?: number | null;
   onEvent(callback: (event: PiRuntimeEvent) => void): () => void;
   prompt(
     message: string,

@@ -1200,6 +1200,10 @@ export class OmpAgentSession implements AgentSession {
     }
   }
 
+  getOwnedProcessIds(): number[] {
+    return this.runtimeSession.processId ? [this.runtimeSession.processId] : [];
+  }
+
   private clearOmpSessionState(): void {
     this.subagentIndex.clear(this.runtimeSession);
     this.clearOmpTurnState();

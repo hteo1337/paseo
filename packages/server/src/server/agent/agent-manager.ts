@@ -31,6 +31,7 @@ import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-confi
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
+import { countExitedProcesses, snapshotProcessTree } from "../../utils/process-tree-snapshot.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -833,6 +834,11 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+  private readonly idleUnloadCloses = new Set<string>();
+  private readonly residentLastUsedAt = new Map<string, number>();
+  private readonly activeAgentUses = new Map<string, number>();
+  private readonly clientStreamHolds = new Map<string, number>();
+  private globalClientStreamHolds = 0;
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
   private readonly refusedProviderSessions = new WeakSet<AgentSession>();
   private readonly approvedClaudeSessions = new WeakSet<AgentSession>();
@@ -1028,6 +1034,7 @@ export class AgentManager {
 
   private touchUpdatedAt(agent: ManagedAgent): Date {
     const nowMs = Date.now();
+    if (agent.lifecycle !== "closed") this.residentLastUsedAt.set(agent.id, nowMs);
     const previousMs = agent.updatedAt.getTime();
     const nextMs = nowMs > previousMs ? nowMs : previousMs + 1;
     const next = new Date(nextMs);
@@ -1282,6 +1289,125 @@ export class AgentManager {
   getAgent(id: string): ManagedAgent | null {
     const agent = this.agents.get(id);
     return agent ? { ...agent } : null;
+  }
+
+  /** Hold a resident session while an access is still loading or admitting work. */
+  beginAgentUse(agentId: string): () => void {
+    this.residentLastUsedAt.set(agentId, Date.now());
+    this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
+      if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
+      else this.activeAgentUses.delete(agentId);
+      this.residentLastUsedAt.set(agentId, Date.now());
+    };
+  }
+
+  /** A selective timeline subscription is an active client stream. */
+  holdClientStream(agentId: string): () => void {
+    this.clientStreamHolds.set(agentId, (this.clientStreamHolds.get(agentId) ?? 0) + 1);
+    const releaseUse = this.beginAgentUse(agentId);
+    releaseUse();
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      const remaining = (this.clientStreamHolds.get(agentId) ?? 1) - 1;
+      if (remaining > 0) this.clientStreamHolds.set(agentId, remaining);
+      else this.clientStreamHolds.delete(agentId);
+      this.residentLastUsedAt.set(agentId, Date.now());
+    };
+  }
+
+  /** Legacy clients receive every timeline, so any one protects all live runtimes. */
+  holdGlobalClientStream(): () => void {
+    this.globalClientStreamHolds += 1;
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      this.globalClientStreamHolds -= 1;
+      const now = Date.now();
+      for (const agentId of this.agents.keys()) this.residentLastUsedAt.set(agentId, now);
+    };
+  }
+
+  private canUnloadIdleAgent(agentId: string, agent: LiveManagedAgent): boolean {
+    return (
+      agent.lifecycle === "idle" &&
+      agent.persistence !== null &&
+      !this.hasInFlightRun(agentId) &&
+      !this.autonomousTurnPhases.has(agentId) &&
+      !this.foregroundMutationTails.has(agentId) &&
+      !this.providerSubagents.list(agentId).some((child) => child.status === "running") &&
+      agent.pendingPermissions.size === 0 &&
+      agent.session.getPendingPermissions().length === 0 &&
+      agent.inFlightPermissionResponses.size === 0 &&
+      !agent.pendingReplacement &&
+      (this.activeAgentUses.get(agentId) ?? 0) === 0 &&
+      (this.clientStreamHolds.get(agentId) ?? 0) === 0 &&
+      this.globalClientStreamHolds === 0
+    );
+  }
+
+  /** Close only sessions that remained idle through their lifecycle lane. */
+  async unloadIdleAgents(idleMs: number, now = Date.now()): Promise<number> {
+    if (idleMs <= 0) return 0;
+    let unloaded = 0;
+    for (const agentId of this.agents.keys()) {
+      if (this.inFlightAgentCloses.has(agentId)) continue;
+      this.idleUnloadCloses.add(agentId);
+      const close = this.runLifecycleMutation(agentId, async () => {
+        const agent = this.agents.get(agentId);
+        const lastUsedAt = this.residentLastUsedAt.get(agentId) ?? now;
+        const idleDurationMs = now - lastUsedAt;
+        if (!agent || idleDurationMs < idleMs || !this.canUnloadIdleAgent(agentId, agent)) return;
+        const ownedProcesses = await snapshotProcessTree(
+          agent.session.getOwnedProcessIds?.() ?? [],
+        ).catch((error: unknown) => {
+          this.logger.warn({ err: error, agentId }, "Could not inspect idle provider process tree");
+          return new Set<number>();
+        });
+        await this.closeAgentRuntime(agentId, {
+          onBeforeClose: () => {
+            if (!this.canUnloadIdleAgent(agentId, agent))
+              throw new Error("Agent became active during idle unload");
+          },
+        });
+        unloaded += 1;
+        const reapedProcesses = await countExitedProcesses(ownedProcesses).catch(
+          (error: unknown) => {
+            this.logger.warn(
+              { err: error, agentId },
+              "Could not count reaped idle provider processes",
+            );
+            return 0;
+          },
+        );
+        this.logger.info(
+          { agentId, provider: agent.provider, idleDurationMs, reapedProcesses },
+          "Idle agent unloaded",
+        );
+      });
+      this.inFlightAgentCloses.set(agentId, close);
+      try {
+        await close;
+      } catch (error) {
+        if (
+          !(error instanceof Error && error.message === "Agent became active during idle unload")
+        ) {
+          this.logger.warn({ err: error, agentId }, "Idle agent unload failed");
+        }
+      } finally {
+        if (this.inFlightAgentCloses.get(agentId) === close)
+          this.inFlightAgentCloses.delete(agentId);
+        this.idleUnloadCloses.delete(agentId);
+      }
+    }
+    return unloaded;
   }
 
   async waitForAgentClose(agentId: string): Promise<void> {
@@ -1891,6 +2017,26 @@ export class AgentManager {
   closeAgent(agentId: string): Promise<void> {
     const existing = this.inFlightAgentCloses.get(agentId);
     if (existing) {
+      if (this.idleUnloadCloses.has(agentId)) {
+        // The sweep may have skipped this agent. An explicit close must still happen.
+        const followup = existing
+          .catch(() => undefined)
+          .then(() =>
+            this.runLifecycleMutation(agentId, async () => {
+              if (this.agents.has(agentId)) await this.closeAgentRuntime(agentId);
+            }),
+          );
+        this.inFlightAgentCloses.set(agentId, followup);
+        void followup.then(
+          () =>
+            this.inFlightAgentCloses.get(agentId) === followup &&
+            this.inFlightAgentCloses.delete(agentId),
+          () =>
+            this.inFlightAgentCloses.get(agentId) === followup &&
+            this.inFlightAgentCloses.delete(agentId),
+        );
+        return followup;
+      }
       return existing;
     }
 
@@ -4157,6 +4303,7 @@ export class AgentManager {
       this.assertAcceptingAgentRegistrations();
       this.assertArchiveAdmission(resolvedAgentId, managed.workspaceId, managed.cwd);
       this.agents.set(resolvedAgentId, managed);
+      this.residentLastUsedAt.set(resolvedAgentId, Date.now());
       registered = true;
       // Initialize previousStatus to track transitions
       this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
@@ -4390,6 +4537,7 @@ export class AgentManager {
     this.closeAutonomousTurnPhase(agent.id);
     this.refusedAutonomousTurns.delete(agent.id);
     this.agents.delete(agent.id);
+    this.residentLastUsedAt.delete(agent.id);
     this.previousStatuses.delete(agent.id);
     if (agent.unsubscribeSession) {
       agent.unsubscribeSession();

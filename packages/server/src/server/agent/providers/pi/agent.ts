@@ -1533,6 +1533,10 @@ export class PiRpcAgentSession implements AgentSession {
     }
   }
 
+  getOwnedProcessIds(): number[] {
+    return this.runtimeSession.processId ? [this.runtimeSession.processId] : [];
+  }
+
   async listCommands(): Promise<AgentSlashCommand[]> {
     if (this.commandCache) {
       return this.commandCache;

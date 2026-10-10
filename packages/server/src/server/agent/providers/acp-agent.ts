@@ -2453,17 +2453,33 @@ export class ACPAgentSession implements AgentSession, ACPClient {
         forceTimeoutMs: 2_000,
       }),
     );
-    await Promise.all(terminalTerminations);
+    const terminalResults = await Promise.all(terminalTerminations);
     this.terminalEntries.clear();
 
     if (this.child) {
-      await this.terminateProcess(this.child, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+      const result = await this.terminateProcess(this.child, {
+        gracefulTimeoutMs: 2_000,
+        forceTimeoutMs: 2_000,
+      });
+      if (result === "kill-timeout") {
+        throw new Error("ACP process did not report exit after SIGKILL");
+      }
+    }
+    if (terminalResults.includes("kill-timeout")) {
+      throw new Error("ACP terminal process did not report exit after SIGKILL");
     }
 
     this.subscribers.clear();
     this.connection = null;
     this.child = null;
     this.activeForegroundTurnId = null;
+  }
+
+  getOwnedProcessIds(): number[] {
+    return [
+      this.child?.pid,
+      ...Array.from(this.terminalEntries.values(), (entry) => entry.child.pid),
+    ].filter((pid): pid is number => typeof pid === "number" && pid > 0);
   }
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
