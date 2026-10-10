@@ -31,7 +31,11 @@ import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-confi
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
-import { countExitedProcesses, snapshotProcessTree } from "../../utils/process-tree-snapshot.js";
+import {
+  reapProcessTree,
+  snapshotProcessTree,
+  type ProcessTreeSnapshot,
+} from "../../utils/process-tree-snapshot.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -836,6 +840,7 @@ export class AgentManager {
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
   private readonly idleUnloadCloses = new Set<string>();
   private readonly residentLastUsedAt = new Map<string, number>();
+  private readonly idleProcessSnapshots = new Map<string, ProcessTreeSnapshot>();
   private readonly activeAgentUses = new Map<string, number>();
   private readonly clientStreamHolds = new Map<string, number>();
   private globalClientStreamHolds = 0;
@@ -1365,28 +1370,25 @@ export class AgentManager {
         const lastUsedAt = this.residentLastUsedAt.get(agentId) ?? now;
         const idleDurationMs = now - lastUsedAt;
         if (!agent || idleDurationMs < idleMs || !this.canUnloadIdleAgent(agentId, agent)) return;
-        const ownedProcesses = await snapshotProcessTree(
+        const ownedProcesses = this.idleProcessSnapshots.get(agentId) ?? new Map();
+        for (const [pid, started] of await snapshotProcessTree(
           agent.session.getOwnedProcessIds?.() ?? [],
-        ).catch((error: unknown) => {
-          this.logger.warn({ err: error, agentId }, "Could not inspect idle provider process tree");
-          return new Set<number>();
-        });
+        )) {
+          ownedProcesses.set(pid, started);
+        }
+        this.idleProcessSnapshots.set(agentId, ownedProcesses);
+        let reapedProcesses = 0;
         await this.closeAgentRuntime(agentId, {
           onBeforeClose: () => {
             if (!this.canUnloadIdleAgent(agentId, agent))
               throw new Error("Agent became active during idle unload");
           },
-        });
-        unloaded += 1;
-        const reapedProcesses = await countExitedProcesses(ownedProcesses).catch(
-          (error: unknown) => {
-            this.logger.warn(
-              { err: error, agentId },
-              "Could not count reaped idle provider processes",
-            );
-            return 0;
+          onAfterSessionClose: async () => {
+            reapedProcesses = await reapProcessTree(ownedProcesses);
           },
-        );
+        });
+        this.idleProcessSnapshots.delete(agentId);
+        unloaded += 1;
         this.logger.info(
           { agentId, provider: agent.provider, idleDurationMs, reapedProcesses },
           "Idle agent unloaded",
@@ -2056,7 +2058,7 @@ export class AgentManager {
 
   private async closeAgentRuntime(
     agentId: string,
-    options?: { onBeforeClose?: () => void },
+    options?: { onBeforeClose?: () => void; onAfterSessionClose?: () => Promise<void> },
   ): Promise<void> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
@@ -2080,6 +2082,7 @@ export class AgentManager {
     // Retain ownership until shutdown succeeds. A failed close may still own a
     // native writer, so publishing a resumable closed snapshot would orphan it.
     await agent.session.close();
+    await options?.onAfterSessionClose?.();
     this.cancelRunningProviderSubagents(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
 

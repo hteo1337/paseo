@@ -215,7 +215,10 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
         if (releasePromise) {
           return releasePromise;
         }
-        releasePromise = this.releaseServer(server);
+        releasePromise = this.releaseServer(server).catch((error: unknown) => {
+          releasePromise = null;
+          throw error;
+        });
         return releasePromise;
       },
     };
