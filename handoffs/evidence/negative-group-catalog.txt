@@ -1,0 +1,41 @@
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/server
+
+stdout | src/server/workspace-registry.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🛡️ auth for agents: https://vestauth.com
+
+ ❯ src/server/workspace-registry.test.ts (28 tests | 1 failed | 27 skipped) 45ms
+     × same-name defaults persist as one catalog and metadata changes update every member and rule 43ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 skipped (28)
+   Start at  15:44:28
+   Duration  821ms (transform 359ms, setup 75ms, import 507ms, tests 45ms, environment 0ms)
+
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts -t same-name defaults --bail=1 --maxWorkers=1
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/workspace-registry.test.ts > project groups > same-name defaults persist as one catalog and metadata changes update every member and rule
+AssertionError: expected [ 'b' ] to deeply equal [ 'a', 'b' ]
+
+- Expected
++ Received
+
+  [
+-   "a",
+    "b",
+  ]
+
+ ❯ src/server/workspace-registry.test.ts:868:80
+    866|       },
+    867|     });
+    868|     expect(changed.changedProjects.map((project) => project.projectId)…
+       |                                                                                ^
+    869|     for (const id of ["a", "b"])
+    870|       expect((await projects.get(id))?.group).toEqual({
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

@@ -1,3 +1,4 @@
+import { createProjectGroupCommand } from "./group.js";
 import { Command } from "commander";
 import { withOutput } from "../../output/index.js";
 import { addJsonAndDaemonHostOptions } from "../../utils/command-options.js";
@@ -39,5 +40,6 @@ export function createProjectCommand(): Command {
       .option("--if-no-active-workspaces", "Refuse to delete a project with active workspaces"),
   ).action(withOutput(runDeleteCommand));
 
+  project.addCommand(createProjectGroupCommand());
   return project;
 }

@@ -1,0 +1,32 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/projects/workspace-structure.test.ts -t preference keys --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/app
+
+ ❯ |unit| src/projects/workspace-structure.test.ts (6 tests | 1 failed | 5 skipped) 9ms
+   × preserves project preference keys and host assignments across group changes 8ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/projects/workspace-structure.test.ts > preserves project preference keys and host assignments across group changes
+AssertionError: expected '["remote:github.com/acme/app",null]' to be 'remote:github.com/acme/app' // Object.is equality
+
+Expected: "remote:github.com/acme/app"
+Received: "["remote:github.com/acme/app",null]"
+
+ ❯ src/projects/workspace-structure.test.ts:199:31
+    197|     });
+    198|     expect(result).toHaveLength(1);
+    199|     expect(result[0].viewKey).toBe(key);
+       |                               ^
+    200|     expect(result[0].hosts.map((host) => host.projectGroup)).toEqual(n…
+    201|     expect(result[0].workspaceKeys).toEqual(["host-0:0", "host-1:1"]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  16:00:00
+   Duration  106ms (transform 28ms, setup 20ms, import 16ms, tests 9ms, environment 0ms)
+

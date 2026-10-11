@@ -1,3 +1,4 @@
+import type { ProjectGroupOperation } from "@getpaseo/protocol/project-groups";
 import { legacyUsageIcon } from "./legacy-usage-icons.js";
 import { subscribeTimeline, type TimelineMessage } from "./timeline-subscription/index.js";
 import { ProviderSnapshotUpdates } from "./provider-snapshots/index.js";
@@ -3021,6 +3022,17 @@ export class DaemonClient {
     if (!payload.accepted) {
       throw new Error(payload.error ?? "updateAgent rejected");
     }
+  }
+
+  async projectGroup(operation: ProjectGroupOperation) {
+    if (this.lastServerInfoMessage?.features?.projectGroups !== true) {
+      throw new Error("Project grouping requires an updated Paseo daemon");
+    }
+    const payload = await this.sendNamespacedCorrelatedSessionRequest<"project.group.response">({
+      message: { type: "project.group.request", operation },
+    });
+    if (!payload.accepted) throw new Error(payload.error ?? "Project grouping rejected");
+    return payload;
   }
 
   async renameProject(

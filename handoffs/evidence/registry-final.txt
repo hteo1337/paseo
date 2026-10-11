@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups
+
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  16:02:30
+   Duration  586ms (transform 195ms, setup 0ms, import 314ms, tests 151ms, environment 0ms)
+

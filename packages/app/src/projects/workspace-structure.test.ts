@@ -174,3 +174,30 @@ describe("buildWorkspaceStructureProjects", () => {
     );
   });
 });
+
+test("preserves project preference keys and host assignments across group changes", () => {
+  const key = "remote:github.com/acme/app";
+  const group = (name: string | null) => (name ? { name, order: 1, collapsed: false } : null);
+  for (const names of [
+    [null, null],
+    ["Nexus Platform", "Fleet tooling"],
+    [null, "Nexus Platform"],
+  ]) {
+    const result = buildWorkspaceStructureProjects({
+      sessions: names.map((name, index) => ({
+        serverId: `host-${index}`,
+        projects: [
+          {
+            ...project({ id: `${index}`, key, root: `/repos/${index}` }),
+            projectGroup: group(name),
+          },
+        ],
+        workspaces: [workspace(`${index}`, `${index}`, `/repos/${index}`)],
+      })),
+    });
+    expect(result).toHaveLength(1);
+    expect(result[0].viewKey).toBe(key);
+    expect(result[0].hosts.map((host) => host.projectGroup)).toEqual(names.map(group));
+    expect(result[0].workspaceKeys).toEqual(["host-0:0", "host-1:1"]);
+  }
+});

@@ -1,3 +1,4 @@
+import { buildProjectGroupTree } from "./project-group-tree";
 import type { TFunction } from "i18next";
 import { buildStatusGroups } from "@/hooks/sidebar-status-view-model";
 import {
@@ -47,6 +48,7 @@ export interface SidebarProjectionInput {
   collapsedProjectKeys: ReadonlySet<string>;
   collapsedWorkspaceGroupKeys: ReadonlySet<string>;
   t: TFunction;
+  groupCollapseOverrides?: Readonly<Record<string, boolean>>;
 }
 
 export function buildSidebarProjection(input: SidebarProjectionInput): SidebarProjection {
@@ -70,10 +72,17 @@ export function buildSidebarProjection(input: SidebarProjectionInput): SidebarPr
   }
   if (input.groupMode === "project") {
     sections.push(
-      ...pinnedGroups.unpinnedProjects.map((project) => ({
-        workspaces: project.workspaces,
-        collapsed: input.collapsedProjectKeys.has(project.viewKey),
-      })),
+      ...buildProjectGroupTree({
+        projects: pinnedGroups.unpinnedProjects,
+        workspaceEntriesByKey: input.workspaceEntriesByKey,
+        collapseOverrides: input.groupCollapseOverrides,
+      })
+        .filter((group) => !group.collapsed)
+        .flatMap((group) => group.projects)
+        .map((project) => ({
+          workspaces: project.workspaces,
+          collapsed: input.collapsedProjectKeys.has(project.viewKey),
+        })),
     );
   } else {
     sections.push(

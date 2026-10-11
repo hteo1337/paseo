@@ -1,0 +1,15 @@
+Text rendering generated from the actual shared tree function; illustrative fixtures, not a screenshot of installed Paseo.
+☐ Hide workspaces with no live agent
+▾ BlackForge (1 projects · 1 workspaces)
+  ▾ company-site
+    company-site
+▾ Nexus Platform (1 projects · 1 workspaces) ● 1 attention
+  ▾ bf-api-gateway
+    bf-api-gateway
+▾ Fleet tooling (1 projects · 1 workspaces)
+  ▾ paseo-dispatch
+    paseo-dispatch
+▾ Ungrouped (1 projects · 1 workspaces)
+  ▾ personal
+    personal
+▸ Scratch (1 projects · 1 workspaces) ● 1 attention
