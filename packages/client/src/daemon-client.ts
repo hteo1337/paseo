@@ -3078,12 +3078,14 @@ export class DaemonClient {
   async removeProject(
     projectId: string,
     requestId?: string,
+    options?: { ifEmpty?: boolean },
   ): Promise<{ removedWorkspaceIds: string[] }> {
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"project.remove.response">({
       requestId,
       message: {
         type: "project.remove.request",
         projectId,
+        ifEmpty: options?.ifEmpty,
       },
     });
     if (!payload.accepted) {
