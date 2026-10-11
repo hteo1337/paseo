@@ -7,6 +7,34 @@ const paseo = createPaseoApi(
   new DaemonClient({ url: "ws://127.0.0.1:1/ws", clientId: "lifecycle-unit" }),
 );
 
+test("agent.create provenance survives an old plugin return and cannot be changed", async () => {
+  const hooks = new PluginHookHandlers(() => {});
+  const creation = {
+    source: "cli" as const,
+    callerAgentId: null,
+    labels: { dispatch_task_id: "task" },
+  };
+  const input = { config: { provider: "codex", cwd: "/project" }, creation };
+  hooks.before("agent.create", ({ request }) => ({
+    config: { ...request.config, title: "modified" },
+  }));
+  expect(await hooks.invoke("operation", "before", "agent.create", input, paseo)).toEqual({
+    ...input,
+    config: { ...input.config, title: "modified" },
+  });
+  for (const change of [
+    { ...creation, source: "system" as const },
+    { ...creation, callerAgentId: "different" },
+    { ...creation, labels: { direct: "operator" } },
+  ]) {
+    const mutating = new PluginHookHandlers(() => {});
+    mutating.before("agent.create", ({ request }) => ({ ...request, creation: change }));
+    await expect(
+      mutating.invoke("operation", "before", "agent.create", input, paseo),
+    ).rejects.toThrow("cannot change creation provenance");
+  }
+});
+
 test("removing an old registration twice preserves a newer registration for the same hook", async () => {
   const hooks = new PluginHookHandlers(() => {});
   const remove = hooks.before("workspace.create", ({ request }) => {
