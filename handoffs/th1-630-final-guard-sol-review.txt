@@ -1,0 +1,29 @@
+Found one P1 and one P2.
+
+1. P1 — Old-daemon fallback can silently execute an unguarded project deletion.
+   packages/client/src/daemon-client.ts:3080–3084
+
+   Failure path: run “paseo project delete <id> --if-no-active-workspaces” against the released v0.11.2 daemon. The client sends both ifEmpty and ifNoActiveWorkspaces, but that daemon supports neither field. Its ProjectRemoveRequestSchema omits both, and its removal handler proceeds directly through archiveWorkspaceContents for every active workspace, archives their records, and removes the project. An active project therefore gets deleted instead of refused; live agents can be archived through that teardown path.
+
+   Verified by reading the local v0.11.2 tag: packages/protocol/src/messages.ts:962–966 and packages/server/src/server/session.ts:3597–3619. The compatibility comment assumes an older daemon already implements the strict empty guard, which is true for the comparison branch but not for the released version.
+
+   Control: the comparison branch’s strict ifEmpty guard rejects populated projects. The new client test only checks outgoing fields and a mocked successful response; it does not establish legacy enforcement.
+
+   Fix: require an advertised guard capability before sending this destructive request. Unknown support must fail closed.
+
+2. P2 — Retirement can move a directory after a new active workspace claims it.
+   scripts/retire-throwaway-workspaces.py:239–242
+
+   Failure path: finalize_archived observes archived-only references and no live agent, then successfully deletes the old project. Before move_eligible renames the directory, another client opens that same path. Project allocation can create a new project ID, and workspace admission accepts it because the retirement fence covers only the deleted project ID. The script does not recheck path ownership or hold admission through the move. It can therefore relocate a directory now owned by an active workspace or running agent.
+
+   The Git case has an especially clear window: clean_and_fully_pushed waits for git ls-remote before the rename. A new agent can start without making the checkout dirty, so the clean/pushed check does not prevent this race.
+
+   An in-memory adapter probe of the actual finalize_archived function inserted a new active workspace during project deletion. The function still requested the move and returned “archived”. No real CLI command or filesystem mutation occurred.
+
+   Control: an active reference detected before deletion is refused. The registry fence also rejects racing claims under the old project ID. Neither protects a replacement project at the same path. This delta newly enables that move for exact-root archived-history projects, where the baseline’s --if-empty deletion refused.
+
+   Fix: fence admission by canonical path through retirement and movement, or leave directories in place.
+
+Reviewed all 12 scoped files against fork/release/v0.11.2-patches, treating grouping as baseline. Scoped git diff --check passed. No files edited, builds run, deployments performed, or live destructive paths exercised.
+
+switchyard: effort medium (kept: consequential) · Jev 308 ms · 5 cached

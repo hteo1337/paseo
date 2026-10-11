@@ -1820,6 +1820,7 @@ export class VoiceAssistantWebSocketServer {
       features: {
         usageSources: true,
         projectGroups: true,
+        guardedProjectRemove: true,
         ownedSubscriptions: true,
         agentRequestReceipts: true,
         ...(this.keeperControl?.enabled ? { keeperControl: true } : {}),

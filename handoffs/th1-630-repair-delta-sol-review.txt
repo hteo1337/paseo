@@ -1,0 +1,25 @@
+Not clear. Two delta findings:
+
+1. P1 — Plain project deletion races with workspace creation/restoration.
+   scripts/retire-throwaway-workspaces.py:224–235
+   scripts/rehome-worktree-projects.py:134–147
+
+   Both check a workspace snapshot, perform a separate agent-list request, then issue unguarded project deletion. A workspace created or unarchived under that project between preflight and deletion is archived by the daemon, including agent teardown. Checking removedWorkspaceIds afterward detects damage but cannot prevent or undo it.
+
+   Confirmed against packages/server/src/server/session.ts:3644–3687 and an isolated mocked interleaving: the new workspace was archived before the script raised. Deletion needs a daemon-side atomic “no active workspaces” guard that permits archived history; --if-empty does not provide that contract.
+
+2. P2 — Rehome’s live-agent check mishandles the CLI’s shortened home paths.
+   scripts/rehome-worktree-projects.py:138–140
+
+   Agent ls emits home-relative cwd values such as ~/Work/… (packages/cli/src/commands/agent/ls.ts:53–57,102). os.path.realpath does not expand ~, so these resolve beneath the repair process’s current directory rather than the user’s home. Running/idle agents under the old project root therefore fail this check, allowing deletion despite the intended hold. Expanduser before realpath, as the retirement tool already does.
+
+Git safety limitation, pre-existing rather than introduced by this delta:
+   scripts/retire-throwaway-workspaces.py:130–149
+
+   The new scan retains broken root gitfiles and nested .git metadata when the outer directory is not a recognized checkout. A valid, clean/pushed outer checkout returns before that scan, however. An ignored nested checkout can contain dirty or unpushed user work and still move with the outer directory. The delta does not establish the requested blanket guarantee that nested Git metadata stays put.
+
+No files edited; no live repair operations executed.
+
+switchyard: effort medium (kept: consequential) · Jev 343 ms · 3 cached
+
+STDERR:

@@ -1,0 +1,29 @@
+No new P1/P2 issues found in 5ddc648ca relative to its parent. Both prior findings are resolved in the inspected flow.
+
+1. Prior P1 — resolved: both guarded delete flags fail closed against released v0.11.2.
+
+   packages/cli/src/commands/project/delete.ts:33–36 routes --if-no-active-workspaces and --if-empty into the corresponding removeProject options.
+
+   packages/client/src/daemon-client.ts:3075–3079 rejects either option unless server_info.features.guardedProjectRemove is exactly true. This precedes the removal RPC at :3081. Missing features, a missing flag, and false all refuse.
+
+   The new daemon advertises the capability at packages/server/src/server/websocket-server.ts:1823; packages/protocol/src/messages.ts:3732 preserves it as an optional boolean.
+
+   Connection readiness does not race the capability lookup: packages/client/src/daemon-client.ts:6843–6855 stores server_info before resolving connect. Cached capabilities are cleared on disconnect at :6723 and for a new transport at :1407.
+
+   Negative control: removing both guard options bypasses the capability check and still sends the ordinary removal request, even to a legacy daemon. The released v0.11.2 schema at packages/protocol/src/messages.ts:962–966 has neither guard, and its packages/server/src/server/session.ts:3604–3619 still archives active workspaces and removes the project. The fix is in the updated client; it does not retrofit refusal into old daemons.
+
+   “Before any RPC” here means before any project-removal RPC; connection/hello still occurs.
+
+2. Prior P2 — resolved by holding all directory moves.
+
+   scripts/retire-throwaway-workspaces.py:239–241 performs guarded project deletion, but :242–248 now unconditionally returns movedTo=None with moveHeld="canonical_path_admission_not_fenced". It no longer calls move_eligible.
+
+   Both automated entry paths converge here: ordinary apply at :216 and resumed retirement at :273–274. A replacement workspace can still claim the canonical path, but this retirement flow cannot subsequently relocate its directory.
+
+   Negative control: move_eligible still contains actual movement operations at :150, :154 and :171. It has no callers in scripts; its only match is the definition at :136. Calling that helper directly would remain unfenced, but neither automated retirement path does so.
+
+   Guarded server removal also retains its refusal checks at packages/server/src/server/session.ts:3696–3700 and its atomic registry check at :3725–3735. These protect project removal, not canonical-path ownership; holding movement is what closes the reported race.
+
+Read-only source review, including the local v0.11.2 tag. Existing test assertions were inspected, not executed. No edits, tests, builds, deployments, or destructive commands.
+
+switchyard: effort medium (kept: consequential) · Jev 265 ms · 5 cached
