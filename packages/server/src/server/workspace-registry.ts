@@ -176,6 +176,7 @@ export interface WorkspaceRegistry {
     projectId: string,
     removeProject: () => Promise<void>,
     projectStillExists: () => Promise<boolean>,
+    options?: { allowArchivedReferences?: boolean },
   ): Promise<boolean>;
   archive(
     workspaceId: string,
@@ -653,10 +654,15 @@ export class FileBackedWorkspaceRegistry
     projectId: string,
     removeProject: () => Promise<void>,
     projectStillExists: () => Promise<boolean>,
+    options?: { allowArchivedReferences?: boolean },
   ): Promise<boolean> {
     return this.mutateCache(
       (records) =>
-        !Array.from(records.values()).some((workspace) => workspace.projectId === projectId),
+        !Array.from(records.values()).some(
+          (workspace) =>
+            workspace.projectId === projectId &&
+            (!options?.allowArchivedReferences || !workspace.archivedAt),
+        ),
       {
         forcePersist: (empty) => empty,
         beforeWrite: async () => {
