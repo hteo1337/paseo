@@ -19,6 +19,11 @@ import {
   HostsRouteFrameSchema,
   HostsRouteClosedSchema,
 } from "./hosts.js";
+import {
+  ProjectGroupSchema,
+  ProjectGroupRuleSchema,
+  ProjectGroupOperationSchema,
+} from "./project-groups.js";
 import { PluginRegistryIdentitySchema } from "./plugin-registry.js";
 import { AgentProfileSchema, AgentSkillSelectionSchema } from "./agent-profile.js";
 export {
@@ -1078,6 +1083,22 @@ export const ProjectIconSourceSchema = z.discriminatedUnion("type", [
   z.object({ type: z.literal("automatic") }),
   z.object({ type: z.literal("upload"), data: z.string() }),
 ]);
+
+export const ProjectGroupRequestSchema = z.object({
+  type: z.literal("project.group.request"),
+  operation: ProjectGroupOperationSchema,
+  requestId: z.string(),
+});
+export const ProjectGroupResponseSchema = z.object({
+  type: z.literal("project.group.response"),
+  payload: z.object({
+    requestId: z.string(),
+    accepted: z.boolean(),
+    groups: z.array(ProjectGroupSchema),
+    rules: z.array(ProjectGroupRuleSchema),
+    error: z.string().nullable(),
+  }),
+});
 
 export const ProjectRenameRequestSchema = z.object({
   type: z.literal("project.rename.request"),
@@ -3651,6 +3672,7 @@ export const SessionInboundMessageSchema = z.discriminatedUnion("type", [
   ArchiveAgentRequestMessageSchema,
   CloseItemsRequestMessageSchema,
   UpdateAgentRequestMessageSchema,
+  ProjectGroupRequestSchema,
   ProjectRenameRequestSchema,
   ProjectIconSetRequestSchema,
   ProjectRemoveRequestSchema,
@@ -4060,6 +4082,7 @@ export const ServerInfoStatusPayloadSchema = z
         terminalCollection: z.boolean().optional(),
         // COMPAT(workspaceBaseBranch): added after v0.11.2, remove gate after 2027-10-14.
         workspaceBaseBranch: z.boolean().optional(),
+        projectGroups: z.boolean().optional(),
         // COMPAT(workspaceSetupRun): added in v0.8.0, remove gate after 2027-09-02.
         workspaceSetupRun: z.boolean().optional(),
         // COMPAT(workspaceTerminals): added in v0.8.0, remove gate after 2027-09-05.
@@ -4538,6 +4561,7 @@ export const WorkspaceDescriptorPayloadSchema = z
     // value (customName) and projectCustomName mirrors the raw override so the
     // settings UI can prefill its input and offer a "reset" action.
     projectCustomName: z.string().nullable().optional(),
+    projectGroup: ProjectGroupSchema.nullable().optional(),
     // Identifies the project's stored custom icon; null means automatic.
     // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
     projectCustomIconRevision: z.string().nullable().optional(),
@@ -4737,6 +4761,7 @@ export const WorkspaceProjectDescriptorPayloadSchema = z.object({
   projectKey: z.string().optional(),
   projectDisplayName: z.string(),
   projectCustomName: z.string().nullable().optional(),
+  projectGroup: ProjectGroupSchema.nullable().optional(),
   // COMPAT(projectCustomIcon): added in v0.2.0, remove after 2027-01-20.
   projectCustomIconRevision: z.string().nullable().optional(),
   // Fingerprints the effective icon, including automatic discovery and the
@@ -7824,6 +7849,7 @@ export const SessionOutboundMessageSchema = z.discriminatedUnion("type", [
   AgentDetachResponseMessageSchema,
   AgentRewindResponseMessageSchema,
   UpdateAgentResponseMessageSchema,
+  ProjectGroupResponseSchema,
   ProjectRenameResponseSchema,
   ProjectIconSetResponseSchema,
   ProjectRemoveResponseSchema,
