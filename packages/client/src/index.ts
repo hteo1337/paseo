@@ -389,6 +389,8 @@ export interface PaseoAgentHandle {
 }
 
 export interface PaseoAgentActions {
+  /** Read a durable creation receipt; never launches an agent. */
+  readCreation(idempotencyKey: string): Promise<CreationSnapshot | null>;
   list(options: PaseoAgentListOptions & { subscribe: {} }): Promise<
     PaseoAgentListResult & {
       subscriptionId: string;
@@ -758,6 +760,7 @@ export function createPaseoApi(
       subscribe: listenWorkspaces,
     },
     agents: {
+      readCreation: (key) => daemonClient.readAgentCreation(key),
       list: listAgents,
       ref: (agent) => createAgentHandle(agent),
       create: (options) => createAgent(options),
