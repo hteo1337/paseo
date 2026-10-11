@@ -5156,6 +5156,18 @@ export const ClearAgentAttentionResponseMessageSchema = z.object({
 });
 
 export const CreationSnapshotSchema = z.object({
+  /** Prior failures survive a same-identity retry. */
+  failures: z
+    .array(
+      z.object({
+        revision: z.number().int().nonnegative(),
+        failedStage: z.enum(["workspace", "agent", "prompt"]),
+        error: z.string(),
+        errorCode: z.string().optional(),
+        outcomeUnknown: z.boolean(),
+      }),
+    )
+    .optional(),
   kind: z.enum(["workspace", "agent"]),
   idempotencyKey: z.string(),
   revision: z.number().int().nonnegative(),
