@@ -1335,6 +1335,7 @@ export class Session {
       listProviderSubagentActivity: async () => this.agentManager.listProviderSubagentActivity(),
       listTerminalActivityContributions: () => this.listTerminalActivityContributions(),
       isProviderVisibleToClient: (provider) => this.isProviderVisibleToClient(provider),
+      isWorkspaceDirectory: (cwd) => this.filesystem.isDirectory(cwd),
       buildWorkspaceDescriptor: (input) => this.buildWorkspaceDescriptor(input),
     });
 
