@@ -279,7 +279,7 @@ async function waitForPermission(client: DaemonClient, agentId: string) {
   return parked;
 }
 
-test("daemon bootstrap migrates cwd-only legacy agents before same-cwd workspaces are added", async () => {
+test("daemon bootstrap migrates cwd-only legacy agents and workspace creation reuses that cwd", async () => {
   const { paseoHomeRoot, cwd } = await seedWorkspaceWithLegacyAgent();
   const daemon = await createTestPaseoDaemon({ paseoHomeRoot });
   const client = new DaemonClient({
@@ -303,19 +303,13 @@ test("daemon bootstrap migrates cwd-only legacy agents before same-cwd workspace
       throw new Error(created.error ?? "Expected same-cwd workspace to be created");
     }
 
-    // The migrated legacy agent stays owned by LEGACY_OWNER. The freshly created
-    // same-cwd workspace owns nothing, so its status is done — status is per id,
-    // never shared across same-cwd workspaces.
+    expect(createdWorkspaceId).toBe(LEGACY_OWNER_WORKSPACE);
     expect(await legacyAgentWorkspaceId(client)).toBe(LEGACY_OWNER_WORKSPACE);
     expect(await agentIdsOwnedByWorkspace(client, LEGACY_OWNER_WORKSPACE)).toEqual([
       "legacy-cwd-only-agent",
     ]);
-    expect(await agentIdsOwnedByWorkspace(client, createdWorkspaceId)).toEqual([]);
     expect(await statusByWorkspaceId(client)).toEqual(
-      new Map([
-        [LEGACY_OWNER_WORKSPACE, "running"],
-        [createdWorkspaceId, "done"],
-      ]),
+      new Map([[LEGACY_OWNER_WORKSPACE, "running"]]),
     );
   } finally {
     await client.close().catch(() => undefined);
@@ -454,7 +448,7 @@ test("create_agent_request with workspaceId does not retitle an existing workspa
   }
 }, 20_000);
 
-test("creating another same-cwd local workspace keeps running status on the owning workspace only", async () => {
+test("creating the same local workspace repeatedly reuses its running owner", async () => {
   const cwd = mkdtempSync(path.join(tmpdir(), "paseo-running-same-cwd-create-"));
   const daemon = await createTestPaseoDaemon({
     agentClients: { mock: new MockLoadTestAgentClient() },
@@ -484,26 +478,9 @@ test("creating another same-cwd local workspace keeps running status on the owni
     if (!secondWorkspaceId) {
       throw new Error(second.error ?? "Expected second workspace to be created");
     }
+    expect(secondWorkspaceId).toBe(firstWorkspaceId);
 
-    const agent = await client.createAgent({
-      provider: "mock",
-      cwd,
-      workspaceId: firstWorkspaceId,
-      model: "five-minute-stream",
-      initialPrompt: "stay running",
-    });
-    expect(agent.workspaceId).toBe(firstWorkspaceId);
-
-    await client.waitForAgentUpsert(agent.id, (snapshot) => snapshot.status === "running", 15_000);
-
-    // Only the workspace that owns the agent is running. The same-cwd sibling
-    // owns nothing active and stays done — status never fans out across a cwd.
-    expect(await statusByWorkspaceId(client)).toEqual(
-      new Map([
-        [firstWorkspaceId, "running"],
-        [secondWorkspaceId, "done"],
-      ]),
-    );
+    expect(await statusByWorkspaceId(client)).toEqual(new Map([[firstWorkspaceId, "done"]]));
 
     const third = await client.createWorkspace({
       source: { kind: "directory", path: cwd },
@@ -513,15 +490,9 @@ test("creating another same-cwd local workspace keeps running status on the owni
     if (!thirdWorkspaceId) {
       throw new Error(third.error ?? "Expected third workspace to be created");
     }
+    expect(thirdWorkspaceId).toBe(firstWorkspaceId);
 
-    expect((await client.fetchAgent({ agentId: agent.id }))?.agent.status).toBe("running");
-    expect(await statusByWorkspaceId(client)).toEqual(
-      new Map([
-        [firstWorkspaceId, "running"],
-        [secondWorkspaceId, "done"],
-        [thirdWorkspaceId, "done"],
-      ]),
-    );
+    expect(await statusByWorkspaceId(client)).toEqual(new Map([[firstWorkspaceId, "done"]]));
   } finally {
     await client.close().catch(() => undefined);
     await daemon.close();

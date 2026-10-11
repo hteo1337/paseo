@@ -196,6 +196,50 @@ test("re-opening an active workspace by exact path returns the same record witho
   expect(await workspaceRegistry.list()).toHaveLength(1);
 });
 
+test("two launch paths into the same branch and cwd share one workspace", async () => {
+  const repo = path.join(tmpDir, "repo");
+  const branchCwd = path.join(tmpDir, "branch");
+  const otherCwd = path.join(tmpDir, "other-branch");
+  mkdirSync(repo);
+  mkdirSync(branchCwd);
+  mkdirSync(otherCwd);
+  gitRoots.add(repo);
+  const otherSession = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  const input = {
+    sourceCwd: repo,
+    repoRoot: repo,
+    cwd: branchCwd,
+    worktreeRoot: branchCwd,
+    branch: "feature/shared",
+    baseBranch: "main",
+    title: null,
+  };
+
+  const [first, second] = await Promise.all([
+    provisioning.createWorkspaceForWorktree(input),
+    otherSession.createWorkspaceForWorktree({ ...input, workspaceId: "second-request" }),
+  ]);
+  const distinct = await provisioning.createWorkspaceForWorktree({
+    ...input,
+    cwd: otherCwd,
+    worktreeRoot: otherCwd,
+    branch: "feature/other",
+  });
+
+  expect(second.workspaceId).toBe(first.workspaceId);
+  expect(second.cwd).toBe(branchCwd);
+  expect(distinct.workspaceId).not.toBe(first.workspaceId);
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+  ).toHaveLength(2);
+});
+
 test("re-opening Windows-equivalent workspace cwd spellings reuses the active and archived record", async () => {
   const cwd = path.join(tmpDir, "workspace");
   const created = await provisioning.findOrCreateWorkspaceForDirectory(cwd);
@@ -727,15 +771,15 @@ test("create-agent reuses only active directory workspaces and groups disposable
   expect(aliasId).toBe("wks-alias");
 });
 
-test("createWorkspaceForDirectory always mints a fresh workspace even when one already occupies the cwd", async () => {
+test("createWorkspaceForDirectory reuses the active workspace at the same cwd", async () => {
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
 
   const first = await provisioning.createWorkspaceForDirectory(repo);
   const second = await provisioning.createWorkspaceForDirectory(repo);
 
-  expect(second.workspaceId).not.toBe(first.workspaceId);
-  expect(await workspaceRegistry.list()).toHaveLength(2);
+  expect(second.workspaceId).toBe(first.workspaceId);
+  expect(await workspaceRegistry.list()).toHaveLength(1);
 });
 
 test("directory creation persists the live branch and a trimmed title", async () => {
