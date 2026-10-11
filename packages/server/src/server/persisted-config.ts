@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { ProjectGroupingConfigSchema } from "@getpaseo/protocol/project-groups";
 import { PluginRegistriesSchema } from "@getpaseo/protocol/plugin-registry";
 import { existsSync, readFileSync } from "node:fs";
 import path from "node:path";
@@ -258,6 +259,7 @@ function normalizeAgentProviders(value: unknown): unknown {
 export const PersistedConfigSchema = z
   .object({
     $schema: z.string().optional(),
+    projectGrouping: ProjectGroupingConfigSchema.optional(),
 
     // v1 schema marker
     version: z.literal(1).optional(),
