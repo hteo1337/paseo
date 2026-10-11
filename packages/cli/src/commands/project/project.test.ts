@@ -43,6 +43,7 @@ describe("project commands", () => {
       "ls",
       "rename",
       "delete",
+      "group",
     ]);
   });
 
@@ -58,6 +59,7 @@ describe("project commands", () => {
       projectId: "project-1",
       name: "Paseo",
       kind: "git",
+      group: null,
       path: "/tmp/paseo",
     });
     expect(close).toHaveBeenCalled();

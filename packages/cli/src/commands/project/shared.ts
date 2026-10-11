@@ -4,6 +4,7 @@ import type { OutputSchema } from "../../output/index.js";
 export interface ProjectRow {
   projectId: string;
   name: string;
+  group: import("@getpaseo/protocol/project-groups").ProjectGroup | null;
   kind: "git" | "non_git" | "directory";
   path: string;
 }
@@ -22,6 +23,7 @@ export function toProjectRow(project: WorkspaceProjectDescriptorPayload): Projec
   return {
     projectId: project.projectId,
     name: project.projectDisplayName,
+    group: project.projectGroup ?? null,
     kind: project.projectKind,
     path: project.projectRootPath,
   };

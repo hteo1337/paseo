@@ -34,6 +34,32 @@ Paseo uses **file-based JSON persistence** instead of a traditional database. Al
 
 All server-side stores live under `$PASEO_HOME` (defaults to `~/.paseo`).
 
+## Project groups
+
+A project may carry `group: { name, order, collapsed }` in `projects/projects.json`.
+Records without it stay ungrouped. Grouping never changes a directory or project ID.
+`groupSource` distinguishes manual assignments (including an explicit ungrouped override)
+from automatic placement. Group metadata is canonical per daemon in `config.json` under `projectGrouping.groups`;
+changing order/collapse updates every member and matching rule. CLI flags omitted on
+assignment preserve existing defaults; `--expanded` resets the default collapse.
+Group rules live in `config.json` under `projectGrouping.rules`;
+the first matching path, remote owner, or remote repository prefix wins.
+
+Use `paseo project group ls|set|unset|rule add|rule rm` to edit groups and rules.
+Path rules use daemon-side absolute paths or `~/`, with an optional trailing `/**`.
+Remote rules use the persisted Git identity, so worktree names and review-clone names
+cannot change placement. Group `collapsed` is a default: each client remembers its own
+collapse overrides and live-agent filter in `project-group-view` storage.
+Equivalent repositories keep their existing project preference identity across group changes.
+The grouped tree partitions their host placements by assignment; host-local set/unset
+never inherits another host's group.
+The filter counts nonarchived initializing, idle, and running agents, including subagents.
+
+At startup, the daemon converts supported prefixes only when its
+`ops-scratch/ws-clean/grouping.tsv` backs the project ID, current canonical root, rename
+action and prefix. It keeps the custom base name. `bf-*` remote repositories go to
+Nexus Platform; other reviewed groups remain as mapped. Unbacked names stay untouched.
+
 ## Store Surface Rules
 
 Store APIs own persistence atomicity and should not make services coordinate raw reads and writes. A good store method maps cleanly to one SQL statement or one SQL transaction, even when the current implementation is JSON files. If a caller needs a queue, lock, read-merge-write loop, or uniqueness race workaround, that behavior belongs behind the store surface.
