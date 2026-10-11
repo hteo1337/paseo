@@ -1,5 +1,6 @@
 import { resolve } from "node:path";
 import type pino from "pino";
+import pLimit from "p-limit";
 import type {
   AgentSnapshotPayload,
   SessionInboundMessage,
@@ -83,6 +84,7 @@ export interface WorkspaceDirectoryDeps {
     Array<{ cwd: string; workspaceId?: string; activity: TerminalActivity | null }>
   >;
   isProviderVisibleToClient(provider: string): boolean;
+  isWorkspaceDirectory?(cwd: string): Promise<boolean>;
   buildWorkspaceDescriptor(input: {
     workspace: PersistedWorkspaceRecord;
     projectRecord?: PersistedProjectRecord | null;
@@ -167,6 +169,7 @@ function activeWorkspaceRecords(
 }
 
 export class WorkspaceDirectory {
+  private readonly directoryProbeLimit = pLimit(16);
   private readonly archivingByWorkspaceId = new Map<string, string>();
   /**
    * Per-workspace last-seen winning bucket + entered-at. Persists across
@@ -238,7 +241,10 @@ export class WorkspaceDirectory {
         .filter((project) => !project.archivedAt)
         .map((project) => [project.projectId, project] as const),
     );
-    const activeRecords = activeWorkspaceRecords(persistedWorkspaces, persistedProjects);
+    const activeRecords = await this.existingActiveWorkspaces(
+      persistedWorkspaces,
+      persistedProjects,
+    );
     const descriptorsByWorkspaceId = new Map<string, WorkspaceDescriptorPayload>();
     const workspaceIds = options.workspaceIds ? new Set(options.workspaceIds) : null;
     const activeWorkspaceIds = new Set(activeRecords.map((workspace) => workspace.workspaceId));
@@ -571,12 +577,9 @@ export class WorkspaceDirectory {
     ]);
     // A project whose only workspaces are hidden reads as empty to that caller.
     const projectIdsWithActiveWorkspaces = new Set(
-      persistedWorkspaces
-        .filter(
-          (workspace) =>
-            !workspace.archivedAt && (options?.includeBackground === true || !workspace.background),
-        )
-        .map((workspace) => workspace.projectId),
+      (await this.existingActiveWorkspaces(persistedWorkspaces, persistedProjects)).filter((workspace) => options?.includeBackground === true || !workspace.background).map(
+        (workspace) => workspace.projectId,
+      ),
     );
     return persistedProjects
       .filter(
@@ -600,11 +603,27 @@ export class WorkspaceDirectory {
       this.deps.workspaceRegistry.list(),
       this.deps.projectRegistry.list(),
     ]);
-    return activeWorkspaceRecords(workspaces, projects).map((workspace) => ({
+    return (await this.existingActiveWorkspaces(workspaces, projects)).map((workspace) => ({
       id: workspace.workspaceId,
       workspaceDirectory: workspace.cwd,
       workspaceKind: workspace.kind,
     }));
+  }
+
+  private async existingActiveWorkspaces(
+    workspaces: PersistedWorkspaceRecord[],
+    projects: PersistedProjectRecord[],
+  ): Promise<PersistedWorkspaceRecord[]> {
+    const active = activeWorkspaceRecords(workspaces, projects);
+    if (!this.deps.isWorkspaceDirectory) return active;
+    const present = await Promise.all(
+      active.map((workspace) =>
+        this.directoryProbeLimit(() =>
+          this.deps.isWorkspaceDirectory!(workspace.cwd).catch(() => false),
+        ),
+      ),
+    );
+    return active.filter((_, index) => present[index]);
   }
 
   // Every active workspace, background ones included. Callers that answer a
