@@ -23,6 +23,7 @@ export async function requestWorkspaceDraftAgent(
 ): Promise<AgentSnapshotPayload> {
   const images = await encodeImages(request.images);
   return await client.createAgent({
+    labels: { direct: "operator" },
     config: request.config,
     workspaceId: request.workspaceId,
     clientMessageId: request.clientMessageId,
