@@ -1039,6 +1039,48 @@ describe("project command-center RPCs", () => {
     }
   });
 
+  test("creates a nested project in a remote-backed checkout at its exact path", async () => {
+    const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "paseo-project-session-")));
+    const directoryPath = join(parentDirectory, "sub");
+    const projectAllocation = vi.fn(async (input) =>
+      createPersistedProjectRecord({
+        projectId: "prj_nested",
+        rootPath: input.rootPath,
+        kind: input.kind,
+        displayName: input.displayName,
+        createdAt: input.timestamp,
+        updatedAt: input.timestamp,
+      }),
+    );
+    const session = createSessionForTest({
+      projectRegistry: { getOrCreateActiveByRoot: projectAllocation },
+      workspaceGitService: {
+        getCheckout: vi.fn(async (cwd: string) => ({
+          cwd,
+          isGit: true as const,
+          currentBranch: "main",
+          remoteUrl: "https://github.com/acme/repo.git",
+          worktreeRoot: parentDirectory,
+          isPaseoOwnedWorktree: false as const,
+          mainRepoRoot: null,
+        })),
+      },
+    });
+    try {
+      await session.handleMessage({
+        type: "project.create_directory.request",
+        parentPath: parentDirectory,
+        name: "sub",
+        requestId: "req-create-nested",
+      });
+      expect(projectAllocation).toHaveBeenCalledWith(
+        expect.objectContaining({ rootPath: directoryPath, kind: "git" }),
+      );
+    } finally {
+      rmSync(parentDirectory, { recursive: true, force: true });
+    }
+  });
+
   test("rolls back the directory when Project registration fails", async () => {
     const parentDirectory = realpathSync(mkdtempSync(join(tmpdir(), "paseo-project-session-")));
     const directoryPath = join(parentDirectory, "unregistered");
