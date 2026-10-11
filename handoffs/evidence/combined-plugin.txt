@@ -1,0 +1,4 @@
+npm notice run paseo@0.11.2 build:plugin
+npm notice run npm run build --workspace=@getpaseo/plugin
+npm notice run @getpaseo/plugin@0.11.2 build
+npm notice run tsc -p tsconfig.json --incremental false

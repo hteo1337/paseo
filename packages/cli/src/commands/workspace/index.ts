@@ -37,9 +37,12 @@ export function createWorkspaceCommand(): Command {
       .option("--forge <forge>", "Forge for --mode checkout-pr (default: source checkout)"),
   ).action(withOutput(runCreateCommand));
 
-  addJsonAndDaemonHostOptions(workspace.command("ls").description("List active workspaces")).action(
-    withOutput(runLsCommand),
-  );
+  addJsonAndDaemonHostOptions(
+    workspace
+      .command("ls")
+      .description("List active workspaces")
+      .option("--group <name>", "Only workspaces in this project group"),
+  ).action(withOutput(runLsCommand));
 
   addJsonAndDaemonHostOptions(
     workspace

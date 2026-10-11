@@ -1,0 +1,8 @@
+npm notice run paseo@0.11.2 format:check
+npm notice run oxfmt --check .
+Checking formatting...
+
+.paseo-ops-rules.json (39ms)
+
+Format issues found in above 1 files. Run without `--check` to fix.
+Finished in 2041ms on 4985 files using 16 threads.

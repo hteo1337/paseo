@@ -1,0 +1,43 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/components/sidebar/sidebar-projection.test.ts -t retains empty --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/app
+
+ ❯ |unit| src/components/sidebar/sidebar-projection.test.ts (10 tests | 1 failed | 9 skipped) 13ms
+   × retains empty or fully pinned host placements beside occupied equivalent repositories 10ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/components/sidebar/sidebar-projection.test.ts > retains empty or fully pinned host placements beside occupied equivalent repositories
+AssertionError: expected [ [ 'Nexus Platform', 1 ] ] to deeply equal [ [ 'Nexus Platform', 1 ], …(1) ]
+
+- Expected
++ Received
+
+  [
+    [
+      "Nexus Platform",
+      1,
+    ],
+-   [
+-     "Fleet tooling",
+-     0,
+-   ],
+  ]
+
+ ❯ src/components/sidebar/sidebar-projection.test.ts:321:69
+    319|   ];
+    320|   const groups = buildProjectGroupTree({ projects: [project], workspac…
+    321|   expect(groups.map((group) => [group.name, group.workspaceCount])).to…
+       |                                                                     ^
+    322|     ["Nexus Platform", 1],
+    323|     ["Fleet tooling", 0],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 9 skipped (10)
+   Start at  16:02:28
+   Duration  1.05s (transform 699ms, setup 43ms, import 852ms, tests 13ms, environment 0ms)
+

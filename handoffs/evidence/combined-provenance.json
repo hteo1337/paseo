@@ -1,0 +1,22 @@
+{
+  "sourceCode": "8f613b4591a99e38f4b93c08e66f5d81bb1aab78",
+  "sourceBase": "d49f5c78dcb4d0890e9d5d30c69ac37df588aea2",
+  "patchBase": "db37855ecf238c2ec959531b917ae4b12a8dfb0a",
+  "testedAppliedCommit": "2743e8433d0a1c9d59b3d0de7e0fc6b833422fa3",
+  "upstreamTag": "v0.11.2",
+  "priorPayloadsVerifiedByteIdentical": 53,
+  "patchCount": 54,
+  "seriesHash": "ba0ba10aac3b64fe",
+  "payload": "0057-feat-projects-persist-groups-and-render-grouped-workspace-sidebar.patch",
+  "payloadSHA256": "84ec6e53b2feded7556fc9887abfd5c89dc1825151a9a2cacc30b46d1f56ae29",
+  "recoveryDiffStablePatchId": "d7cda1e7338364147588b6c7cda836a654039e4f",
+  "reviewedFeatureCodeUnchanged": true,
+  "checksSerial": true,
+  "deployments": 0,
+  "dependencySetup": "External installed dependencies reused without npm install; workspace package links resolve to applied-tree packages. Thirty app-local dependency directories APFS-cloned to make Metro discovery local.",
+  "workspacePackageRealpaths": {
+    "@getpaseo/client": "/Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/client",
+    "@getpaseo/protocol": "/Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/protocol",
+    "@getpaseo/server": "/Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/server"
+  }
+}

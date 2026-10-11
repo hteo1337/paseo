@@ -4,7 +4,11 @@ import type { CommandError, ListResult } from "../../output/index.js";
 import { toWorkspaceRow, workspaceSchema, type WorkspaceRow } from "./shared.js";
 
 export async function runLsCommand(
-  options: { host?: string; daemonTarget: import("../../utils/daemon-target.js").DaemonTarget },
+  options: {
+    group?: string;
+    host?: string;
+    daemonTarget: import("../../utils/daemon-target.js").DaemonTarget;
+  },
   _command: Command,
 ): Promise<ListResult<WorkspaceRow>> {
   const host = getDaemonHost({ target: options.daemonTarget });
@@ -25,7 +29,13 @@ export async function runLsCommand(
       workspaces.push(...payload.entries.map(toWorkspaceRow));
       cursor = payload.pageInfo.nextCursor ?? undefined;
     } while (cursor);
-    return { type: "list", data: workspaces, schema: workspaceSchema };
+    return {
+      type: "list",
+      data: options.group
+        ? workspaces.filter((workspace) => workspace.group?.name === options.group)
+        : workspaces,
+      schema: workspaceSchema,
+    };
   } finally {
     await client.close().catch(() => undefined);
   }

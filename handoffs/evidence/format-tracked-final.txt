@@ -1,0 +1,6 @@
+npm notice run paseo@0.11.2 format:files
+npm notice run oxfmt --check docs/data-model.md packages/protocol/src/project-groups.ts packages/server/src/server/project-grouping.ts packages/server/src/server/workspace-registry.ts packages/server/src/server/workspace-registry.test.ts packages/server/src/server/cli-run-workspace-precedence.e2e.test.ts packages/cli/src/commands/project/group.ts packages/app/src/components/sidebar/project-group-tree.ts packages/app/src/components/sidebar/sidebar-projection.test.ts packages/app/src/projects/workspace-structure.ts packages/app/src/projects/workspace-structure.test.ts packages/app/src/hooks/sidebar-workspaces-view-model.ts handoffs/STATUS.md handoffs/ROLLOUT.md handoffs/REVIEW-4b7093d7.md
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 193ms on 15 files using 16 threads.
