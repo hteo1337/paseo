@@ -57,7 +57,11 @@ export function createWorkspaceCommand(): Command {
     workspace
       .command("archive")
       .description("Archive a workspace and everything it owns")
-      .argument("<workspace-id>", "Workspace id"),
+      .argument("<workspace-id>", "Workspace id")
+      .option(
+        "--if-no-live-agents",
+        "Refuse if agents still use the workspace; retain its directory",
+      ),
   ).action(withOutput(runArchiveCommand));
 
   return workspace;
