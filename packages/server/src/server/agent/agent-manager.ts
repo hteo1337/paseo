@@ -9,6 +9,7 @@ import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/inde
 import { applyRecordPatch } from "../record-patch.js";
 import type {
   PluginSessionOpenRequest,
+  PluginAgentCreation,
   PluginSessionOpenedRequest,
   PluginTurnStartRequest,
 } from "@getpaseo/plugin/server";
@@ -395,6 +396,8 @@ type ProviderEnabledMap = Partial<Record<AgentProvider, ProviderEnabledFlag>>;
 type ProviderClientMap = Partial<Record<AgentProvider, AgentClient>>;
 
 export interface CreateAgentOptions {
+  creationSource?: PluginAgentCreation["source"];
+  callerAgentId?: string;
   labels?: Record<string, string>;
   metadata?: AgentMetadata;
   initialPrompt?: string;
@@ -406,6 +409,14 @@ export interface CreateAgentOptions {
   owner?: AgentOwner;
   /** Background agents stay out of discovery, tabs, tracks and attention. Fixed at creation. */
   background?: boolean;
+}
+
+function describeAgentCreation(options: CreateAgentOptions): PluginAgentCreation {
+  return {
+    source: options.creationSource ?? "system",
+    callerAgentId: options.callerAgentId ?? null,
+    labels: { ...options.labels },
+  };
 }
 
 export interface AgentManagerOptions {
@@ -1648,6 +1659,7 @@ export class AgentManager {
         config: sent,
         env: options.env,
         metadata: options.metadata ?? {},
+        creation: describeAgentCreation(options),
       });
       // COMPAT(featureValues): added in v0.15.0, remove after 2027-05-01. A plugin written
       // against the previous SDK edits `config.featureValues`.

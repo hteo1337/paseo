@@ -169,11 +169,19 @@ export interface PluginHookEvents {
   "workspace.archive.after": { workspace: PluginHookWorkspace };
 }
 
+export interface PluginAgentCreation {
+  /** Server-derived entry point; operator UI creates carry direct=operator. */
+  source: "cli" | "agent" | "system";
+  callerAgentId: string | null;
+  labels: Record<string, string>;
+}
+
 export interface PluginHookRequests {
   "agent.set_model": PluginSetModelRequest;
   "agent.session_opened": PluginSessionOpenedRequest;
   "worktree.create.before": PluginWorktreeCreateRequest;
   "agent.create.before": {
+    creation?: PluginAgentCreation;
     config: AgentSessionConfig;
     env?: Record<string, string>;
     /** Stored on the new agent. Always present in the payload; return it changed to change it. */
