@@ -1,0 +1,7 @@
+2026-10-11 m4 read-only filesystem check:
+canonical ~/.paseo/ops-scratch/ws-clean/grouping.tsv absent.
+source grouping/grouping-source.tsv277 rows: m5 hold124/rehome90/rename50; m4 rename7/hold5/rehome1.
+Compared m4 rename project IDs against ~/.paseo/projects/projects.json, active status, canonical roots and current exact Group / prefix.
+Eligible: prj_5096df4654cbaa38, prj_77c4462108b4384b, prj_7ec8d553860757ac, prj_aac1ded7c3681df6, prj_e27cc0e106159252, prj_f7164ffbdbf0a910.
+Ineligible: prj_a3ab209507b06429.
+Six currently eligible rows. No files/records/config changed.

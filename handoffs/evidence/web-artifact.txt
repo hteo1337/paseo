@@ -1,0 +1,5 @@
+Single-worker Electron-targeted web export exit0.
+packages/app/dist/_expo/static/js/web/index-2c5ba7da9e4913d62c8d0b0f01c2fa22.js
+sha256 1f4822f30759706121b0dc54b329ff0654fb448570c957b7e498d88eb2bb247e
+Inspected one occurrence each: project-group-view, sidebar-project-group-header-, Hide workspaces with no live agent.
+This verifies export artifact presence, not installed runtime UI.

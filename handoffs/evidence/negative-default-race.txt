@@ -1,0 +1,44 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts -t queued assignments --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/server
+
+stdout | src/server/workspace-registry.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  suppress all logs with { quiet: true }
+
+ ❯ src/server/workspace-registry.test.ts (29 tests | 1 failed | 28 skipped) 18ms
+     × queued assignments inherit the latest defaults when CLI flags are omitted 17ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/workspace-registry.test.ts > project groups > queued assignments inherit the latest defaults when CLI flags are omitted
+AssertionError: expected { name: 'Fleet tooling', …(2) } to deeply equal { name: 'Fleet tooling', …(2) }
+
+- Expected
++ Received
+
+  {
+-   "collapsed": true,
++   "collapsed": false,
+    "name": "Fleet tooling",
+-   "order": 7,
++   "order": 0,
+  }
+
+ ❯ src/server/workspace-registry.test.ts:946:47
+    944|     ]);
+    945|     for (const id of ["a", "b"])
+    946|       expect((await projects.get(id))?.group).toEqual({
+       |                                               ^
+    947|         name: "Fleet tooling",
+    948|         order: 7,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 28 skipped (29)
+   Start at  15:59:58
+   Duration  224ms (transform 89ms, setup 18ms, import 124ms, tests 18ms, environment 0ms)
+

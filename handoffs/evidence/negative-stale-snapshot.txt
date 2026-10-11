@@ -1,0 +1,49 @@
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/server
+
+stdout | src/server/workspace-registry.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛡️ auth for agents: https://vestauth.com
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+
+ ❯ src/server/workspace-registry.test.ts (28 tests | 1 failed | 27 skipped) 42ms
+     × stale git snapshots preserve manual set/unset while automatic placement follows changed identity 39ms
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 27 skipped (28)
+   Start at  15:44:26
+   Duration  624ms (transform 250ms, setup 41ms, import 389ms, tests 42ms, environment 0ms)
+
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts -t stale git snapshots --bail=1 --maxWorkers=1
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/workspace-registry.test.ts > project groups > stale git snapshots preserve manual set/unset while automatic placement follows changed identity
+AssertionError: expected { projectId: 'repo', …(11) } to match object { group: { …(3) }, …(2) }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "group": {
+-     "collapsed": false,
+-     "name": "Fleet tooling",
+-     "order": 2,
+-   },
+-   "groupSource": "manual",
++   "group": null,
++   "groupSource": "rule",
+    "projectKey": "remote:github.com/other/repo",
+  }
+
+ ❯ src/server/workspace-registry.test.ts:825:40
+    823|     });
+    824|     await projects.upsert({ ...stale, projectKey: "remote:github.com/o…
+    825|     expect(await projects.get("repo")).toMatchObject({
+       |                                        ^
+    826|       group: INITIAL_PROJECT_GROUPS[2],
+    827|       groupSource: "manual",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+

@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/hooks/sidebar-workspaces-view-model.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/app
+
+
+ Test Files  1 passed (1)
+      Tests  40 passed (40)
+   Start at  16:05:24
+   Duration  294ms (transform 133ms, setup 32ms, import 155ms, tests 9ms, environment 0ms)
+

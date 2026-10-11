@@ -1,0 +1,51 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/components/sidebar/sidebar-projection.test.ts -t each host --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-662-project-groups/packages/app
+
+ ❯ |unit| src/components/sidebar/sidebar-projection.test.ts (9 tests | 1 failed | 8 skipped) 6ms
+   × places equivalent repositories under each host's group without changing preference keys 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  |unit| src/components/sidebar/sidebar-projection.test.ts > places equivalent repositories under each host's group without changing preference keys
+AssertionError: expected [ [ 'Ungrouped', 'project', …(1) ] ] to deeply equal [ [ 'Fleet tooling', …(2) ], …(1) ]
+
+- Expected
++ Received
+
+  [
+    [
+-     "Fleet tooling",
++     "Ungrouped",
+      "project",
+      [
++       "a",
+        "b",
+-     ],
+-   ],
+-   [
+-     "Nexus Platform",
+-     "project",
+-     [
+-       "a",
+      ],
+    ],
+  ]
+
+ ❯ src/components/sidebar/sidebar-projection.test.ts:284:5
+    282|       section.projects[0].workspaces.map((ws) => ws.workspaceId),
+    283|     ]),
+    284|   ).toEqual([
+       |     ^
+    285|     ["Fleet tooling", "project", ["b"]],
+    286|     ["Nexus Platform", "project", ["a"]],
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 8 skipped (9)
+   Start at  15:59:59
+   Duration  480ms (transform 333ms, setup 19ms, import 394ms, tests 6ms, environment 0ms)
+
