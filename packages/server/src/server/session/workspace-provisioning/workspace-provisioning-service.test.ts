@@ -18,6 +18,7 @@ import {
   type WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import { checkoutLiteFromGitSnapshot } from "../../workspace-registry-model.js";
+import { archiveWorkspaceAndEmptyProject } from "../../workspace-archive-service.js";
 import type { CreatePaseoWorktreeWorkflowResult } from "../../worktree-session.js";
 import {
   createWorkspaceProvisioningService,
@@ -565,12 +566,19 @@ test("create-agent reuses only active directory workspaces and groups disposable
       });
     }
   });
+  const peerProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
   const [concurrentA, concurrentB] = await Promise.all(
-    ["First agent", "Second agent"].map((initialTitle) =>
-      provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    [provisioning, peerProvisioning].map((service, index) =>
+      service.resolveOrCreateWorkspaceIdForCreateAgent({
         createdWorktree: null,
         cwd: concurrentCwd,
-        initialTitle,
+        initialTitle: index === 0 ? "First agent" : "Second agent",
       }),
     ),
   );
@@ -679,6 +687,48 @@ test("createWorkspaceForDirectory always mints a fresh workspace even when one a
 
   expect(second.workspaceId).not.toBe(first.workspaceId);
   expect(await workspaceRegistry.list()).toHaveLength(2);
+});
+
+test("last-workspace archive serializes a concurrent reopen across provisioning instances", async () => {
+  const cwd = path.join(tmpDir, "archive-race");
+  mkdirSync(cwd);
+  const first = await provisioning.createWorkspaceForDirectory(cwd);
+  const archiveProject = projectRegistry.archive.bind(projectRegistry);
+  let markArchiveEntered!: () => void;
+  const archiveEntered = new Promise<void>((resolve) => {
+    markArchiveEntered = resolve;
+  });
+  let releaseArchive!: () => void;
+  const archiveGate = new Promise<void>((resolve) => {
+    releaseArchive = resolve;
+  });
+  projectRegistry.archive = async (projectId, archivedAt) => {
+    markArchiveEntered();
+    await archiveGate;
+    return archiveProject(projectId, archivedAt);
+  };
+  const archive = archiveWorkspaceAndEmptyProject({
+    workspaceId: first.workspaceId,
+    workspaceRegistry,
+    projectRegistry,
+  });
+  await archiveEntered;
+  const peer = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  const reopen = peer.findOrCreateWorkspaceForDirectory(cwd, { reuseArchived: false });
+  releaseArchive();
+  await archive;
+  const second = await reopen;
+
+  expect(second.workspaceId).not.toBe(first.workspaceId);
+  expect(second.projectId).not.toBe(first.projectId);
+  expect((await projectRegistry.get(first.projectId))?.archivedAt).not.toBeNull();
+  expect((await projectRegistry.get(second.projectId))?.archivedAt).toBeNull();
 });
 
 test("directory creation persists the live branch and a trimmed title", async () => {

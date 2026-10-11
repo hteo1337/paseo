@@ -2725,9 +2725,8 @@ export const ArchiveWorkspaceRequestSchema = z.object({
   requestId: z.string(),
 });
 
-// Create a new workspace record. Unlike open_project, this never deduplicates by
-// directory: it always produces a fresh workspace. The source discriminates
-// between an existing local directory and a newly created paseo worktree.
+// An ordinary directory request reuses an active workspace unless workspaceId is supplied;
+// explicit IDs and worktree sources create a separate workspace.
 export const WorkspaceCreateRequestSchema = z.object({
   type: z.literal("workspace.create.request"),
   workspaceId: z

@@ -161,7 +161,7 @@ import { WorkspaceGitServiceImpl } from "./workspace-git-service.js";
 import { resolveWorkspaceIdForPath } from "./resolve-workspace-id-for-path.js";
 import {
   archiveByScope,
-  archivePersistedWorkspaceRecord,
+  archiveWorkspaceAndEmptyProject,
   killTerminalsForWorkspace,
   type ActiveWorkspaceRef,
 } from "./workspace-archive-service.js";
@@ -1051,9 +1051,10 @@ export async function createPaseoDaemon(
     workspaceId: string,
     context?: WorkspaceArchiveContext,
   ) => {
-    const existingWorkspace = await archivePersistedWorkspaceRecord({
+    const existingWorkspace = await archiveWorkspaceAndEmptyProject({
       workspaceId,
       workspaceRegistry,
+      projectRegistry,
       context,
     });
     if (!existingWorkspace || existingWorkspace.archivedAt) return;
@@ -1068,13 +1069,17 @@ export async function createPaseoDaemon(
     cwd: string,
     firstAgentContext?: FirstAgentContext,
   ): Promise<string> => {
+    let created = false;
     const workspace = await workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
       title: resolveFirstAgentPromptTitle(firstAgentContext),
       expectsInitialAgent: Boolean(firstAgentContext),
       excludeWorktrees: true,
       reuseArchived: false,
+      onResult: (didCreate) => {
+        created = didCreate;
+      },
     });
-    if (firstAgentContext) {
+    if (firstAgentContext && created) {
       workspaceAutoName.scheduleForDirectory({
         workspaceId: workspace.workspaceId,
         cwd: workspace.cwd,

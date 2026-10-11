@@ -319,10 +319,7 @@ describe("workspace registries", () => {
 
     expect(second).toEqual(first);
     expect(await projectRegistry.list()).toEqual([first]);
-  });
 
-  test("prefers an active project with the same project key across different roots", async () => {
-    await projectRegistry.initialize();
     const rootPath = path.join(tmpDir, "main");
     const matching = await projectRegistry.getOrCreateActiveByRoot({
       rootPath,
@@ -341,7 +338,7 @@ describe("workspace registries", () => {
 
     expect(reused.projectId).toBe(matching.projectId);
     expect(reused.rootPath).toBe(rootPath);
-    expect(await projectRegistry.list()).toHaveLength(1);
+    expect(await projectRegistry.list()).toHaveLength(2);
   });
 
   test("reuses a project across lexical and symlink root spellings", async () => {

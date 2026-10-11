@@ -188,7 +188,7 @@ import type { HubExecutionAgents } from "./hub/daemon-executions.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { PushNotifications } from "./push/index.js";
 import {
-  archivePersistedWorkspaceRecord,
+  archiveWorkspaceAndEmptyProject,
   archiveWorkspaceContents,
 } from "./workspace-archive-service.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
@@ -5990,10 +5990,11 @@ export class Session {
 
   private async archiveWorkspaceRecord(workspaceId: string, archivedAt?: string): Promise<void> {
     const archiveTimestamp = archivedAt ?? new Date().toISOString();
-    const existingWorkspace = await archivePersistedWorkspaceRecord({
+    const existingWorkspace = await archiveWorkspaceAndEmptyProject({
       workspaceId,
       archivedAt: archiveTimestamp,
       workspaceRegistry: this.workspaceRegistry,
+      projectRegistry: this.projectRegistry,
     });
     if (!existingWorkspace) {
       this.workspaceGitObserver.removeForWorkspaceId(workspaceId);
@@ -6004,9 +6005,6 @@ export class Session {
       const activeSiblings = (await this.workspaceRegistry.list()).filter(
         (workspace) => workspace.projectId === existingWorkspace.projectId && !workspace.archivedAt,
       );
-      if (activeSiblings.length === 0) {
-        await this.projectRegistry.archive(existingWorkspace.projectId, archiveTimestamp);
-      }
       this.sessionLogger.info(
         {
           workspaceId,
@@ -6752,19 +6750,38 @@ export class Session {
 
     const explicitTitle = request.title?.trim() || null;
     const promptTitle = resolveFirstAgentPromptTitle(request.firstAgentContext);
-    const workspace = await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
-      title: explicitTitle ?? promptTitle,
-      projectId: request.source.projectId,
-      expectsInitialAgent: Boolean(request.firstAgentContext),
-      workspaceId,
-      reuseArchived: false,
-    });
+    let created = Boolean(request.workspaceId);
+    let workspace = request.workspaceId
+      ? await this.workspaceProvisioning.createWorkspaceForDirectory(
+          cwd,
+          explicitTitle ?? promptTitle,
+          request.source.projectId,
+          { expectsInitialAgent: Boolean(request.firstAgentContext), workspaceId },
+        )
+      : await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
+          title: explicitTitle ?? promptTitle,
+          projectId: request.source.projectId,
+          expectsInitialAgent: Boolean(request.firstAgentContext),
+          workspaceId,
+          reuseArchived: false,
+          onResult: (didCreate) => {
+            created = didCreate;
+          },
+        });
+    if (!created && explicitTitle && workspace.title !== explicitTitle) {
+      workspace = { ...workspace, title: explicitTitle, updatedAt: new Date().toISOString() };
+      await this.workspaceRegistry.upsert(workspace);
+    }
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
-    await this.emitCreatedWorkspaceUpdate(
-      descriptor,
-      request.firstAgentContext ? "running" : undefined,
-    );
+    if (created) {
+      await this.emitCreatedWorkspaceUpdate(
+        descriptor,
+        request.firstAgentContext ? "running" : undefined,
+      );
+    } else {
+      await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
+    }
     void this.workspaceGitService
       .getSnapshot(workspace.cwd, { force: true, includeForge: true, reason: "open_project" })
       .catch((error) => {
@@ -6773,7 +6790,7 @@ export class Session {
           "Background snapshot refresh failed after workspace.create",
         );
       });
-    if (request.firstAgentContext) {
+    if (request.firstAgentContext && created) {
       const firstAgentContext = request.firstAgentContext;
       this.workspaceAutoName.scheduleForDirectory(
         {

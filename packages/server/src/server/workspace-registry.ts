@@ -19,6 +19,28 @@ const UntrustedWorkspaceSourceSchema = z.object({
   headRepository: z.string(),
 });
 
+const workspaceLifecycleLocks = new WeakMap<WorkspaceRegistry, Promise<void>>();
+
+/** Serialize workspace allocation and last-workspace project archival across session instances. */
+export async function withWorkspaceLifecycleLock<T>(
+  registry: WorkspaceRegistry,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = workspaceLifecycleLocks.get(registry);
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => {
+    release = resolveLock;
+  });
+  workspaceLifecycleLocks.set(registry, current);
+  if (previous) await previous;
+  try {
+    return await operation();
+  } finally {
+    if (workspaceLifecycleLocks.get(registry) === current) workspaceLifecycleLocks.delete(registry);
+    release();
+  }
+}
+
 const PersistedProjectRecordSchema = z.object({
   projectId: z.string(),
   rootPath: z.string(),

@@ -12,6 +12,7 @@ import {
 } from "../../workspace-registry-model.js";
 import {
   createPersistedWorkspaceRecord,
+  withWorkspaceLifecycleLock,
   type PersistedProjectRecord,
   type PersistedWorkspaceRecord,
   type ProjectRegistry,
@@ -61,14 +62,7 @@ export interface WorkspaceProvisioningService {
   ): Promise<ImportWorkspaceResult<T>>;
   findOrCreateWorkspaceForDirectory(
     cwd: string,
-    options?: {
-      title?: string | null;
-      projectId?: string;
-      expectsInitialAgent?: boolean;
-      workspaceId?: string;
-      excludeWorktrees?: boolean;
-      reuseArchived?: boolean;
-    },
+    options?: FindOrCreateWorkspaceOptions,
   ): Promise<PersistedWorkspaceRecord>;
   resolveOrCreateWorkspaceIdForCreateAgent(input: ResolveOrCreateWorkspaceIdInput): Promise<string>;
   createWorkspaceForDirectory(
@@ -84,6 +78,16 @@ export interface WorkspaceProvisioningService {
   ensureWorkspaceRecordUnarchived(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord>;
+}
+
+interface FindOrCreateWorkspaceOptions {
+  title?: string | null;
+  projectId?: string;
+  expectsInitialAgent?: boolean;
+  workspaceId?: string;
+  excludeWorktrees?: boolean;
+  reuseArchived?: boolean;
+  onResult?: (created: boolean) => void;
 }
 
 export type WorkspaceProvisioningErrorCode = "unknown_project" | "archived_project";
@@ -102,6 +106,8 @@ export class WorkspaceProvisioningError extends Error {
   }
 }
 
+const workspaceLookupLocksByRegistry = new WeakMap<WorkspaceRegistry, Map<string, Promise<void>>>();
+
 export function createWorkspaceProvisioningService(deps: {
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
@@ -112,7 +118,9 @@ export function createWorkspaceProvisioningService(deps: {
   lifecycle?: PluginLifecycle;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
-  const workspaceLookupLocks = new Map<string, Promise<void>>();
+  const workspaceLookupLocks =
+    workspaceLookupLocksByRegistry.get(workspaceRegistry) ?? new Map<string, Promise<void>>();
+  workspaceLookupLocksByRegistry.set(workspaceRegistry, workspaceLookupLocks);
 
   async function withWorkspaceLookupLock<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
     let lockKey: string;
@@ -250,7 +258,7 @@ export function createWorkspaceProvisioningService(deps: {
     return project;
   }
 
-  async function createWorkspaceForDirectory(
+  async function createWorkspaceForDirectoryUnlocked(
     cwd: string,
     title?: string | null,
     projectId?: string,
@@ -276,7 +284,18 @@ export function createWorkspaceProvisioningService(deps: {
     return workspace;
   }
 
-  async function createWorkspaceForWorktree(
+  async function createWorkspaceForDirectory(
+    cwd: string,
+    title?: string | null,
+    projectId?: string,
+    context?: { expectsInitialAgent?: boolean; workspaceId?: string },
+  ): Promise<PersistedWorkspaceRecord> {
+    return withWorkspaceLifecycleLock(workspaceRegistry, () =>
+      createWorkspaceForDirectoryUnlocked(cwd, title, projectId, context),
+    );
+  }
+
+  async function createWorkspaceForWorktreeUnlocked(
     input: CreateWorktreeWorkspaceInput,
   ): Promise<PersistedWorkspaceRecord> {
     const sourceCwd = resolve(input.sourceCwd);
@@ -310,6 +329,14 @@ export function createWorkspaceProvisioningService(deps: {
     });
     deps.lifecycle?.emit("workspace.created", { workspace: describeHookWorkspace(workspace) });
     return workspace;
+  }
+
+  async function createWorkspaceForWorktree(
+    input: CreateWorktreeWorkspaceInput,
+  ): Promise<PersistedWorkspaceRecord> {
+    return withWorkspaceLifecycleLock(workspaceRegistry, () =>
+      createWorkspaceForWorktreeUnlocked(input),
+    );
   }
 
   async function resolveSourceProjectForWorktree(input: {
@@ -355,54 +382,64 @@ export function createWorkspaceProvisioningService(deps: {
 
   async function findOrCreateWorkspaceForDirectory(
     cwd: string,
-    options?: {
-      title?: string | null;
-      projectId?: string;
-      expectsInitialAgent?: boolean;
-      workspaceId?: string;
-      excludeWorktrees?: boolean;
-      reuseArchived?: boolean;
-    },
+    options?: FindOrCreateWorkspaceOptions,
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
-    return withWorkspaceLookupLock(normalizedCwd, async () => {
-      if (options?.projectId) await requireActiveProject(options.projectId);
-      const matchesCwd = createRealpathAwarePathMatcher(normalizedCwd);
-      const isEligible = (workspace: PersistedWorkspaceRecord) =>
-        (!options?.projectId || workspace.projectId === options.projectId) &&
-        (!options?.excludeWorktrees ||
-          (workspace.kind !== "worktree" &&
-            !workspace.isPaseoOwnedWorktree &&
-            !(workspace.worktreeRoot && workspace.mainRepoRoot))) &&
-        matchesCwd(workspace.cwd);
-      const workspaces = await workspaceRegistry.list();
-      const active = workspaces
-        .filter((workspace) => !workspace.archivedAt && isEligible(workspace))
-        .sort(
-          (left, right) =>
-            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-            left.workspaceId.localeCompare(right.workspaceId),
-        )[0];
-      if (active) return refreshWorkspaceRecord(active);
-      const archived =
-        options?.reuseArchived === false
-          ? null
-          : workspaces
-              .filter((workspace) => workspace.archivedAt && isEligible(workspace))
-              .sort(
-                (left, right) =>
-                  Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-                  left.workspaceId.localeCompare(right.workspaceId),
-              )[0];
-      if (archived) {
-        const project = await projectRegistry.get(archived.projectId);
-        if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
-      }
-      return createWorkspaceForDirectory(normalizedCwd, options?.title, options?.projectId, {
-        expectsInitialAgent: options?.expectsInitialAgent,
-        workspaceId: options?.workspaceId,
-      });
-    });
+    return withWorkspaceLookupLock(normalizedCwd, () =>
+      withWorkspaceLifecycleLock(workspaceRegistry, async () => {
+        if (options?.projectId) await requireActiveProject(options.projectId);
+        const matchesCwd = createRealpathAwarePathMatcher(normalizedCwd);
+        const isEligible = (workspace: PersistedWorkspaceRecord) =>
+          (!options?.projectId || workspace.projectId === options.projectId) &&
+          (!options?.excludeWorktrees ||
+            (workspace.kind !== "worktree" &&
+              !workspace.isPaseoOwnedWorktree &&
+              !(workspace.worktreeRoot && workspace.mainRepoRoot))) &&
+          matchesCwd(workspace.cwd);
+        const workspaces = await workspaceRegistry.list();
+        const active = workspaces
+          .filter((workspace) => !workspace.archivedAt && isEligible(workspace))
+          .sort(
+            (left, right) =>
+              Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+              left.workspaceId.localeCompare(right.workspaceId),
+          )[0];
+        if (active) {
+          const refreshed = await refreshWorkspaceRecord(active);
+          options?.onResult?.(false);
+          return refreshed;
+        }
+        const archived =
+          options?.reuseArchived === false
+            ? null
+            : workspaces
+                .filter((workspace) => workspace.archivedAt && isEligible(workspace))
+                .sort(
+                  (left, right) =>
+                    Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+                    left.workspaceId.localeCompare(right.workspaceId),
+                )[0];
+        if (archived) {
+          const project = await projectRegistry.get(archived.projectId);
+          if (project && !project.archivedAt) {
+            const reopened = await ensureWorkspaceRecordUnarchivedUnlocked(archived);
+            options?.onResult?.(false);
+            return reopened;
+          }
+        }
+        const created = await createWorkspaceForDirectoryUnlocked(
+          normalizedCwd,
+          options?.title,
+          options?.projectId,
+          {
+            expectsInitialAgent: options?.expectsInitialAgent,
+            workspaceId: options?.workspaceId,
+          },
+        );
+        options?.onResult?.(true);
+        return created;
+      }),
+    );
   }
 
   async function resolveOrCreateWorkspaceIdForCreateAgent(
@@ -452,7 +489,7 @@ export function createWorkspaceProvisioningService(deps: {
       : workspace.autoArchivedChangeRequestUrl;
   }
 
-  async function ensureWorkspaceRecordUnarchived(
+  async function ensureWorkspaceRecordUnarchivedUnlocked(
     workspace: PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord> {
     const project = await projectRegistry.get(workspace.projectId);
@@ -504,6 +541,14 @@ export function createWorkspaceProvisioningService(deps: {
     if (!next) return workspace;
     await workspaceRegistry.upsert(next);
     return next;
+  }
+
+  async function ensureWorkspaceRecordUnarchived(
+    workspace: PersistedWorkspaceRecord,
+  ): Promise<PersistedWorkspaceRecord> {
+    return withWorkspaceLifecycleLock(workspaceRegistry, () =>
+      ensureWorkspaceRecordUnarchivedUnlocked(workspace),
+    );
   }
 
   async function refreshWorkspaceRecord(

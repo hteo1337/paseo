@@ -9381,6 +9381,31 @@ test("workspace.create.response persists the first prompt as the initial title",
   const persisted = await session.workspaceRegistry.get(workspaceId as string);
   expect(persisted?.title).toBe("Add retries to the payments flow");
   expect(filterByType(emitted, "workspace_update")).toHaveLength(1);
+
+  emitted.length = 0;
+  await session.handleMessage({
+    type: "workspace.create.request",
+    requestId: "req-reuse-first-prompt",
+    source: { kind: "directory", path: REPO_CWD },
+    title: "Manual title",
+    firstAgentContext: { prompt: "A later prompt must not rename this workspace" },
+  });
+  expect(findByType(emitted, "workspace.create.response")?.payload.workspace?.id).toBe(workspaceId);
+  expect((await session.workspaceRegistry.get(workspaceId as string))?.title).toBe("Manual title");
+  expect(workspaces.size).toBe(1);
+
+  emitted.length = 0;
+  const explicitWorkspaceId = "wks_aaaaaaaaaaaaaaaa";
+  await session.handleMessage({
+    type: "workspace.create.request",
+    requestId: "req-explicit-workspace-id",
+    workspaceId: explicitWorkspaceId,
+    source: { kind: "directory", path: REPO_CWD },
+  });
+  expect(findByType(emitted, "workspace.create.response")?.payload.workspace?.id).toBe(
+    explicitWorkspaceId,
+  );
+  expect(workspaces.size).toBe(2);
 });
 
 test("workspace create emits through a matching workspace subscription", async () => {
