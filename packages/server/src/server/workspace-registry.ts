@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
-import { areEquivalentPaths } from "../utils/path.js";
+import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../utils/path.js";
 import {
   generateProjectId,
   type PersistedProjectKind,
@@ -163,6 +163,10 @@ export interface WorkspaceRegistry {
     updater: (record: PersistedWorkspaceRecord) => PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord | null>;
   upsert(record: PersistedWorkspaceRecord, context?: WorkspaceMutationContext): Promise<void>;
+  getOrCreateActiveByCwd(
+    record: PersistedWorkspaceRecord,
+    context?: WorkspaceMutationContext,
+  ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }>;
   archive(
     workspaceId: string,
     archivedAt: string,
@@ -563,6 +567,35 @@ export class FileBackedWorkspaceRegistry
       workspace: record,
       ...(context?.expectsInitialAgent ? { expectsInitialAgent: true } : {}),
     });
+  }
+
+  async getOrCreateActiveByCwd(
+    record: PersistedWorkspaceRecord,
+    context?: WorkspaceMutationContext,
+  ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }> {
+    const parsed = PersistedWorkspaceRecordSchema.parse(record);
+    const matchesCwd = createRealpathAwarePathMatcher(parsed.cwd);
+    const result = await this.mutateCache((records) => {
+      const existing = Array.from(records.values())
+        .filter((candidate) => !candidate.archivedAt && matchesCwd(candidate.cwd))
+        .sort(
+          (left, right) =>
+            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+            left.workspaceId.localeCompare(right.workspaceId),
+        )[0];
+      if (existing) return { workspace: existing, created: false };
+      records.set(parsed.workspaceId, parsed);
+      return { workspace: parsed, created: true };
+    });
+    if (result.created) {
+      await this.notifyMutation({
+        kind: "upsert",
+        workspaceId: result.workspace.workspaceId,
+        workspace: result.workspace,
+        ...(context?.expectsInitialAgent ? { expectsInitialAgent: true } : {}),
+      });
+    }
+    return result;
   }
 
   override async archive(
