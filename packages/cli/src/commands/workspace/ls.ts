@@ -9,6 +9,7 @@ import {
 } from "./shared.js";
 
 export interface WorkspaceLsOptions {
+  group?: string;
   host?: string;
   daemonTarget: import("../../utils/daemon-target.js").DaemonTarget;
   /** --background: Include background workspaces */
@@ -40,7 +41,9 @@ export async function runLsCommand(
     } while (cursor);
     return {
       type: "list",
-      data: workspaces,
+      data: options.group
+        ? workspaces.filter((workspace) => workspace.group?.name === options.group)
+        : workspaces,
       schema: options.background ? workspaceWithBackgroundSchema : workspaceSchema,
     };
   } finally {
