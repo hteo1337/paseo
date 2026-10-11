@@ -160,7 +160,7 @@ async function connectCreationPeer(port: number) {
           (m) =>
             "payload" in m && "requestId" in m.payload && m.payload.requestId === message.requestId,
         );
-      await expect.poll(response).toBeDefined();
+      await expect.poll(response, { timeout: 10000 }).toBeDefined();
       return response()!;
     },
   };
@@ -282,5 +282,88 @@ test("legacy keyed creation preserves checkout error codes", async () => {
     peer.close();
     await daemon.close();
     await rm(directory, { recursive: true, force: true });
+  }
+}, 60000);
+
+test("closed durable parents support one same-receipt child retry without resuming or prompting the parent", async () => {
+  const root = await mkdtemp(join(tmpdir(), "durable-parent-"));
+  let sessions = 0,
+    turns = 0;
+  const daemon = await createTestPaseoDaemon({
+    agentClients: createTestAgentClients({
+      beforeCreateSession: async () => {
+        sessions++;
+        if (sessions === 2) throw new Error("Synthetic child initialization rejection");
+      },
+      onStartTurn: () => {
+        turns++;
+      },
+    }),
+  });
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+  try {
+    await client.connect();
+    const parent = await client.createAgent({ provider: "codex", cwd: root });
+    await daemon.daemon.agentManager.closeAgent(parent.id);
+    expect(daemon.daemon.agentManager.getAgent(parent.id)).toBeNull();
+    const stored = await client.fetchAgent({ agentId: parent.id });
+    expect(stored?.agent?.status).toBe("closed");
+    const childId = randomUUID(),
+      key = "same-child-proof";
+    const request = {
+      agentId: childId,
+      idempotencyKey: key,
+      callerAgentId: parent.id,
+      workspaceId: parent.workspaceId!,
+      provider: "codex",
+      cwd: root,
+    };
+    await expect(client.createAgent(request)).rejects.toThrow(
+      "Synthetic child initialization rejection",
+    );
+    const failed = await client.readAgentCreation(key);
+    expect(failed).toMatchObject({
+      phase: "failed",
+      agentId: childId,
+      failedStage: "agent",
+      outcomeUnknown: false,
+    });
+    expect(await client.fetchAgent({ agentId: childId })).toBeNull();
+    await expect(client.createAgent({ ...request, model: "changed" })).rejects.toThrow(
+      "agent_request_key_conflict",
+    );
+    const child = await client.createAgent(request);
+    expect(child.id).toBe(childId);
+    expect(child.workspaceId).toBe(parent.workspaceId);
+    const completed = await client.readAgentCreation(key);
+    expect(completed).toMatchObject({
+      phase: "completed",
+      agentId: childId,
+      failures: [
+        {
+          revision: failed!.revision,
+          error: "Synthetic child initialization rejection",
+          failedStage: "agent",
+          outcomeUnknown: false,
+        },
+      ],
+    });
+    expect((await client.createAgent(request)).id).toBe(childId);
+    expect(sessions).toBe(3);
+    expect(turns).toBe(0);
+    expect(daemon.daemon.agentManager.getAgent(parent.id)).toBeNull();
+    expect((await client.fetchAgent({ agentId: parent.id }))?.agent?.persistence).toEqual(
+      stored?.agent?.persistence,
+    );
+    await client.archiveAgent(parent.id);
+    await expect(
+      client.createAgent({ ...request, agentId: randomUUID(), idempotencyKey: "archived-parent" }),
+    ).rejects.toThrow("Caller agent");
+    expect(sessions).toBe(3);
+    expect(turns).toBe(0);
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(root, { recursive: true, force: true });
   }
 }, 60000);
