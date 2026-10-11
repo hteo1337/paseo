@@ -48,8 +48,31 @@ npm run build --workspace=@getpaseo/expo-two-way-audio
 npm run build:main --workspace=@getpaseo/desktop
 ```
 
-4. Package/sign/notarize with the first rollout's verified v0.11.2 pipeline; preserve local-build.json's baseTag/head/seriesHash provenance. Validate the resulting signed bundle and install/restart using the rollout owner's existing procedure, serially on m5 then m4. The inspected m4 ~/.claude-setup/bin/paseo-patched-update.sh currently reads the ROOT v0.10.3 series and its library requires the clone root; it does not select v0.11 as README claims. Do not invoke it blindly for this series or point it to a subfolder its guard rejects. Owner was notified. This grouping patch does not modify installer tooling.
-5. After startup, inspect group JSON and migrated names. Configure ordered automatic rules below, after inspecting existing rule IDs. CLI flags omitted preserve the daemon's latest group defaults. Manual set/unset wins over all rules; metadata updates apply to every same-name member/rule. Platform rule must precede the broader company rule. Fleet tooling path/owner must come from the reviewed mapping, not a blanket directory guess.
+4. Package/sign/notarize with the first rollout's verified v0.11.2 signing configuration. Before packaging, write the marker from the exact applied series:
+
+```sh
+python3 - "$PATCH_REPO" "$BUILD_DIR" <<'PY_MARKER'
+import datetime, hashlib, json, subprocess, sys
+from pathlib import Path
+patches, build = map(Path, sys.argv[1:])
+series = (patches / 'v0.11/series').read_bytes()
+payloads = [line for line in series.decode().splitlines() if line.strip() and not line.startswith('#')]
+digest = hashlib.sha256(series + b''.join((patches / 'v0.11' / name).read_bytes() for name in payloads)).hexdigest()[:16]
+head = subprocess.check_output(['git', '-C', str(build), 'rev-parse', 'HEAD'], text=True).strip()
+marker = {'localBuild': True, 'baseTag': 'v0.11.2', 'seriesHash': digest, 'head': head,
+          'builtAt': datetime.datetime.now().astimezone().isoformat(timespec='seconds')}
+(build / 'packages/desktop/assets/local-build.json').write_text(json.dumps(marker, indent=2))
+PY_MARKER
+(cd "$BUILD_DIR/packages/desktop" && npx electron-builder --config electron-builder.yml --mac --arm64)
+BUILT="$BUILD_DIR/packages/desktop/release/mac-arm64/Paseo.app"
+node "$PATCH_REPO/validation/mac-signing.js" "$BUILT"
+# Rollout owner only, after checkpointing agents and verifying the signed bundle/marker:
+~/.claude-setup/bin/paseo-patched-update.sh --install-app "$BUILT" --wait
+# Transfer the verified bundle to m4 with the first rollout's procedure, run the same validator,
+# then run --install-app <transferred-bundle> --wait on m4.
+```
+
+The prebuilt --install-app path was inspected: it bypasses root-series build selection, checks the bundle marker/signature, waits for idle and validates installed asar equality. This task did not run the packaging/signing/install commands. Preserve local-build.json's baseTag/head/seriesHash provenance. Validate the resulting signed bundle and install/restart using the rollout owner's existing procedure, serially on m5 then m4. The inspected m4 ~/.claude-setup/bin/paseo-patched-update.sh currently reads the ROOT v0.10.3 series and its library requires the clone root; it does not select v0.11 as README claims. Do not invoke it blindly for this series or point it to a subfolder its guard rejects. Owner was notified. This grouping patch does not modify installer tooling. 5. After startup, inspect group JSON and migrated names. Configure ordered automatic rules below, after inspecting existing rule IDs. CLI flags omitted preserve the daemon's latest group defaults. Manual set/unset wins over all rules; metadata updates apply to every same-name member/rule. Platform rule must precede the broader company rule. Fleet tooling path/owner must come from the reviewed mapping, not a blanket directory guess.
 
 ```sh
 paseo project group ls --json
