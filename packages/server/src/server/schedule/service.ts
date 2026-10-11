@@ -994,6 +994,7 @@ export class ScheduleService {
       const runConfig = { ...config, cwd: workspace.cwd };
       const created = await this.createAgent({
         kind: "mcp",
+        creationSource: "system",
         provider: formatScheduleProviderModel(runConfig),
         config: buildScheduleAgentConfig(runConfig),
         cwd: workspace.cwd,
