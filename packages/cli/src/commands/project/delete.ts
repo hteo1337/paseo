@@ -21,7 +21,7 @@ const projectDeleteSchema = {
 
 export async function runDeleteCommand(
   projectId: string,
-  options: CommandOptions,
+  options: CommandOptions & { ifEmpty?: boolean },
   _command: Command,
 ): Promise<SingleResult<ProjectDeleteResult>> {
   const client = await connectToDaemon({ target: options.daemonTarget }).catch((error: unknown) => {
@@ -29,7 +29,7 @@ export async function runDeleteCommand(
   });
 
   try {
-    const result = await client.removeProject(projectId);
+    const result = await client.removeProject(projectId, undefined, { ifEmpty: options.ifEmpty });
     return {
       type: "single",
       data: { projectId, removedWorkspaceIds: result.removedWorkspaceIds },
