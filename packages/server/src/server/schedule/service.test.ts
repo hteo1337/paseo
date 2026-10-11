@@ -1196,6 +1196,7 @@ describe("ScheduleService", () => {
     await service.tick();
 
     expect(createdInputs).toHaveLength(1);
+    expect(createdInputs[0].creationSource).toBe("system");
     expect(createdInputs[0].initialPrompt).toBeUndefined();
     expect(runPrompts).toEqual(["/compact"]);
     const inspected = await service.inspect(created.id);
