@@ -152,11 +152,22 @@ export interface PluginHookEvents {
   "workspace.archive.after": { workspace: PluginHookWorkspace };
 }
 
+export interface PluginAgentCreation {
+  /** Server-derived entry point; operator UI creates carry direct=operator. */
+  source: "cli" | "agent" | "system";
+  callerAgentId: string | null;
+  labels: Record<string, string>;
+}
+
 export interface PluginHookRequests {
   "agent.set_model": PluginSetModelRequest;
   "agent.session_opened": PluginSessionOpenedRequest;
   "worktree.create.before": PluginWorktreeCreateRequest;
-  "agent.create.before": { config: AgentSessionConfig; env?: Record<string, string> };
+  "agent.create.before": {
+    config: AgentSessionConfig;
+    env?: Record<string, string>;
+    creation?: PluginAgentCreation;
+  };
   "agent.open.before": PluginSessionOpenRequest;
   "workspace.create.before": Omit<WorkspaceCreateRequest, "type" | "requestId">;
   "agent.turn_start": PluginTurnStartRequest;
