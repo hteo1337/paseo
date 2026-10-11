@@ -3841,8 +3841,11 @@ export class Session {
       const activeWorkspaceIds = projectWorkspaces
         .filter((workspace) => !workspace.archivedAt)
         .map((workspace) => workspace.workspaceId);
-      if (request.ifEmpty && projectWorkspaces.length > 0) {
+      if (request.ifEmpty && !request.ifNoActiveWorkspaces && projectWorkspaces.length > 0) {
         throw new Error(`Project has workspaces: ${projectId}`);
+      }
+      if (request.ifNoActiveWorkspaces && activeWorkspaceIds.length > 0) {
+        throw new Error(`Project has active workspaces: ${projectId}`);
       }
 
       if (activeWorkspaceIds.length > 0) {
@@ -3867,7 +3870,7 @@ export class Session {
           removedWorkspaceIds.push(workspaceId);
         }
 
-        if (request.ifEmpty) {
+        if (request.ifEmpty || request.ifNoActiveWorkspaces) {
           if (!this.workspaceRegistry.removeProjectIfUnreferenced) {
             throw new Error("Guarded project removal is unavailable");
           }
@@ -3875,6 +3878,7 @@ export class Session {
             resolvedProjectId,
             () => this.projectRegistry.remove(resolvedProjectId),
             async () => Boolean(await this.projectRegistry.get(resolvedProjectId)),
+            { allowArchivedReferences: request.ifNoActiveWorkspaces === true },
           );
           if (!removed) throw new Error(`Project gained a workspace: ${projectId}`);
         } else {
