@@ -1,6 +1,6 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
-import { basename, dirname, join, resolve } from "node:path";
+import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
 import { existsSync, realpathSync } from "node:fs";
 import { homedir } from "node:os";
 import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
@@ -205,22 +205,62 @@ export function createWorkspaceProvisioningService(deps: {
   }
 
   async function findOrCreateProjectForDirectory(cwd: string): Promise<PersistedProjectRecord> {
-    const rootPath = resolve(cwd);
-    const checkout = await workspaceGitService.getCheckout(rootPath);
+    const requestedPath = resolve(cwd);
+    const checkout = await workspaceGitService.getCheckout(requestedPath);
+    const checkoutProjectRoot = projectRootForCheckout(requestedPath, checkout);
+    const projectKey = deriveProjectKey({
+      rootPath: checkoutProjectRoot,
+      remoteUrl: checkout.remoteUrl,
+      worktreeRoot:
+        checkout.isGit && checkout.mainRepoRoot ? checkout.mainRepoRoot : checkout.worktreeRoot,
+      mainRepoRoot: checkout.mainRepoRoot,
+      serverId,
+    });
+    // Standalone review clones have their own Git common dir. Join an already
+    // registered checkout of the same remote, preferring the shortest root
+    // (the main checkout is usually shallower than a review clone).
+    const remotePeers =
+      checkout.isGit && checkout.remoteUrl && !checkout.mainRepoRoot
+        ? (await projectRegistry.list()).filter(
+            (project) =>
+              !project.archivedAt &&
+              project.kind === "git" &&
+              project.projectKey === projectKey &&
+              existsSync(project.rootPath),
+          )
+        : [];
+    const rootPath = checkout.mainRepoRoot
+      ? checkoutProjectRoot
+      : [checkoutProjectRoot, ...remotePeers.map((project) => project.rootPath)].sort(
+          (left, right) =>
+            left.split(sep).length - right.split(sep).length ||
+            left.length - right.length ||
+            left.localeCompare(right),
+        )[0];
     const timestamp = new Date().toISOString();
     return projectRegistry.getOrCreateActiveByRoot({
       rootPath,
       kind: checkout.isGit ? "git" : "non_git",
       displayName: basename(rootPath) || rootPath,
-      projectKey: deriveProjectKey({
-        rootPath,
-        remoteUrl: checkout.remoteUrl,
-        worktreeRoot: checkout.worktreeRoot,
-        mainRepoRoot: checkout.mainRepoRoot,
-        serverId,
-      }),
+      projectKey,
       timestamp,
     });
+  }
+
+  function projectRootForCheckout(cwd: string, checkout: ProjectCheckoutLitePayload): string {
+    // mainRepoRoot is derived from Git's common dir, so a linked worktree's
+    // folder name cannot turn it into a separate top-level project.
+    if (!checkout.isGit) return cwd;
+    const checkoutRoot = resolve(checkout.worktreeRoot ?? cwd);
+    const withinCheckout = relative(checkoutRoot, cwd);
+    if (
+      withinCheckout === ".." ||
+      withinCheckout.startsWith(`..${sep}`) ||
+      isAbsolute(withinCheckout)
+    ) {
+      return cwd;
+    }
+    return resolve(checkout.mainRepoRoot ?? checkoutRoot);
   }
 
   async function requireActiveProject(projectId: string): Promise<PersistedProjectRecord> {
@@ -254,10 +294,19 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     const checkout = await workspaceGitService.getCheckout(normalizedCwd);
-    const project = projectId
-      ? await refreshProjectKind(await requireActiveProject(projectId), normalizedCwd, checkout)
-      : // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
-        await findOrCreateProjectForDirectory(normalizedCwd);
+    const managedGitCheckout =
+      checkout.isGit && Boolean(checkout.mainRepoRoot || checkout.remoteUrl);
+    let project: PersistedProjectRecord;
+    if (managedGitCheckout || !projectId) {
+      // COMPAT(workspaceCreateMissingProjectId): added in v0.1.107, remove after 2027-01-15.
+      project = await findOrCreateProjectForDirectory(normalizedCwd);
+    } else {
+      project = await refreshProjectKind(
+        await requireActiveProject(projectId),
+        normalizedCwd,
+        checkout,
+      );
+    }
     const timestamp = new Date().toISOString();
     const workspace = createPersistedWorkspaceRecord({
       workspaceId: context?.workspaceId ?? generateWorkspaceId(),
@@ -268,7 +317,10 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
       background: await resolveBackground(context),
     });
-    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, { expectsInitialAgent: context?.expectsInitialAgent });
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, {
+      expectsInitialAgent: context?.expectsInitialAgent,
+      ...(managedGitCheckout || !projectId ? { rehomeProjectId: project.projectId } : {}),
+    });
     if (claimed.created) {
       emitWorkspaceCreated(claimed.workspace);
     }
