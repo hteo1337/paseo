@@ -497,6 +497,11 @@ export function createPluginWorker(options: {
       type: "ready",
       methods: [...handlers.keys()].sort(),
       subscriptions: subscriptions.catalog(),
+      rpcAuthorizations: Object.fromEntries(
+        [...handlers.entries()]
+          .filter(([, registered]) => registered.contract.authorization)
+          .map(([method, registered]) => [method, registered.contract.authorization!]),
+      ),
       hooks: hooks.catalog(),
       worktreeManager: worktreeManagerCapabilities(),
       providers: [...providers.values()]
