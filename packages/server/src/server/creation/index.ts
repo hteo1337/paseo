@@ -46,6 +46,17 @@ const RecordSchema = z.object({
 });
 type Record = z.infer<typeof RecordSchema>;
 
+class CreationRetryLimitError extends Error {
+  readonly code = "creation_retry_limit";
+  constructor(
+    readonly identity: string,
+    readonly limit: number,
+  ) {
+    super("Creation retry audit limit reached");
+    this.name = "CreationRetryLimitError";
+  }
+}
+
 /** Owns creation across socket lifetimes. Resource owners perform work; this module commits its milestones. */
 export class CreationService {
   private admission: Promise<unknown> = Promise.resolve();
@@ -92,7 +103,9 @@ export class CreationService {
       }
       await this.claimResources(identity, record.snapshot, input);
       if (record.snapshot.phase === "failed") {
+        const failures = this.retryFailures(identity, record.snapshot);
         await this.publish(identity, record, {
+          failures,
           phase: record.snapshot.workspace ? "workspace_ready" : "accepted",
           error: null,
           errorCode: undefined,
@@ -120,6 +133,21 @@ export class CreationService {
     } finally {
       unsubscribe();
     }
+  }
+
+  private retryFailures(identity: string, snapshot: CreationSnapshot) {
+    const failures = snapshot.failures ?? [];
+    if (failures.length >= 32) throw new CreationRetryLimitError(identity, 32);
+    return [
+      ...failures,
+      {
+        revision: snapshot.revision,
+        failedStage: snapshot.failedStage ?? ("agent" as const),
+        error: snapshot.error ?? "Creation failed",
+        errorCode: snapshot.errorCode,
+        outcomeUnknown: snapshot.outcomeUnknown === true,
+      },
+    ];
   }
 
   async subscribe(
