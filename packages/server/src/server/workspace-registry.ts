@@ -118,6 +118,7 @@ export interface WorkspaceMutation {
 
 export interface WorkspaceMutationContext {
   expectsInitialAgent?: boolean;
+  rehomeProjectId?: string;
 }
 
 export interface WorkspaceArchiveContext {
@@ -583,11 +584,22 @@ export class FileBackedWorkspaceRegistry
             Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
             left.workspaceId.localeCompare(right.workspaceId),
         )[0];
-      if (existing) return { workspace: existing, created: false };
+      if (existing) {
+        if (context?.rehomeProjectId && existing.projectId !== context.rehomeProjectId) {
+          const updated = {
+            ...existing,
+            projectId: context.rehomeProjectId,
+            updatedAt: new Date().toISOString(),
+          };
+          records.set(existing.workspaceId, updated);
+          return { workspace: updated, created: false, updated: true };
+        }
+        return { workspace: existing, created: false, updated: false };
+      }
       records.set(parsed.workspaceId, parsed);
-      return { workspace: parsed, created: true };
+      return { workspace: parsed, created: true, updated: false };
     });
-    if (result.created) {
+    if (result.created || result.updated) {
       await this.notifyMutation({
         kind: "upsert",
         workspaceId: result.workspace.workspaceId,
@@ -595,7 +607,7 @@ export class FileBackedWorkspaceRegistry
         ...(context?.expectsInitialAgent ? { expectsInitialAgent: true } : {}),
       });
     }
-    return result;
+    return { workspace: result.workspace, created: result.created };
   }
 
   override async archive(

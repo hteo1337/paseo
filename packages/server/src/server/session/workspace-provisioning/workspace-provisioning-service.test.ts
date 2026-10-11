@@ -44,6 +44,7 @@ async function isDirectory(target: string): Promise<boolean> {
 
 let tmpDir: string;
 let gitRoots: Set<string>;
+let gitMainRoots: Map<string, string>;
 let gitBranches: Map<string, string | null>;
 let checkoutFailure: Error | null;
 let restoredMergedChangeRequestUrl: string | null;
@@ -91,7 +92,7 @@ function gitService() {
         remoteUrl: null,
         worktreeRoot,
         isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
+        mainRepoRoot: worktreeRoot ? (gitMainRoots.get(worktreeRoot) ?? null) : null,
       };
     },
   });
@@ -100,6 +101,7 @@ function gitService() {
 beforeEach(async () => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), "workspace-provisioning-"));
   gitRoots = new Set();
+  gitMainRoots = new Map();
   gitBranches = new Map();
   checkoutFailure = null;
   restoredMergedChangeRequestUrl = null;
@@ -135,6 +137,113 @@ test("fresh git repo creates a workspace at the canonical worktree root", async 
   expect(workspace.cwd).toBe(repo);
   expect(await workspaceRegistry.list()).toHaveLength(1);
   expect(await projectRegistry.list()).toHaveLength(1);
+});
+
+test("linked worktrees share their git-common-dir project while another repo stays separate", async () => {
+  const mainRepo = path.join(tmpDir, "owner-repo");
+  const linked = path.join(tmpDir, "worktrees", "review");
+  const otherRepo = path.join(tmpDir, "other-repo");
+  for (const root of [mainRepo, linked, otherRepo]) {
+    mkdirSync(root, { recursive: true });
+    gitRoots.add(root);
+  }
+  gitMainRoots.set(linked, mainRepo);
+  expect((await gitService().getCheckout(linked)).mainRepoRoot).toBe(mainRepo);
+  expect((await gitService().getCheckout(otherRepo)).mainRepoRoot).toBeNull();
+
+  const mainWorkspace = await provisioning.createWorkspaceForDirectory(mainRepo);
+  const legacyProject = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: linked,
+    kind: "git",
+    displayName: "review",
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  const legacyWorkspace = createPersistedWorkspaceRecord({
+    workspaceId: "wks_legacy_linked",
+    projectId: legacyProject.projectId,
+    cwd: linked,
+    kind: "directory",
+    displayName: "review",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  await workspaceRegistry.upsert(legacyWorkspace);
+  const linkedWorkspace = await provisioning.createWorkspaceForDirectory(linked);
+  const explicitLegacy = await provisioning.createWorkspaceForDirectory(
+    linked,
+    null,
+    legacyProject.projectId,
+  );
+  const otherWorkspace = await provisioning.createWorkspaceForDirectory(otherRepo);
+
+  expect(linkedWorkspace.workspaceId).toBe(legacyWorkspace.workspaceId);
+  expect(explicitLegacy.projectId).toBe(mainWorkspace.projectId);
+  expect(linkedWorkspace.projectId).toBe(mainWorkspace.projectId);
+  expect(otherWorkspace.projectId).not.toBe(mainWorkspace.projectId);
+  expect((await projectRegistry.get(linkedWorkspace.projectId))?.rootPath).toBe(mainRepo);
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+  ).toHaveLength(3);
+});
+
+test("a review clone with the same remote rejoins its main project", async () => {
+  const main = path.join(tmpDir, "repo");
+  const clone = path.join(tmpDir, "reviews", "branch", "repo");
+  const other = path.join(tmpDir, "other");
+  for (const root of [main, clone, other]) mkdirSync(root, { recursive: true });
+  mkdirSync(path.join(clone, "src"));
+  const cloneProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    isDirectory,
+    logger,
+    workspaceGitService: createNoopWorkspaceGitService({
+      peekSnapshot: () => null,
+      getCheckout: async (cwd: string) => ({
+        cwd,
+        isGit: true,
+        currentBranch: "main",
+        remoteUrl:
+          cwd === other ? "https://github.com/acme/other.git" : "https://github.com/acme/repo.git",
+        worktreeRoot: cwd.startsWith(clone) ? clone : cwd,
+        isPaseoOwnedWorktree: false,
+        mainRepoRoot: null,
+      }),
+    }),
+  });
+  const mainWorkspace = await cloneProvisioning.createWorkspaceForDirectory(main);
+  const legacyCloneProject = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: clone,
+    kind: "git",
+    displayName: "repo",
+    projectKey: "remote:github.com/acme/repo",
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  await workspaceRegistry.upsert(
+    createPersistedWorkspaceRecord({
+      workspaceId: "wks_legacy_clone",
+      projectId: legacyCloneProject.projectId,
+      cwd: clone,
+      kind: "directory",
+      displayName: "repo",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }),
+  );
+
+  const joined = await cloneProvisioning.createWorkspaceForDirectory(
+    clone,
+    null,
+    legacyCloneProject.projectId,
+  );
+  const subdirectory = await cloneProvisioning.createWorkspaceForDirectory(path.join(clone, "src"));
+  const distinct = await cloneProvisioning.createWorkspaceForDirectory(other);
+
+  expect(joined.workspaceId).toBe("wks_legacy_clone");
+  expect(joined.projectId).toBe(mainWorkspace.projectId);
+  expect(subdirectory.projectId).toBe(mainWorkspace.projectId);
+  expect(distinct.projectId).not.toBe(mainWorkspace.projectId);
+  expect((await projectRegistry.get(mainWorkspace.projectId))?.rootPath).toBe(main);
 });
 
 test("fresh non-git directory creates a directory workspace at the exact path", async () => {
