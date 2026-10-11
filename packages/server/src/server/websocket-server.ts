@@ -1980,6 +1980,7 @@ export class VoiceAssistantWebSocketServer {
         // COMPAT(relayProtectedSecurity): added in v0.13.0, remove gate after 2027-04-21.
         relayProtectedSecurity: true,
         usageSources: true,
+        projectGroups: true,
         ownedSubscriptions: true,
         agentRequestReceipts: true,
         ...(this.keeperControl?.enabled ? { keeperControl: true } : {}),
