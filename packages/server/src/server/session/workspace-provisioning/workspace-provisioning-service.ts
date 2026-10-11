@@ -242,9 +242,13 @@ export function createWorkspaceProvisioningService(deps: {
       createdAt: timestamp,
       updatedAt: timestamp,
     });
-    await workspaceRegistry.upsert(workspace, context);
-    deps.lifecycle?.emit("workspace.created", { workspace: describeHookWorkspace(workspace) });
-    return workspace;
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, context);
+    if (claimed.created) {
+      deps.lifecycle?.emit("workspace.created", {
+        workspace: describeHookWorkspace(claimed.workspace),
+      });
+    }
+    return claimed.workspace;
   }
 
   async function createWorkspaceForWorktree(
@@ -276,11 +280,15 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
       ...(input.untrustedSource ? { untrustedSource: input.untrustedSource } : {}),
     });
-    await workspaceRegistry.upsert(workspace, {
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
     });
-    deps.lifecycle?.emit("workspace.created", { workspace: describeHookWorkspace(workspace) });
-    return workspace;
+    if (claimed.created) {
+      deps.lifecycle?.emit("workspace.created", {
+        workspace: describeHookWorkspace(claimed.workspace),
+      });
+    }
+    return claimed.workspace;
   }
 
   async function resolveSourceProjectForWorktree(input: {
