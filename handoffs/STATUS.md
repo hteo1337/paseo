@@ -95,3 +95,9 @@ Dispatch PR https://github.com/hteo1337/paseo-dispatch/pull/24 is separately own
 Teo advanced the 55-patch rollout to now. Dispatch PR #24 merged at 20:27 and dispatchd install is in progress; m4 health was unavailable at 20:29.
 Three running m5 peers received a three-minute commit/push/handoff/pause request at 20:28. Existing m5 wrapper PID 3895 is alive; updater child PID 4579 is paused; no install result exists.
 The superseded 23:00 wake job was removed. Resume only that updater after the checkpoint window and dispatch install; verify m5, then m4 and guarded repair. No rebuild/review repeat.
+
+## 2026-10-11 20:37 EEST m5 55-patch runtime
+
+Our waiting installer exited 1 before switching when its fleet JSON read returned empty during a concurrent updater. That updater installed signed v0.11.2 / series `35afe21e63eed092`, asar `56709818443e…`, with native addon present; workspace RPC returned 108 records and dispatchd health was ok/connected.
+Its applied Git tree `991ef0fa114825213cf8c3083317895b1e997ce1` equals our staged tree. Asar headers have 8,978 identical paths with one integrity difference, the separately built native addon; its signed installed binary loaded in the live daemon. No second m5 restart or rollback is warranted.
+The external updater is pushing the same build to m4 and waiting for agents. TH1-681 pushed and idled; TH1-672 still has uncommitted work after receiving a checkpoint request. Verify m4 after its install, then run disposable live-owner refusal and guarded repair before final counts.
