@@ -29,7 +29,9 @@ export async function runDeleteCommand(
   });
 
   try {
-    const result = await client.removeProject(projectId, undefined, { ifEmpty: options.ifEmpty });
+    const result = options.ifEmpty
+      ? await client.removeProject(projectId, undefined, { ifEmpty: true })
+      : await client.removeProject(projectId);
     return {
       type: "single",
       data: { projectId, removedWorkspaceIds: result.removedWorkspaceIds },
