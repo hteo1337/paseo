@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 
-import { beforeEach, afterEach, describe, expect, test } from "vitest";
+import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../test-utils/test-logger.js";
 import { writeJsonFileAtomic } from "./atomic-file.js";
@@ -515,6 +515,67 @@ describe("workspace registries", () => {
     expect(
       (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
     ).toHaveLength(2);
+  });
+
+  test("guarded empty project removal excludes archived references and racing claims", async () => {
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: "project-one",
+      cwd: path.join(tmpDir, "checkout"),
+      kind: "local_checkout",
+      displayName: "checkout",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+    await workspaceRegistry.upsert({ ...record, archivedAt: "2026-03-02T00:00:00.000Z" });
+    const remove = vi.fn(async () => {});
+    expect(
+      await workspaceRegistry.removeProjectIfUnreferenced("project-one", remove, async () => true),
+    ).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
+
+    await workspaceRegistry.remove(record.workspaceId);
+    let enterRemoval!: () => void;
+    const removing = new Promise<void>((resolve) => (enterRemoval = resolve));
+    let finishRemoval!: () => void;
+    const removalHeld = new Promise<void>((resolve) => (finishRemoval = resolve));
+    const removal = workspaceRegistry.removeProjectIfUnreferenced(
+      "project-one",
+      async () => {
+        enterRemoval();
+        await removalHeld;
+      },
+      async () => false,
+    );
+    await removing;
+    const claim = workspaceRegistry.getOrCreateActiveByCwd(record);
+    finishRemoval();
+    expect(await removal).toBe(true);
+    await expect(claim).rejects.toThrow("Project is being removed");
+    await expect(workspaceRegistry.upsert(record)).rejects.toThrow("Project is being removed");
+    expect(await workspaceRegistry.list()).toEqual([]);
+  });
+
+  test("failed pre-commit project removal releases its admission fence", async () => {
+    await expect(
+      workspaceRegistry.removeProjectIfUnreferenced(
+        "project-one",
+        async () => {
+          throw new Error("write failed");
+        },
+        async () => true,
+      ),
+    ).rejects.toThrow("write failed");
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: "project-one",
+      cwd: path.join(tmpDir, "checkout"),
+      kind: "local_checkout",
+      displayName: "checkout",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+    expect((await workspaceRegistry.getOrCreateActiveByCwd(workspace)).created).toBe(true);
   });
 
   test("refreshes workspace archive timestamps when an archive is repeated", async () => {
