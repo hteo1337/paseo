@@ -1,0 +1,26 @@
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/35a69bia/th1-728-create-provenance
+
+ ❯ packages/server/src/server/schedule/service.test.ts (60 tests | 1 failed) 91ms
+     × archiveOnFinish=false local runs create one active workspace per run 36ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/server/schedule/service.test.ts > ScheduleService > archiveOnFinish=false local runs create one active workspace per run
+AssertionError: expected 'wks_1274ba6181abdeec' not to be 'wks_1274ba6181abdeec' // Object.is equality
+ ❯ packages/server/src/server/schedule/service.test.ts:628:41
+    626|     expect(firstAgent?.workspaceId).toMatch(/^wks_/);
+    627|     expect(secondAgent?.workspaceId).toMatch(/^wks_/);
+    628|     expect(firstAgent?.workspaceId).not.toBe(secondAgent?.workspaceId);
+       |                                         ^
+    629|     expect(firstAgent?.archivedAt ?? null).toBeNull();
+    630|     expect(secondAgent?.archivedAt ?? null).toBeNull();
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 skipped (2)
+      Tests  1 failed | 7 passed (72)
+   Start at  02:28:13
+   Duration  6.53s (transform 5.25s, setup 0ms, import 7.02s, tests 91ms, environment 0ms)
+
