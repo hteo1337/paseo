@@ -122,4 +122,14 @@ describe("project commands", () => {
       removedWorkspaceIds: ["workspace-1"],
     });
   });
+
+  it("passes the empty-project guard only when requested", async () => {
+    await runDeleteCommand(
+      "project-1",
+      { daemonTarget: { kind: "instance", home: "/tmp/project-test" }, ifEmpty: true },
+      {} as never,
+    );
+
+    expect(removeProject).toHaveBeenCalledWith("project-1", undefined, { ifEmpty: true });
+  });
 });
