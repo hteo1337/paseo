@@ -91,3 +91,29 @@ test("openProject expands tilde before creating the workspace", async () => {
   expect(response.errorCode).toBeUndefined();
   expect(response.workspace?.workspaceDirectory).toBe(workspacePath);
 }, 30000);
+
+test("workspace listing omits a directory that disappeared and retains a present peer", async () => {
+  const daemon = await createTestPaseoDaemon();
+  cleanupDaemons.add(daemon);
+  const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
+  cleanupClients.add(client);
+  await client.connect();
+
+  const parent = await mkdtemp(path.join(os.tmpdir(), "paseo-list-missing-"));
+  cleanupPaths.add(parent);
+  const missing = await mkdtemp(path.join(parent, "removed-"));
+  const present = await mkdtemp(path.join(parent, "present-"));
+  const removedWorkspace = await client.createWorkspace({
+    source: { kind: "directory", path: missing },
+  });
+  const presentWorkspace = await client.createWorkspace({
+    source: { kind: "directory", path: present },
+  });
+  expect(removedWorkspace.workspace?.id).toBeTruthy();
+  expect(presentWorkspace.workspace?.id).toBeTruthy();
+  await rm(missing, { recursive: true });
+
+  const listed = await client.fetchWorkspaces();
+  expect(listed.entries.map((entry) => entry.id)).not.toContain(removedWorkspace.workspace?.id);
+  expect(listed.entries.map((entry) => entry.id)).toContain(presentWorkspace.workspace?.id);
+}, 30000);
