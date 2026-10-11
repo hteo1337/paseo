@@ -2042,6 +2042,7 @@ export class VoiceAssistantWebSocketServer {
         relayProtectedSecurity: true,
         usageSetting: true,
         usageSources: true,
+        projectGroups: true,
         ownedSubscriptions: true,
         providerOptionControls: true,
         entityMetadata: true,
