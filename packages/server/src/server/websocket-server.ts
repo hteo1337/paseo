@@ -2021,6 +2021,7 @@ export class VoiceAssistantWebSocketServer {
         usageSetting: true,
         usageSources: true,
         projectGroups: true,
+        guardedProjectRemove: true,
         ownedSubscriptions: true,
         binaryChunkingV1: true,
         agentRequestReceipts: true,
