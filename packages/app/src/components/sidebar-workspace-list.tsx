@@ -1,3 +1,6 @@
+import { buildProjectGroupTree } from "./sidebar/project-group-tree";
+import { SidebarSectionHeader } from "./sidebar/sidebar-section-header";
+import { useProjectGroupViewStore } from "@/stores/project-group-view-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
   View,
@@ -2011,7 +2014,25 @@ export function SidebarWorkspaceList({
       />
     );
 
-  return content;
+  const hideInactive = useProjectGroupViewStore((state) => state.hideInactive);
+  const toggleHideInactive = useProjectGroupViewStore((state) => state.toggleHideInactive);
+  const liveFilterAccessibilityState = useMemo(() => ({ checked: hideInactive }), [hideInactive]);
+  return (
+    <>
+      <Pressable
+        accessibilityRole="checkbox"
+        accessibilityState={liveFilterAccessibilityState}
+        onPress={toggleHideInactive}
+        testID="sidebar-hide-inactive"
+        style={styles.liveAgentFilter}
+      >
+        <Text style={styles.liveAgentFilterText}>
+          {hideInactive ? "☑" : "☐"} Hide workspaces with no live agent
+        </Text>
+      </Pressable>
+      {content}
+    </>
+  );
 }
 
 /**
@@ -2077,6 +2098,28 @@ function SidebarGroupedModeList({
       sidebarFilterEmpty={sidebarFilterEmpty}
       parentGestureRef={parentGestureRef}
       dragGestureHostActive={dragGestureHostActive}
+    />
+  );
+}
+
+function ProjectGroupHeader({
+  group,
+}: {
+  group: import("./sidebar/project-group-tree").ProjectGroupSection;
+}) {
+  const toggleGroup = useProjectGroupViewStore((state) => state.toggleGroup);
+  const onToggle = useCallback(
+    () => toggleGroup(group.key, group.collapsed),
+    [group.key, group.collapsed, toggleGroup],
+  );
+  return (
+    <SidebarSectionHeader
+      title={group.name}
+      counts={`${group.projects.length} projects · ${group.workspaceCount} workspaces`}
+      attentionCount={group.attentionCount}
+      collapsed={group.collapsed}
+      onToggle={onToggle}
+      testID={`sidebar-project-group-header-${group.key}`}
     />
   );
 }
@@ -2399,24 +2442,45 @@ function ProjectModeList({
     ],
   );
 
+  const collapseOverrides = useProjectGroupViewStore((state) => state.collapseOverrides);
+  const projectGroups = useMemo(
+    () =>
+      buildProjectGroupTree({
+        projects: unpinnedProjects,
+        workspaceEntriesByKey,
+        collapseOverrides,
+      }),
+    [unpinnedProjects, workspaceEntriesByKey, collapseOverrides],
+  );
+
   const projectBody =
     projects.length === 0 ? (
       <SidebarProjectEmptyState onAddProject={onAddProject} onImportSession={onImportSession} />
     ) : (
-      <DraggableList
-        testID="sidebar-project-list"
-        data={unpinnedProjects}
-        keyExtractor={projectViewKeyExtractor}
-        renderItem={renderProject}
-        onDragEnd={handleProjectDragEnd}
-        extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
-        scrollEnabled={false}
-        useDragHandle
-        nestable={platformIsNative}
-        simultaneousGestureRef={parentGestureRef}
-        gestureHostPresented={dragGestureHostActive}
-        containerStyle={styles.projectListContainer}
-      />
+      <View testID="sidebar-project-list">
+        {projectGroups.map((group) => (
+          <View key={group.key} testID={`sidebar-project-group-${group.key}`}>
+            <ProjectGroupHeader group={group} />
+            {group.collapsed ? null : (
+              <View style={styles.projectGroupChildren}>
+                <DraggableList
+                  data={group.projects}
+                  keyExtractor={projectViewKeyExtractor}
+                  renderItem={renderProject}
+                  onDragEnd={handleProjectDragEnd}
+                  extraData={activeWorkspaceSelectionKey(activeWorkspaceSelection)}
+                  scrollEnabled={false}
+                  useDragHandle
+                  nestable={platformIsNative}
+                  simultaneousGestureRef={parentGestureRef}
+                  gestureHostPresented={dragGestureHostActive}
+                  containerStyle={styles.projectListContainer}
+                />
+              </View>
+            )}
+          </View>
+        ))}
+      </View>
     );
 
   const content = (
@@ -2526,6 +2590,9 @@ const styles = StyleSheet.create((theme) => ({
   // Padding on the block rather than margin, and only while it has children: the gap belongs to
   // the rows underneath the header, so a collapsed project gives it back and a column of collapsed
   // headers closes up to the pitch of a list instead of staying spaced for content that is gone.
+  projectGroupChildren: { paddingLeft: theme.spacing[2] },
+  liveAgentFilter: { paddingHorizontal: theme.spacing[2], paddingVertical: theme.spacing[1] },
+  liveAgentFilterText: { color: theme.colors.foregroundMuted, fontSize: 12 },
   projectBlockExpanded: {
     paddingBottom: theme.spacing[3],
   },
