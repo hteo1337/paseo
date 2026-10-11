@@ -4233,6 +4233,9 @@ export class Session {
       const activeWorkspaceIds = projectWorkspaces
         .filter((workspace) => !workspace.archivedAt)
         .map((workspace) => workspace.workspaceId);
+      if (request.ifEmpty && activeWorkspaceIds.length > 0) {
+        throw new Error(`Project has active workspaces: ${projectId}`);
+      }
 
       const removedWorkspaceIds: string[] = [];
       this.markWorkspaceArchiving(activeWorkspaceIds, new Date().toISOString());
@@ -4257,6 +4260,14 @@ export class Session {
           removedWorkspaceIds.push(workspaceId);
         }
 
+        if (
+          request.ifEmpty &&
+          (await this.workspaceRegistry.list()).some(
+            (workspace) => workspace.projectId === resolvedProjectId && !workspace.archivedAt,
+          )
+        ) {
+          throw new Error(`Project gained an active workspace: ${projectId}`);
+        }
         await this.projectRegistry.remove(resolvedProjectId);
         await removeProjectCustomIcon({
           paseoHome: this.paseoHome,
