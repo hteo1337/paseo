@@ -2043,6 +2043,7 @@ export class VoiceAssistantWebSocketServer {
         usageSetting: true,
         usageSources: true,
         projectGroups: true,
+        guardedProjectRemove: true,
         ownedSubscriptions: true,
         providerOptionControls: true,
         entityMetadata: true,
