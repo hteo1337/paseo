@@ -121,10 +121,13 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--home", type=Path, default=Path.home() / ".paseo")
     parser.add_argument("--apply", action="store_true")
+    parser.add_argument("--guard-verified", action="store_true", help="Required for --apply after a live-owner refusal probe on this daemon")
     parser.add_argument("--retire-id", help="Apply to one candidate, for a disposable proof")
     parser.add_argument("--limit", type=int)
     parser.add_argument("--jobs", type=int, default=1, help="Bounded concurrent archive requests (default: 1)")
     args = parser.parse_args()
+    if args.apply and not args.guard_verified:
+        raise RuntimeError("--apply requires --guard-verified after testing this daemon's live-owner refusal")
     before = plan(args.home)
     output = {"mode": "apply" if args.apply else "dry-run", "before": before}
     if args.apply:
