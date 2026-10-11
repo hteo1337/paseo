@@ -361,6 +361,7 @@ function createNoopWorkspaceRegistry(): WorkspaceRegistry {
     get: async () => null,
     update: async () => null,
     upsert: async () => {},
+    getOrCreateActiveByCwd: async (record) => ({ workspace: record, created: true }),
     archive: async () => false,
     remove: async () => {},
   };
