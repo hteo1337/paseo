@@ -23,6 +23,7 @@ export interface SidebarWorkspacePlacement {
   workspaceId: string;
   projectViewKey: string;
   projectName: string;
+  projectGroup?: import("@getpaseo/protocol/project-groups").ProjectGroup | null;
   projectRootPath?: string;
   workspaceDirectory?: string;
   projectKind: WorkspaceStructureProject["projectKind"];
@@ -58,6 +59,7 @@ export interface SidebarWorkspaceEntry extends SidebarStatusWorkspacePlacement {
 export interface SidebarProjectEntry {
   viewKey: string;
   projectName: string;
+  projectGroup?: import("@getpaseo/protocol/project-groups").ProjectGroup | null;
   projectKind: WorkspaceStructureProject["projectKind"];
   iconWorkingDir: string;
   hosts: WorkspaceStructureHostPlacement[];
@@ -315,6 +317,8 @@ function createStructuralWorkspaceEntry(input: {
     workspaceId: identity.workspaceId,
     projectViewKey: input.project.viewKey,
     projectName: input.project.projectName,
+    projectGroup: input.project.hosts.find((host) => host.serverId === identity.serverId)
+      ?.projectGroup,
     projectRootPath: input.project.iconWorkingDir,
     workspaceDirectory: undefined,
     projectKind: input.project.projectKind,
@@ -447,6 +451,7 @@ export function buildSidebarProjectsFromStructure(input: {
       viewKey: project.viewKey,
       projectKey: project.projectKey,
       projectName: project.projectName,
+      projectGroup: project.projectGroup,
       projectKind: project.projectKind,
       iconWorkingDir: project.iconWorkingDir,
       hosts: project.hosts,
@@ -465,6 +470,7 @@ export function buildSidebarProjectsFromHostProjects(input: {
   return input.projects.map((project) => ({
     viewKey: project.viewKey,
     projectName: project.projectName,
+    projectGroup: project.projectGroup,
     projectKind: project.projectKind,
     iconWorkingDir: project.iconWorkingDir,
     hosts: project.hosts,
