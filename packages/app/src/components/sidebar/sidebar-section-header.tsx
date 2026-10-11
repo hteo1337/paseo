@@ -21,11 +21,15 @@ export function SidebarSectionHeader({
   collapsed,
   onToggle,
   testID,
+  counts,
+  attentionCount = 0,
 }: {
   title: string;
   collapsed: boolean;
   onToggle: () => void;
   testID: string;
+  counts?: string;
+  attentionCount?: number;
 }) {
   const isCompact = useIsCompactFormFactor();
   const accessibilityState = useMemo(() => ({ expanded: !collapsed }), [collapsed]);
@@ -46,6 +50,15 @@ export function SidebarSectionHeader({
       {({ hovered }) => (
         <>
           <Text style={styles.title}>{title}</Text>
+          {counts ? <Text style={styles.counts}>{counts}</Text> : null}
+          {attentionCount > 0 ? (
+            <Text
+              style={styles.attention}
+              accessibilityLabel={`${attentionCount} workspaces need attention`}
+            >
+              ● {attentionCount}
+            </Text>
+          ) : null}
           {hovered || isNative || isCompact ? (
             <Chevron size={12} uniProps={foregroundMutedColorMapping} />
           ) : null}
@@ -65,6 +78,16 @@ const styles = StyleSheet.create((theme) => ({
     paddingHorizontal: theme.spacing[2],
     paddingVertical: theme.spacing[1],
     userSelect: "none",
+  },
+  counts: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm - 2,
+    flexShrink: 1,
+  },
+  attention: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm - 2,
+    fontWeight: theme.fontWeight.medium,
   },
   title: {
     color: theme.colors.foregroundMuted,
