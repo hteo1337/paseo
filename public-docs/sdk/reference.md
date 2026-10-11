@@ -57,6 +57,17 @@ Create a new client after `close()`.
 
 `list({ subscribe: {} })` also returns a `subscriptionId` and an owned `subscription`. Its `subscribe({ snapshot, update, error? })` callbacks receive the snapshot before scoped wire updates; `release()` ends that observation. Capable daemons assign the ID and keep observations independent. Older daemons use local IDs and their established shared delivery behavior. Plain lists create no observation. The same contract applies to workspace lists. See [events](./events.md).
 
+`agents.readCreation(idempotencyKey)` reads an existing agent creation receipt without
+creating an agent or keeping a subscription. It returns `CreationSnapshot | null`.
+A failed receipt with `outcomeUnknown: false` may be retried with the same key,
+resource IDs and unchanged request. An uncertain outcome must be reconciled first.
+Prior failures remain in `failures`; the host refuses further retries after 32
+recorded failures. Creation does not send an initial prompt unless requested.
+
+A valid unarchived `parent` may be closed. The host uses its durable identity and
+workspace metadata without opening a provider session. Archived parents remain
+unavailable; explicit child workspace placement keeps its normal semantics.
+
 Creation options include `config`, `cwd`, `parent`, `title`, `prompt`, `env`, `outputSchema`, `images`, `attachments`, `git`, `worktree`, `autoArchive`, `background`, and `labels`.
 
 `background` is workspace creation intent. It cannot accompany an existing `workspaceId`.
