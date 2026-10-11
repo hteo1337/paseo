@@ -3,6 +3,7 @@ import type { PluginLifecycle } from "../plugins/lifecycle/index.js";
 import { describeHookAgent, publishAgentStream } from "../plugins/lifecycle/index.js";
 import type {
   PluginSessionOpenRequest,
+  PluginAgentCreation,
   PluginSessionOpenedRequest,
   PluginTurnStartRequest,
 } from "@getpaseo/plugin/server";
@@ -343,6 +344,8 @@ type ProviderEnabledMap = Partial<Record<AgentProvider, ProviderEnabledFlag>>;
 type ProviderClientMap = Partial<Record<AgentProvider, AgentClient>>;
 
 export interface CreateAgentOptions {
+  creationSource?: PluginAgentCreation["source"];
+  callerAgentId?: string;
   labels?: Record<string, string>;
   initialPrompt?: string;
   env?: Record<string, string>;
@@ -351,6 +354,14 @@ export interface CreateAgentOptions {
   // undefined is an explicit decision: the agent never appears in the sidebar.
   workspaceId: string | undefined;
   owner?: AgentOwner;
+}
+
+function describeAgentCreation(options: CreateAgentOptions): PluginAgentCreation {
+  return {
+    source: options.creationSource ?? "system",
+    callerAgentId: options.callerAgentId ?? null,
+    labels: { ...options.labels },
+  };
 }
 
 export interface AgentManagerOptions {
@@ -1399,6 +1410,7 @@ export class AgentManager {
       const request = await this.pluginLifecycle.before("agent.create", {
         config,
         env: options.env,
+        creation: describeAgentCreation(options),
       });
       config = { ...request.config, internal: config.internal };
       options = { ...options, env: request.env };
