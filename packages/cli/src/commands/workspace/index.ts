@@ -43,7 +43,8 @@ export function createWorkspaceCommand(): Command {
     workspace
       .command("ls")
       .description("List active workspaces")
-      .option("--background", "Include background workspaces"),
+      .option("--background", "Include background workspaces")
+      .option("--group <name>", "Only workspaces in this project group"),
   ).action(withOutput(runLsCommand));
 
   addJsonAndDaemonHostOptions(
