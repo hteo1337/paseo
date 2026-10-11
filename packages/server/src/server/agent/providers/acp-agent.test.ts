@@ -171,14 +171,14 @@ class FakeTerminator {
   readonly terminated: TreeKillTarget[] = [];
   private readonly pending: Array<() => void> = [];
 
-  constructor(private readonly mode: "immediate" | "deferred" = "immediate") {}
+  constructor(private readonly mode: "immediate" | "deferred" | "timeout" = "immediate") {}
 
   readonly terminate: ProcessTerminator = async (child) => {
     this.terminated.push(child);
     if (this.mode === "deferred") {
       await new Promise<void>((resolve) => this.pending.push(resolve));
     }
-    return "terminated";
+    return this.mode === "timeout" ? "kill-timeout" : "terminated";
   };
 
   releaseAll(): void {
@@ -3469,8 +3469,11 @@ describe("ACPAgentSession close() tree-kill", () => {
     const terminalChild = createTerminalChildStub();
     await startTerminal(session, terminalChild);
 
+    expect(session.hasLiveTerminals()).toBe(true);
+
     await session.close();
 
+    expect(session.hasLiveTerminals()).toBe(false);
     expect(terminator.terminated).toContain(terminalChild);
     expect(terminalChild.kill).not.toHaveBeenCalled();
   });
@@ -3513,13 +3516,25 @@ describe("ACPAgentSession close() tree-kill", () => {
     const child = createTerminalChildStub();
     const terminalId = await startTerminal(session, child);
 
+    expect(session.hasLiveTerminals()).toBe(true);
+
     await session.releaseTerminal({ sessionId: "session-1", terminalId });
 
+    expect(session.hasLiveTerminals()).toBe(false);
     expect(terminator.terminated).toContain(child);
     expect(child.kill).not.toHaveBeenCalled();
     await expect(session.terminalOutput({ sessionId: "session-1", terminalId })).rejects.toThrow(
       `Unknown terminal '${terminalId}'`,
     );
+
+    const timeoutSession = createSession({
+      terminateProcess: new FakeTerminator("timeout").terminate,
+    });
+    const timeoutTerminalId = await startTerminal(timeoutSession, createTerminalChildStub());
+    await expect(
+      timeoutSession.releaseTerminal({ sessionId: "session-1", terminalId: timeoutTerminalId }),
+    ).rejects.toThrow("ACP terminal did not exit after SIGKILL");
+    expect(timeoutSession.hasLiveTerminals()).toBe(true);
   });
 });
 

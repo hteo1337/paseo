@@ -35,6 +35,7 @@ import type {
   AgentFeature,
   AgentLaunchContext,
   AgentPromptInput,
+  AgentPermissionRequest,
   AgentProvider,
   AgentPersistenceHandle,
   AgentRunOptions,
@@ -9755,6 +9756,138 @@ test("subscribe does not emit state events for internal agents to global subscri
   // Should only have events from the normal agent
   expect(receivedEvents.filter((id) => id === generatedAgentIds[0]).length).toBeGreaterThan(0);
   expect(receivedEvents.filter((id) => id === generatedAgentIds[1]).length).toBe(0);
+});
+
+test("idle runtime unloads after the threshold and the next access resumes it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-unload-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  let failReap = false;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async (snapshot) => {
+      if (failReap) throw new Error("descendants still alive");
+      return snapshot.size;
+    },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const originalSession = agent.session;
+    const close = vi.spyOn(originalSession!, "close");
+    const now = Date.now();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 30_000)).toBe(0);
+    expect(manager.getAgent(agent.id)?.session).toBe(originalSession);
+    expect(close).not.toHaveBeenCalled();
+
+    const releaseStream = manager.holdClientStream(agent.id);
+    expect(await manager.unloadIdleAgents(60_000, now + 60_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseStream();
+
+    const releaseLegacyStream = manager.holdGlobalClientStream();
+    expect(await manager.unloadIdleAgents(60_000, now + 90_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseLegacyStream();
+
+    let terminalActive = true;
+    Object.assign(originalSession!, { hasLiveTerminals: () => terminalActive });
+    expect(await manager.unloadIdleAgents(60_000, now + 100_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    terminalActive = false;
+
+    const pendingPermissions = vi
+      .spyOn(originalSession!, "getPendingPermissions")
+      .mockReturnValue([{} as AgentPermissionRequest]);
+    expect(await manager.unloadIdleAgents(60_000, now + 105_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    pendingPermissions.mockRestore();
+
+    const releaseQueuedPrompt = manager.beginAgentUse(agent.id);
+    expect(await manager.unloadIdleAgents(60_000, now + 110_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseQueuedPrompt();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 120_001)).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(close).toHaveBeenCalledOnce();
+    expect((await storage.get(agent.id))?.lastStatus).toBe("closed");
+
+    const resumed = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(resumed.id).toBe(agent.id);
+    expect(resumed.session).not.toBe(originalSession);
+    expect(client.resumeOverrides).toHaveLength(1);
+
+    const closeStarted = deferred<void>();
+    const finishClose = deferred<void>();
+    const resumedSession = resumed.session!;
+    vi.spyOn(resumedSession, "close").mockImplementationOnce(async () => {
+      closeStarted.resolve();
+      await finishClose.promise;
+    });
+    const racingUnload = manager.unloadIdleAgents(60_000, now + 180_001);
+    await closeStarted.promise;
+    const racingAccess = ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    finishClose.resolve();
+    expect(await racingUnload).toBe(1);
+    const afterRace = await racingAccess;
+    expect(afterRace.session).not.toBe(resumedSession);
+    expect(client.resumeOverrides).toHaveLength(2);
+
+    const deadSession = afterRace.session!;
+    const deadClose = vi.spyOn(deadSession, "close");
+    failReap = true;
+    expect(await manager.unloadIdleAgents(60_000, now + 240_001)).toBe(0);
+    expect(deadClose).toHaveBeenCalledOnce();
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    expect(() => manager.streamAgent(agent.id, "must not reach a closed session")).toThrow(
+      "Provider process cleanup incomplete",
+    );
+    await expect(
+      ensureAgentLoaded(agent.id, { agentManager: manager, agentStorage: storage, logger }),
+    ).rejects.toThrow("descendants still alive");
+    expect(deadClose).toHaveBeenCalledTimes(2);
+
+    failReap = false;
+    const afterCleanup = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(afterCleanup.session).not.toBe(deadSession);
+    expect((await storage.get(agent.id))?.lastStatus).toBe("idle");
+    expect(client.resumeOverrides).toHaveLength(3);
+
+    const providerCleanup = vi
+      .spyOn(afterCleanup.session!, "close")
+      .mockRejectedValueOnce(new Error("provider-owned cleanup failed"));
+    expect(await manager.unloadIdleAgents(60_000, now + 300_001)).toBe(0);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    expect(() => manager.streamAgent(agent.id, "must wait for provider cleanup")).toThrow(
+      "Provider process cleanup incomplete",
+    );
+    const afterProviderCleanup = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(providerCleanup).toHaveBeenCalledTimes(2);
+    expect(afterProviderCleanup.session).not.toBe(afterCleanup.session);
+    expect(client.resumeOverrides).toHaveLength(4);
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
 });
 
 test("subscribe hides provider subagents of internal parents from global subscribers", async () => {
