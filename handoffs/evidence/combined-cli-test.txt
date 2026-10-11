@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/commands/project/project.test.ts --bail=1 --maxWorkers=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/cli
+
+
+ Test Files  1 passed (1)
+      Tests  9 passed (9)
+   Start at  16:37:03
+   Duration  246ms (transform 98ms, setup 0ms, import 179ms, tests 5ms, environment 0ms)
+

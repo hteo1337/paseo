@@ -1,0 +1,112 @@
+1/54 0001-feat-app-collapse-and-cap-the-top-sidebar-group.patch
+Applying: feat(app): collapse and cap the top sidebar group
+2/54 0002-fix-app-honour-the-sidebar-group-s-share-on-short-wi.patch
+Applying: fix(app): honour the sidebar group's share on short windows
+3/54 0003-feat-app-let-the-sidebar-navigation-group-be-dragged.patch
+Applying: feat(app): let the sidebar navigation group be dragged
+4/54 0004-fix-app-leave-the-sidebar-s-chrome-room-when-the-nav.patch
+Applying: fix(app): leave the sidebar's chrome room when the nav group is dragged
+5/54 0005-feat-composer-suggest-the-next-prompt-after-a-turn-e.patch
+Applying: feat(composer): suggest the next prompt after a turn ends
+6/54 0006-feat-metadata-allow-a-model-per-metadata-kind.patch
+Applying: feat(metadata): allow a model per metadata kind
+7/54 0007-fix-metadata-keep-per-kind-providers-through-load-an.patch
+Applying: fix(metadata): keep per-kind providers through load and writes
+8/54 0008-feat-composer-ask-for-suggestions-when-a-chat-is-ope.patch
+Applying: feat(composer): ask for suggestions when a chat is opened
+9/54 0009-fix-composer-resume-a-closed-chat-before-suggesting-.patch
+Applying: fix(composer): resume a closed chat before suggesting for it
+10/54 0010-feat-agent-draft-answers-when-an-agent-asks-a-questi.patch
+Applying: feat(agent): draft answers when an agent asks a question
+11/54 0011-feat-composer-suggest-a-first-prompt-for-an-empty-ch.patch
+Applying: feat(composer): suggest a first prompt for an empty chat
+12/54 0012-fix-composer-suggest-first-prompts-on-the-new-chat-s.patch
+Applying: fix(composer): suggest first prompts on the new-chat screen
+13/54 0013-fix-metadata-keep-the-shared-model-list-when-a-patch.patch
+Applying: fix(metadata): keep the shared model list when a patch names one kind
+14/54 0014-fix-composer-keep-the-question-a-drafted-answer-belo.patch
+Applying: fix(composer): keep the question a drafted answer belongs to
+15/54 0015-feat-settings-pick-a-model-for-prompt-suggestions.patch
+Applying: feat(settings): pick a model for prompt suggestions
+16/54 0016-fix-settings-give-prompt-suggestions-their-own-secti.patch
+Applying: fix(settings): give prompt suggestions their own section
+17/54 0017-fix-settings-label-suggestion-model-modes-Automatic-.patch
+Applying: fix(settings): label suggestion model modes Automatic and Manual
+18/54 0018-feat-desktop-keep-the-updater-off-a-locally-patched-.patch
+Applying: feat(desktop): keep the updater off a locally patched build
+19/54 0019-fix-cli-resolve-agents-beyond-the-first-listing-page.patch
+Applying: fix(cli): resolve agents beyond the first listing page
+20/54 0020-fix-server-defer-auto-archive-on-merge-while-an-agen.patch
+Applying: fix(server): defer auto-archive on merge while an agent is still working
+21/54 0021-feat-server-model-policy-hooks-for-set_model-session.patch
+/Users/hteo/Work/GitHub/hteo1337/paseo/.git/worktrees/6f0be387-th1-662-series-check/rebase-apply/patch:1016: new blank line at EOF.
++
+warning: 1 line adds whitespace errors.
+Applying: feat(server): model policy hooks for set_model, session_open and plugin reload
+22/54 0022-feat-server-agent.turn_start-before-hook-for-model-p.patch
+Applying: feat(server): agent.turn_start before hook for model policy
+23/54 0023-fix-metadata-keep-suggestions-on-configured-model-ch.patch
+Applying: fix(metadata): keep suggestions on configured model chains
+24/54 0024-feat-cli-include-updatedAt-in-agent-ls-json.patch
+Applying: feat(cli): include updatedAt in agent ls --json
+25/54 0025-Add-opt-in-atomic-keeper-control-API.patch
+Applying: Add opt-in atomic keeper control API
+26/54 0026-Repair-torn-outbox-tail-on-open-and-recheck-archive-.patch
+Applying: Repair torn outbox tail on open and recheck archive after receipt reserve
+27/54 0027-Hold-lifecycle-lane-during-guarded-send-gate-permiss.patch
+Applying: Hold lifecycle lane during guarded send, gate permission tracking on the flag, close keeper after agents
+28/54 0028-Hold-the-lifecycle-lane-until-the-keeper-send-is-ack.patch
+Applying: Hold the lifecycle lane until the keeper send is acknowledged; mark closes that outlive shutdown
+29/54 0029-Acknowledge-a-keeper-send-on-the-first-turn-event-re.patch
+Applying: Acknowledge a keeper send on the first turn event; report close_timeout only for closes that did not settle
+30/54 0030-Drain-a-keeper-turn-whose-first-event-arrives-after-.patch
+Applying: Drain a keeper turn whose first event arrives after the start timeout
+31/54 0031-Report-a-stalled-keeper-feed-refuse-a-send-when-a-re.patch
+Applying: Report a stalled keeper feed, refuse a send when a receipt appears at reserve, retry receipt release
+32/54 0032-fix-keeper-surface-a-failed-receipt-release-and-test.patch
+Applying: fix(keeper): surface a failed receipt release and test retry, log and feed wiring
+33/54 0033-fix-keeper-look-up-the-receipt-before-checking-the-a.patch
+Applying: fix(keeper): look up the receipt before checking the agent exists
+34/54 0034-feat-keeper-record-the-admitted-identity-in-the-send.patch
+Applying: feat(keeper): record the admitted identity in the send receipt
+35/54 0035-feat-keeper-record-a-send.rejected-event-for-every-r.patch
+Applying: feat(keeper): record a send.rejected event for every rejected guarded send
+36/54 0036-fix-server-reuse-workspace-by-cwd-on-create-agent.patch
+Applying: fix(server): reuse workspace by cwd on create-agent
+37/54 0037-fix-cli-reuse-workspace-by-cwd-on-agent-run.patch
+Applying: fix(cli): reuse workspace by cwd on agent run
+38/54 0038-feat-plugin-validate-RPC-targets-under-authenticated.patch
+Applying: feat(plugin): validate RPC targets under authenticated global grants
+39/54 0039-fix-desktop-validate-real-signing-teams-before-accep.patch
+Applying: fix(desktop): validate real signing teams before accepting macOS artifacts
+40/54 0040-fix-desktop-inspect-literal-helper-filenames-during-.patch
+Applying: fix(desktop): inspect literal helper filenames during signing validation
+41/54 0041-feat-keeper-answer-pending-questions-under-guarded-a.patch
+Applying: feat(keeper): answer pending questions under guarded admission
+42/54 0043-fix-plugins-start-shutdown-escalation-before-IPC-ack.patch
+Applying: fix(plugins): start shutdown escalation before IPC acknowledgement
+43/54 0047-fix-plugins-advertise-scoped-RPC-authority-from-v011-child.patch
+Applying: fix(plugins): advertise scoped RPC authority from v0.11 child
+44/54 0046-feat-server-bind-owner-Unix-provenance-to-each-plugin.patch
+Applying: feat(server): port owner Unix request provenance to 0.11.2
+Applying: build: explicitly unpack optional owner Unix credential bridge
+45/54 0048-fix-server-use-durable-parents-and-preserve-creation-retry-audit.patch
+Applying: fix(server): resolve durable parents and retain creation retry audit
+46/54 0049-fix-server-reuse-the-active-workspace-for-a-director.patch
+Applying: fix(server): reuse the active workspace for a directory on agent create
+47/54 0050-fix-server-reuse-active-workspace-for-canonical-dire.patch
+Applying: fix(server): reuse active workspace for canonical directory
+48/54 0051-feat-tools-add-guarded-duplicate-workspace-repair.patch
+Applying: feat(tools): add guarded duplicate workspace repair
+49/54 0052-fix-tools-retry-concurrent-inventory-snapshot-races.patch
+Applying: fix(tools): retry concurrent inventory snapshot races
+50/54 0053-fix-server-guard-duplicate-workspace-repair-archives.patch
+Applying: fix(server): guard duplicate workspace repair archives
+51/54 0054-feat-workspaces-rehome-review-checkouts-and-guard-project-cleanup.patch
+Applying: feat(workspaces): rehome review checkouts and guard project cleanup
+52/54 0055-fix-workspaces-resolve-path-aliases-and-preserve-CLI-guard-typing.patch
+Applying: fix(workspaces): resolve path aliases and preserve CLI guard typing
+53/54 0056-fix-workspaces-preserve-shared-import-and-project-state.patch
+Applying: fix(workspaces): preserve shared import and project state
+54/54 0057-feat-projects-persist-groups-and-render-grouped-workspace-sidebar.patch
+Applying: feat(projects): persist groups and render grouped workspace sidebar

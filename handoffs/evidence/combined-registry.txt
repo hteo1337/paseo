@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts --bail=1 --maxWorkers=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  31 passed (31)
+   Start at  16:36:15
+   Duration  312ms (transform 99ms, setup 21ms, import 142ms, tests 77ms, environment 0ms)
+

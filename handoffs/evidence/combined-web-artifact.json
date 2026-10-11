@@ -1,0 +1,13 @@
+{
+  "path": "/Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/app/dist/_expo/static/js/web/index-1ce50836e13d7bd328f6584a1b8966ec.js",
+  "sha256": "3334462f09d7c90787eac73407d29df48e584c54434f90787db5ef25521f31b8",
+  "bytes": 22361895,
+  "inspectedStrings": {
+    "project-group-view": 1,
+    "sidebar-project-group-header-": 1,
+    "Hide workspaces with no live agent": 1
+  },
+  "command": "PASEO_WEB_PLATFORM=electron npx expo export --platform web --max-workers 1",
+  "exitCode": 0,
+  "installedRuntimeAcceptance": false
+}

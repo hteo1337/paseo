@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/cli-run-workspace-precedence.e2e.test.ts -t project grouping CLI --bail=1 --maxWorkers=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/6f0be387-th1-662-series-check/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 1 skipped (2)
+   Start at  16:37:22
+   Duration  11.12s (transform 3.81s, setup 21ms, import 4.87s, tests 6.16s, environment 0ms)
+
