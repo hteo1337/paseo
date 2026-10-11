@@ -1,3 +1,4 @@
+import type { ProjectGroup } from "@getpaseo/protocol/project-groups";
 import equal from "fast-deep-equal";
 import { create } from "zustand";
 import { subscribeWithSelector } from "zustand/middleware";
@@ -110,6 +111,7 @@ export interface WorkspaceDescriptor {
   projectId: string;
   projectDisplayName: string;
   projectCustomName?: string | null;
+  projectGroup?: ProjectGroup | null;
   projectCustomIconRevision?: string | null;
   projectRootPath: string;
   workspaceDirectory: string;
@@ -149,6 +151,7 @@ export function normalizeWorkspaceDescriptor(
     projectId: payload.projectId,
     projectDisplayName: payload.projectDisplayName,
     projectCustomName: payload.projectCustomName ?? null,
+    projectGroup: payload.projectGroup ?? null,
     projectCustomIconRevision: payload.projectCustomIconRevision ?? null,
     projectRootPath: payload.projectRootPath,
     // Canonicalize the workspace directory once, at the store boundary, so every
@@ -183,6 +186,7 @@ export interface ProjectDescriptor {
   projectKey?: string | null;
   projectDisplayName: string;
   projectCustomName: string | null;
+  projectGroup?: ProjectGroup | null;
   projectCustomIconRevision?: string | null;
   projectIconRevision?: string;
   projectRootPath: string;
@@ -197,6 +201,7 @@ export function normalizeProjectDescriptor(
     projectKey: payload.projectKey ?? null,
     projectDisplayName: payload.projectDisplayName,
     projectCustomName: payload.projectCustomName ?? null,
+    projectGroup: payload.projectGroup ?? null,
     projectCustomIconRevision: payload.projectCustomIconRevision ?? null,
     projectIconRevision: payload.projectIconRevision,
     projectRootPath: payload.projectRootPath,

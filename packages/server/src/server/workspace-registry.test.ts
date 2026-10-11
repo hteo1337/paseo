@@ -1,3 +1,14 @@
+import { readFileSync } from "node:fs";
+import {
+  INITIAL_PROJECT_GROUPS,
+  ProjectGroupOperationSchema,
+  type ProjectGroupRule,
+} from "@getpaseo/protocol/project-groups";
+import {
+  resolveProjectGroup,
+  migrateProjectGroupPrefixes,
+  projectGroupOperation,
+} from "./project-grouping.js";
 import os from "node:os";
 import path from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
@@ -706,6 +717,429 @@ describe("workspace registries", () => {
     expect(await reloadedRegistry.get("ws-1")).toMatchObject({
       title: "Payments work",
       pinnedAt: "2026-03-03T00:00:00.000Z",
+    });
+  });
+});
+
+describe("project groups", () => {
+  let home: string;
+  const logger = createTestLogger();
+  beforeEach(() => {
+    home = mkdtempSync(path.join(os.tmpdir(), "project-grouping-"));
+  });
+  afterEach(() => {
+    rmSync(home, { recursive: true, force: true });
+  });
+  function registry() {
+    return new FileBackedProjectRegistry(path.join(home, "projects", "projects.json"), logger, {
+      paseoHome: home,
+    });
+  }
+  function record(id: string, customName: string | null = null) {
+    const rootPath = path.join(home, id);
+    mkdirSync(rootPath, { recursive: true });
+    return createPersistedProjectRecord({
+      projectId: id,
+      rootPath,
+      kind: "git",
+      displayName: id,
+      customName,
+      createdAt: "2026-01-01T00:00:00Z",
+      updatedAt: "2026-01-01T00:00:00Z",
+      projectKey: `remote:github.com/BlackHubTechnologies/${id}`,
+    });
+  }
+  test("first matching path/owner rule wins and sibling paths/owners are negative controls", () => {
+    const rules: ProjectGroupRule[] = [
+      {
+        id: "platform",
+        group: INITIAL_PROJECT_GROUPS[1],
+        match: { kind: "path", prefix: "~/Work/Platform/**" },
+      },
+      {
+        id: "company",
+        group: INITIAL_PROJECT_GROUPS[0],
+        match: { kind: "remote_owner", owner: "BlackHubTechnologies/*" },
+      },
+    ];
+    expect(
+      resolveProjectGroup({
+        project: {
+          rootPath: "/home/teo/Work/Platform/repo",
+          projectKey: "remote:github.com/blackhubtechnologies/repo",
+        },
+        rules,
+        home: "/home/teo",
+      })?.name,
+    ).toBe("Nexus Platform");
+    expect(
+      resolveProjectGroup({
+        project: {
+          rootPath: "/home/teo/Work/Platform-other/repo",
+          projectKey: "remote:github.com/blackhubtechnologies/repo",
+        },
+        rules,
+        home: "/home/teo",
+      })?.name,
+    ).toBe("BlackForge");
+    expect(
+      resolveProjectGroup({
+        project: {
+          rootPath: "/home/teo/Work/Platform-other/repo",
+          projectKey: "remote:github.com/blackhubtechnologies-other/repo",
+        },
+        rules,
+        home: "/home/teo",
+      }),
+    ).toBeNull();
+    expect(
+      resolveProjectGroup({
+        project: { rootPath: "/home/teo/Work/Platform", projectKey: null },
+        rules,
+        home: "/home/teo",
+      })?.name,
+    ).toBe("Nexus Platform");
+  });
+  test("bf platform classification uses remote repository identity even in arbitrary checkout names", () => {
+    const rules: ProjectGroupRule[] = [
+      {
+        id: "platform",
+        group: INITIAL_PROJECT_GROUPS[1],
+        match: { kind: "remote_repository", prefix: "bf-" },
+      },
+    ];
+    expect(
+      resolveProjectGroup({
+        project: {
+          rootPath: "/reviews/final",
+          projectKey: "remote:github.com/blackhubtechnologies/bf-model-serving",
+        },
+        rules,
+      })?.name,
+    ).toBe("Nexus Platform");
+    expect(
+      resolveProjectGroup({
+        project: {
+          rootPath: "/bf-model-serving",
+          projectKey: "remote:github.com/blackhubtechnologies/company-site",
+        },
+        rules,
+      }),
+    ).toBeNull();
+  });
+  test("legacy records stay ungrouped and manual assignments survive persistence and rule changes", async () => {
+    const projects = registry();
+    await projects.upsert(record("repo"));
+    expect((await projects.get("repo"))?.group).toBeUndefined();
+    await projects.upsert({ ...record("control"), projectKey: "remote:github.com/other/repo" });
+    const automatic = await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "rule_add",
+        rule: {
+          id: "owner",
+          group: INITIAL_PROJECT_GROUPS[0],
+          match: { kind: "remote_owner", owner: "blackhubtechnologies" },
+        },
+      },
+    });
+    expect(automatic.changedProjects.map((project) => project.projectId)).toEqual(["repo"]);
+    expect((await projects.get("control"))?.group).toBeUndefined();
+    expect((await projects.get("repo"))?.group?.name).toBe("BlackForge");
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "set",
+        projectId: "repo",
+        group: { name: "Fleet tooling", order: 3, collapsed: true },
+      },
+    });
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "rule_remove", id: "owner" },
+    });
+    const reopened = registry();
+    await reopened.initialize();
+    expect((await reopened.get("repo"))?.group).toEqual({
+      name: "Fleet tooling",
+      order: 3,
+      collapsed: true,
+    });
+    await projectGroupOperation({
+      projects: reopened,
+      paseoHome: home,
+      operation: { kind: "unset", projectId: "repo" },
+    });
+    await projectGroupOperation({
+      projects: reopened,
+      paseoHome: home,
+      operation: {
+        kind: "rule_add",
+        rule: {
+          id: "owner",
+          group: INITIAL_PROJECT_GROUPS[0],
+          match: { kind: "remote_owner", owner: "blackhubtechnologies" },
+        },
+      },
+    });
+    expect((await reopened.get("repo"))?.group).toBeNull();
+    const added = await reopened.getOrCreateActiveByRoot({
+      rootPath: path.join(home, "review11"),
+      kind: "git",
+      displayName: "review11",
+      projectKey: "remote:github.com/blackhubtechnologies/new-repo",
+      timestamp: "2026-10-11T00:00:00Z",
+    });
+    expect(added.group?.name).toBe("BlackForge");
+    const config = JSON.parse(readFileSync(path.join(home, "config.json"), "utf8"));
+    expect(config.projectGrouping.rules[0].id).toBe("owner");
+  });
+  test("removing a rule clears automatic placement, duplicate/missing rules reject, concurrent writes retain unrelated fields", async () => {
+    const projects = registry();
+    await projects.upsert(record("repo"));
+    const rule: ProjectGroupRule = {
+      id: "owner",
+      group: INITIAL_PROJECT_GROUPS[0],
+      match: { kind: "remote_owner", owner: "blackhubtechnologies" },
+    };
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "rule_add", rule },
+    });
+    await expect(
+      projectGroupOperation({ projects, paseoHome: home, operation: { kind: "rule_add", rule } }),
+    ).rejects.toThrow("already exists");
+    await Promise.all([
+      projectGroupOperation({
+        projects,
+        paseoHome: home,
+        operation: { kind: "rule_remove", id: "owner" },
+      }),
+      projects.update("repo", (current) => ({ ...current, customName: "Kept name" })),
+    ]);
+    expect(await projects.get("repo")).toMatchObject({ group: null, customName: "Kept name" });
+    await expect(
+      projectGroupOperation({
+        projects,
+        paseoHome: home,
+        operation: { kind: "rule_remove", id: "owner" },
+      }),
+    ).rejects.toThrow("Rule not found");
+  });
+  test("stale git snapshots preserve manual set/unset while automatic placement follows changed identity", async () => {
+    const projects = registry();
+    await projects.upsert(record("repo"));
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "rule_add",
+        rule: {
+          id: "owner",
+          group: INITIAL_PROJECT_GROUPS[0],
+          match: { kind: "remote_owner", owner: "blackhubtechnologies" },
+        },
+      },
+    });
+    const stale = (await projects.get("repo"))!;
+    expect(stale.groupSource).toBe("rule");
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "set", projectId: "repo", group: INITIAL_PROJECT_GROUPS[2] },
+    });
+    await projects.upsert({ ...stale, projectKey: "remote:github.com/other/repo" });
+    expect(await projects.get("repo")).toMatchObject({
+      group: INITIAL_PROJECT_GROUPS[2],
+      groupSource: "manual",
+      projectKey: "remote:github.com/other/repo",
+    });
+    const beforeUnset = (await projects.get("repo"))!;
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "unset", projectId: "repo" },
+    });
+    await projects.upsert({ ...beforeUnset, projectKey: stale.projectKey });
+    expect(await projects.get("repo")).toMatchObject({ group: null, groupSource: "manual" });
+    await projects.upsert(record("automatic"));
+    const automatic = (await projects.get("automatic"))!;
+    expect(automatic.group?.name).toBe("BlackForge");
+    await projects.upsert({ ...automatic, projectKey: "remote:github.com/other/automatic" });
+    expect((await projects.get("automatic"))?.group).toBeNull();
+    const reopened = registry();
+    await reopened.initialize();
+    expect(await reopened.get("repo")).toMatchObject({ group: null, groupSource: "manual" });
+  });
+  test("same-name defaults persist as one catalog and metadata changes update every member and rule", async () => {
+    const projects = registry();
+    for (const id of ["a", "b", "automatic"]) await projects.upsert(record(id));
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "set",
+        projectId: "a",
+        group: { name: "Fleet tooling", order: 2, collapsed: true },
+      },
+    });
+    const changed = await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "set",
+        projectId: "b",
+        group: { name: "Fleet tooling", order: 0, collapsed: false },
+      },
+    });
+    expect(changed.changedProjects.map((project) => project.projectId).sort()).toEqual(["a", "b"]);
+    for (const id of ["a", "b"])
+      expect((await projects.get(id))?.group).toEqual({
+        name: "Fleet tooling",
+        order: 0,
+        collapsed: false,
+      });
+    const rule = {
+      id: "fleet",
+      group: { name: "Fleet tooling", order: 3, collapsed: true },
+      match: { kind: "remote_owner" as const, owner: "blackhubtechnologies" },
+    };
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "rule_add", rule },
+    });
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "unset", projectId: "a" },
+    });
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "set",
+        projectId: "b",
+        group: { name: "Fleet tooling", order: 4, collapsed: false },
+      },
+    });
+    const reopened = registry();
+    await reopened.initialize();
+    expect((await reopened.get("a"))?.group).toBeNull();
+    for (const id of ["b", "automatic"])
+      expect((await reopened.get(id))?.group).toEqual({
+        name: "Fleet tooling",
+        order: 4,
+        collapsed: false,
+      });
+    const listing = await projectGroupOperation({
+      projects: reopened,
+      paseoHome: home,
+      operation: { kind: "list" },
+    });
+    expect(listing.groups.find((group) => group.name === "Fleet tooling")).toEqual({
+      name: "Fleet tooling",
+      order: 4,
+      collapsed: false,
+    });
+    expect(listing.rules[0].group).toEqual({ name: "Fleet tooling", order: 4, collapsed: false });
+  });
+  test("queued assignments inherit the latest defaults when CLI flags are omitted", async () => {
+    const projects = registry();
+    for (const id of ["a", "b"]) await projects.upsert(record(id));
+    const implicit = ProjectGroupOperationSchema.parse({
+      kind: "set",
+      projectId: "a",
+      group: { name: "Fleet tooling" },
+    });
+    expect(implicit).toEqual({ kind: "set", projectId: "a", group: { name: "Fleet tooling" } });
+    await Promise.all([
+      projectGroupOperation({
+        projects,
+        paseoHome: home,
+        operation: {
+          kind: "set",
+          projectId: "b",
+          group: { name: "Fleet tooling", order: 7, collapsed: true },
+        },
+      }),
+      projectGroupOperation({ projects, paseoHome: home, operation: implicit }),
+    ]);
+    for (const id of ["a", "b"])
+      expect((await projects.get(id))?.group).toEqual({
+        name: "Fleet tooling",
+        order: 7,
+        collapsed: true,
+      });
+    await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: {
+        kind: "rule_add",
+        rule: {
+          id: "inherit",
+          group: { name: "Fleet tooling" },
+          match: { kind: "remote_owner", owner: "other" },
+        },
+      },
+    });
+    const listing = await projectGroupOperation({
+      projects,
+      paseoHome: home,
+      operation: { kind: "list" },
+    });
+    expect(listing.rules[0].group).toEqual({ name: "Fleet tooling", order: 7, collapsed: true });
+  });
+  test("TSV-backed migration preserves custom base names, respects root/id/action guards and is idempotent", async () => {
+    const projects = registry();
+    const eligible = record("bf-api-gateway", "BlackForge / Payments gateway");
+    const company = record("company-site", "BlackForge / Company site");
+    const unbacked = record("unbacked", "BlackForge / User's chosen name");
+    const moved = record("moved", "Fleet tooling / Kept");
+    for (const project of [eligible, company, unbacked, moved]) await projects.upsert(project);
+    const mapping = `path\tgroup\tproject\thost\tproject_id\taction\trule\n${eligible.rootPath}\tBlackForge\tbf-api-gateway\tm5\tbf-api-gateway\trename\tapproved\n${company.rootPath}\tBlackForge\tcompany-site\tm5\tcompany-site\trename\tapproved\n${eligible.rootPath}\tFleet tooling\tmoved\tm5\tmoved\trename\tapproved\n${unbacked.rootPath}\tBlackForge\tunbacked\tm5\tunbacked\thold\tunknown`;
+    expect(await migrateProjectGroupPrefixes({ projects, mapping })).toEqual([
+      "bf-api-gateway",
+      "company-site",
+    ]);
+    expect(await projects.get("bf-api-gateway")).toMatchObject({
+      customName: "Payments gateway",
+      displayName: "bf-api-gateway",
+      rootPath: eligible.rootPath,
+      group: { name: "Nexus Platform" },
+    });
+    expect(await projects.get("company-site")).toMatchObject({
+      customName: "Company site",
+      group: { name: "BlackForge" },
+    });
+    expect(await projects.get("unbacked")).toMatchObject({
+      customName: "BlackForge / User's chosen name",
+    });
+    expect(await projects.get("moved")).toMatchObject({ customName: "Fleet tooling / Kept" });
+    expect(await migrateProjectGroupPrefixes({ projects, mapping })).toEqual([]);
+    expect(
+      JSON.parse(readFileSync(path.join(home, "projects", "projects.json"), "utf8")),
+    ).toHaveLength(4);
+  });
+  test("daemon startup automatically consumes the reviewed mapping when present", async () => {
+    const projects = registry();
+    const project = record("company-site", "BlackForge / Site");
+    await projects.upsert(project);
+    mkdirSync(path.join(home, "ops-scratch", "ws-clean"), { recursive: true });
+    const { writeFileSync } = await import("node:fs");
+    writeFileSync(
+      path.join(home, "ops-scratch", "ws-clean", "grouping.tsv"),
+      `path\tgroup\tproject_id\taction\n${project.rootPath}\tBlackForge\tcompany-site\trename`,
+    );
+    const restarted = registry();
+    await restarted.initialize();
+    expect(await restarted.get("company-site")).toMatchObject({
+      customName: "Site",
+      group: { name: "BlackForge" },
     });
   });
 });
