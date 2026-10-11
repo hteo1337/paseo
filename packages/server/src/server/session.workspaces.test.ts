@@ -3955,6 +3955,19 @@ test("project.remove.request archives active workspaces and removes the project 
   await session.handleMessage({
     type: "project.remove.request",
     projectId: project.projectId,
+    requestId: "req-guarded-remove-project",
+    ifEmpty: true,
+  });
+  expect(projects.has(project.projectId)).toBe(true);
+  expect(workspaces.get(workspace.workspaceId)?.archivedAt).toBeNull();
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toMatchObject({
+    accepted: false,
+    removedWorkspaceIds: [],
+  });
+
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: project.projectId,
     requestId: "req-remove-project",
   });
 
@@ -3964,7 +3977,7 @@ test("project.remove.request archives active workspaces and removes the project 
     updatedAt: expect.any(String),
     archivedAt: expect.any(String),
   });
-  expect(findByType(emitted, "project.remove.response")?.payload).toEqual({
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toEqual({
     requestId: "req-remove-project",
     projectId: project.projectId,
     accepted: true,
@@ -4032,6 +4045,7 @@ test("project.remove.request removes an already-empty project", async () => {
     type: "project.remove.request",
     projectId: project.projectId,
     requestId: "req-remove-empty-project",
+    ifEmpty: true,
   });
 
   expect(projects.has(project.projectId)).toBe(false);
