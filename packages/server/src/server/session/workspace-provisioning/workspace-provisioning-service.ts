@@ -206,7 +206,12 @@ export function createWorkspaceProvisioningService(deps: {
 
   async function findOrCreateProjectForDirectory(cwd: string): Promise<PersistedProjectRecord> {
     const requestedPath = resolve(cwd);
-    const checkout = await workspaceGitService.getCheckout(requestedPath);
+    let checkout = await workspaceGitService.getCheckout(requestedPath);
+    const realPath = canonicalPath(requestedPath);
+    if (!checkout.isGit && realPath !== requestedPath) {
+      const realCheckout = await workspaceGitService.getCheckout(realPath);
+      if (realCheckout.isGit) checkout = realCheckout;
+    }
     const checkoutProjectRoot = projectRootForCheckout(requestedPath, checkout);
     const projectKey = deriveProjectKey({
       rootPath: checkoutProjectRoot,
@@ -252,7 +257,7 @@ export function createWorkspaceProvisioningService(deps: {
     // folder name cannot turn it into a separate top-level project.
     if (!checkout.isGit) return cwd;
     const checkoutRoot = resolve(checkout.worktreeRoot ?? cwd);
-    const withinCheckout = relative(checkoutRoot, cwd);
+    const withinCheckout = relative(canonicalPath(checkoutRoot), canonicalPath(cwd));
     if (
       withinCheckout === ".." ||
       withinCheckout.startsWith(`..${sep}`) ||
@@ -261,6 +266,14 @@ export function createWorkspaceProvisioningService(deps: {
       return cwd;
     }
     return resolve(checkout.mainRepoRoot ?? checkoutRoot);
+  }
+
+  function canonicalPath(target: string): string {
+    try {
+      return realpathSync(target);
+    } catch {
+      return resolve(target);
+    }
   }
 
   async function requireActiveProject(projectId: string): Promise<PersistedProjectRecord> {
