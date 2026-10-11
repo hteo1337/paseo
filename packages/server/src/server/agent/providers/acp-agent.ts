@@ -2480,9 +2480,15 @@ export class ACPAgentSession implements AgentSession, ACPClient {
 
   getOwnedProcessIds(): number[] {
     return [
-      this.child?.pid,
-      ...Array.from(this.terminalEntries.values(), (entry) => entry.child.pid),
+      this.child?.exitCode === null && this.child.signalCode === null ? this.child.pid : undefined,
+      ...Array.from(this.terminalEntries.values(), (entry) =>
+        entry.exit === null ? entry.child.pid : undefined,
+      ),
     ].filter((pid): pid is number => typeof pid === "number" && pid > 0);
+  }
+
+  hasLiveTerminals(): boolean {
+    return Array.from(this.terminalEntries.values()).some((entry) => entry.exit === null);
   }
 
   async requestPermission(params: RequestPermissionRequest): Promise<RequestPermissionResponse> {
@@ -2718,7 +2724,11 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   async releaseTerminal(params: { sessionId: string; terminalId: string }): Promise<void> {
     const entry = this.getTerminalEntry(params.terminalId);
     if (!entry.exit) {
-      await this.terminateProcess(entry.child, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+      const result = await this.terminateProcess(entry.child, {
+        gracefulTimeoutMs: 2_000,
+        forceTimeoutMs: 2_000,
+      });
+      if (result === "kill-timeout") throw new Error("ACP terminal did not exit after SIGKILL");
     }
     this.terminalEntries.delete(params.terminalId);
   }
@@ -2726,7 +2736,11 @@ export class ACPAgentSession implements AgentSession, ACPClient {
   async killTerminal(params: KillTerminalRequest): Promise<Record<string, never>> {
     const entry = this.getTerminalEntry(params.terminalId);
     if (!entry.exit) {
-      await this.terminateProcess(entry.child, { gracefulTimeoutMs: 2_000, forceTimeoutMs: 2_000 });
+      const result = await this.terminateProcess(entry.child, {
+        gracefulTimeoutMs: 2_000,
+        forceTimeoutMs: 2_000,
+      });
+      if (result === "kill-timeout") throw new Error("ACP terminal did not exit after SIGKILL");
     }
     return {};
   }

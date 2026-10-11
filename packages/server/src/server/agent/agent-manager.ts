@@ -380,11 +380,18 @@ export interface AgentManagerOptions {
   appendSystemPrompt?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
+  processTreeReaper?: typeof reapProcessTree;
   beforeSteerUnavailableFallback?: (input: {
     agentId: string;
     expectedTurnId: string;
   }) => Promise<void>;
   logger: Logger;
+}
+
+function resolveProcessTreeReaper(
+  reaper: AgentManagerOptions["processTreeReaper"],
+): typeof reapProcessTree {
+  return reaper ?? reapProcessTree;
 }
 
 export type ActiveTurnSteerDispatchResult =
@@ -841,6 +848,8 @@ export class AgentManager {
   private readonly idleUnloadCloses = new Set<string>();
   private readonly residentLastUsedAt = new Map<string, number>();
   private readonly idleProcessSnapshots = new Map<string, ProcessTreeSnapshot>();
+  private readonly idleReapPending = new Set<string>();
+  private readonly processTreeReaper: typeof reapProcessTree;
   private readonly activeAgentUses = new Map<string, number>();
   private readonly clientStreamHolds = new Map<string, number>();
   private globalClientStreamHolds = 0;
@@ -891,6 +900,7 @@ export class AgentManager {
     this.resolvePaseoToolPolicy = options.resolvePaseoToolPolicy ?? (() => undefined);
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
+    this.processTreeReaper = resolveProcessTreeReaper(options.processTreeReaper);
     this.rescueTimeouts = {
       reloadSessionCloseMs:
         options.rescueTimeouts?.reloadSessionCloseMs ?? RELOAD_SESSION_CLOSE_TIMEOUT_MS,
@@ -1350,6 +1360,7 @@ export class AgentManager {
       !this.providerSubagents.list(agentId).some((child) => child.status === "running") &&
       agent.pendingPermissions.size === 0 &&
       agent.session.getPendingPermissions().length === 0 &&
+      !agent.session.hasLiveTerminals?.() &&
       agent.inFlightPermissionResponses.size === 0 &&
       !agent.pendingReplacement &&
       (this.activeAgentUses.get(agentId) ?? 0) === 0 &&
@@ -1411,6 +1422,13 @@ export class AgentManager {
     // Loading during reload must wait for the replacement, not resume another writer.
     await this.lifecycleMutationTails.get(agentId);
     await this.inFlightAgentCloses?.get(agentId)?.catch(() => undefined);
+    if (this.idleReapPending.has(agentId)) {
+      await this.runLifecycleMutation(agentId, async () => {
+        if (this.idleReapPending.has(agentId) && this.agents.has(agentId)) {
+          await this.closeAgentRuntime(agentId);
+        }
+      });
+    }
   }
 
   getTimeline(id: string): AgentTimelineItem[] {
@@ -2074,14 +2092,29 @@ export class AgentManager {
     // Runs synchronously, with no await between it and session.close(), so a
     // requireIdle recheck here cannot race a turn that starts during the drain.
     options?.onBeforeClose?.();
-    // Retain ownership until shutdown succeeds. A failed close may still own a
-    // native writer, so publishing a resumable closed snapshot would orphan it.
-    await agent.session.close();
     const idleSnapshot = this.idleProcessSnapshots.get(agentId);
-    const reapedProcesses =
-      (idleSnapshot ? await reapProcessTree(idleSnapshot) : 0) +
-      (agent.session.getReapedProcessCount?.() ?? 0);
+    if (idleSnapshot) {
+      // Provider-owned cleanup may fail inside close(). Block access before it
+      // starts and retry the close on the lifecycle lane before any resume.
+      this.idleReapPending.add(agentId);
+      this.refusedProviderSessions.add(agent.session);
+    }
+    let reapedProcesses: number;
+    try {
+      // Retain ownership until shutdown succeeds. A failed close may still own
+      // a native writer, so publishing a resumable snapshot would orphan it.
+      await agent.session.close();
+      reapedProcesses =
+        (idleSnapshot ? await this.processTreeReaper(idleSnapshot) : 0) +
+        (agent.session.getReapedProcessCount?.() ?? 0);
+    } catch (error) {
+      agent.lastError = `Provider process cleanup incomplete: ${error instanceof Error ? error.message : String(error)}`;
+      agent.lifecycle = "error";
+      this.emitState(agent);
+      throw error;
+    }
     this.idleProcessSnapshots.delete(agentId);
+    this.idleReapPending.delete(agentId);
     this.cancelRunningProviderSubagents(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
 
