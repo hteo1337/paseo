@@ -309,6 +309,11 @@ export function createPluginWorker(options: {
     send({
       type: "ready",
       methods: [...handlers.keys()].sort(),
+      rpcAuthorizations: Object.fromEntries(
+        [...handlers.entries()]
+          .filter(([, registered]) => registered.contract.authorization)
+          .map(([method, registered]) => [method, registered.contract.authorization!]),
+      ),
       hooks: hooks.catalog(),
       providers: [...providers.values()]
         .sort((left, right) => left.id.localeCompare(right.id))
