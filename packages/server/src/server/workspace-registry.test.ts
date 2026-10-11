@@ -474,6 +474,49 @@ describe("workspace registries", () => {
     expect(await workspaceRegistry.list()).toEqual([]);
   });
 
+  test("claims one active workspace for concurrent opens of the same real directory", async () => {
+    const checkout = path.join(tmpDir, "checkout");
+    const alias = path.join(tmpDir, "checkout-alias");
+    const other = path.join(tmpDir, "other");
+    mkdirSync(checkout);
+    mkdirSync(other);
+    symlinkSync(checkout, alias);
+    const record = (workspaceId: string, cwd: string) =>
+      createPersistedWorkspaceRecord({
+        workspaceId,
+        projectId: "project-one",
+        cwd,
+        kind: "local_checkout",
+        displayName: workspaceId,
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      });
+
+    const [first, second] = await Promise.all([
+      workspaceRegistry.getOrCreateActiveByCwd(record("workspace-one", checkout)),
+      workspaceRegistry.getOrCreateActiveByCwd(record("workspace-two", alias)),
+    ]);
+    const distinct = await workspaceRegistry.getOrCreateActiveByCwd(
+      record("workspace-three", other),
+    );
+
+    expect(first).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-one" }),
+      created: true,
+    });
+    expect(second).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-one" }),
+      created: false,
+    });
+    expect(distinct).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-three" }),
+      created: true,
+    });
+    expect(
+      (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+    ).toHaveLength(2);
+  });
+
   test("refreshes workspace archive timestamps when an archive is repeated", async () => {
     await workspaceRegistry.initialize();
     await workspaceRegistry.upsert(

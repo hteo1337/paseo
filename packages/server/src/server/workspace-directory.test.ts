@@ -3,6 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { AgentStorage } from "./agent/agent-storage.js";
 import { AgentDirectory } from "./agent/directory.js";
+import os from "node:os";
+import path from "node:path";
+import { mkdtempSync, rmSync, statSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 import { createTestLogger } from "../test-utils/test-logger.js";
@@ -571,6 +574,7 @@ describe("WorkspaceDirectory empty projects", () => {
   function makeDirectory(input: {
     projects: PersistedProjectRecord[];
     workspaces: PersistedWorkspaceRecord[];
+    isWorkspaceDirectory?: (cwd: string) => Promise<boolean>;
   }): WorkspaceDirectory {
     return new WorkspaceDirectory({
       logger: createTestLogger(),
@@ -581,6 +585,7 @@ describe("WorkspaceDirectory empty projects", () => {
       listProviderSubagentActivity: async () => [],
       listTerminalActivityContributions: async () => [],
       isProviderVisibleToClient: () => true,
+      isWorkspaceDirectory: input.isWorkspaceDirectory,
       buildWorkspaceDescriptor: async ({ workspace }) => ({
         id: workspace.workspaceId,
         projectId: workspace.projectId,
@@ -699,6 +704,46 @@ describe("WorkspaceDirectory empty projects", () => {
     });
     expect(shown.entries.map((entry) => entry.id)).toEqual(["ws-internal"]);
     expect(shown.emptyProjects).toEqual([]);
+  });
+
+  test("omits a missing directory while retaining an existing workspace", async () => {
+    const existing = mkdtempSync(path.join(os.tmpdir(), "paseo-directory-visible-"));
+    const missing = `${existing}-gone`;
+    const record = (workspaceId: string, cwd: string): PersistedWorkspaceRecord => ({
+      workspaceId,
+      projectId: workspaceId,
+      cwd,
+      kind: "directory",
+      displayName: workspaceId,
+      createdAt: NOW,
+      updatedAt: NOW,
+      archivedAt: null,
+    });
+    try {
+      const directory = makeDirectory({
+        projects: [project({ projectId: "present" }), project({ projectId: "missing" })],
+        workspaces: [record("present", existing), record("missing", missing)],
+        isWorkspaceDirectory: async (cwd) => {
+          try {
+            return statSync(cwd).isDirectory();
+          } catch {
+            return false;
+          }
+        },
+      });
+
+      const listed = await directory.listFetchEntries({
+        type: "fetch_workspaces_request",
+        requestId: "missing-dir",
+      });
+      expect(listed.entries.map((entry) => entry.id)).toEqual(["present"]);
+      expect(listed.emptyProjects.map((entry) => entry.projectId)).toEqual(["missing"]);
+      expect((await directory.listObservationTargets()).map((entry) => entry.id)).toEqual([
+        "present",
+      ]);
+    } finally {
+      rmSync(existing, { recursive: true, force: true });
+    }
   });
 });
 
