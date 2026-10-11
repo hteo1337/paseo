@@ -3072,14 +3072,20 @@ export class DaemonClient {
     requestId?: string,
     options?: { ifEmpty?: boolean; ifNoActiveWorkspaces?: boolean },
   ): Promise<{ removedWorkspaceIds: string[] }> {
+    if (
+      (options?.ifEmpty || options?.ifNoActiveWorkspaces) &&
+      this.lastServerInfoMessage?.features?.guardedProjectRemove !== true
+    ) {
+      throw new Error("Guarded project removal is unavailable on this daemon");
+    }
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"project.remove.response">({
       requestId,
       message: {
         type: "project.remove.request",
         projectId,
         // COMPAT(projectNoActiveGuard): added in v0.11.2, remove after 2027-04-11.
-        // Older daemons ignore the new field; their strict empty guard must
-        // reject archived-only projects rather than delete them unguarded.
+        // A daemon without guardedProjectRemove is rejected above; both fields
+        // remain optional on the wire for older clients and daemons.
         ifEmpty: options?.ifEmpty || options?.ifNoActiveWorkspaces,
         ifNoActiveWorkspaces: options?.ifNoActiveWorkspaces,
       },

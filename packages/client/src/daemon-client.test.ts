@@ -3651,7 +3651,7 @@ test("sends project.remove.request", async () => {
   clients.push(client);
 
   const connectPromise = client.connect();
-  mock.triggerOpen();
+  mock.triggerOpen({ features: { guardedProjectRemove: true } });
   await connectPromise;
 
   const removePromise = client.removeProject("remote:github.com/acme/app", "req-remove-project");
@@ -3700,6 +3700,27 @@ test("sends project.remove.request", async () => {
     }),
   );
   await expect(guarded).resolves.toEqual({ removedWorkspaceIds: [] });
+});
+
+test("guarded project removal refuses a daemon without the capability", async () => {
+  const mock = createMockTransport();
+  const client = new DaemonClient({
+    url: "ws://test",
+    clientId: "clsk_legacy_project_remove",
+    reconnect: { enabled: false },
+    transportFactory: () => mock.transport,
+  });
+  clients.push(client);
+  const connected = client.connect();
+  mock.triggerOpen({ features: {} });
+  await connected;
+  await expect(client.removeProject("project-1", undefined, { ifEmpty: true })).rejects.toThrow(
+    "Guarded project removal is unavailable",
+  );
+  await expect(
+    client.removeProject("project-1", undefined, { ifNoActiveWorkspaces: true }),
+  ).rejects.toThrow("Guarded project removal is unavailable");
+  expect(mock.sent).toEqual([]);
 });
 
 test("sends worktree base-ref fields in create_paseo_worktree_request", async () => {

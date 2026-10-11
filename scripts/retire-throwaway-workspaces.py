@@ -239,10 +239,13 @@ def finalize_archived(home, include_sandbox, item, trash):
         cli("project", "delete", item["projectId"],
             "--if-no-active-workspaces" if has_history else "--if-empty")
         removed_project = True
-    destination = move_eligible(path, item["reason"], trash)
+    # Workspace admission is fenced by project ID, not by canonical directory.
+    # A new project can claim this path immediately after guarded deletion, so
+    # moving it here could relocate data belonging to a newly live workspace.
+    destination = None
     return {**{key: value for key, value in item.items() if key != "error"},
             "result": "archived", "projectRemoved": removed_project,
-            "movedTo": destination}
+            "movedTo": destination, "moveHeld": "canonical_path_admission_not_fenced"}
 
 
 def main():
