@@ -1,3 +1,4 @@
+import type { ProjectGroup } from "@getpaseo/protocol/project-groups";
 import type { ProjectDescriptor, WorkspaceDescriptor } from "@/stores/session-store";
 import { projectDisplayNameFromProjectId } from "@/utils/project-display-name";
 
@@ -5,6 +6,7 @@ export interface WorkspaceStructureHostPlacement {
   serverId: string;
   projectId: string;
   iconWorkingDir: string;
+  projectGroup?: ProjectGroup | null;
   worktreeSupport: "supported" | "unsupported" | "unknown";
   customIconRevision?: string | null;
   iconRevision?: string;
@@ -14,6 +16,7 @@ export interface WorkspaceStructureProject {
   viewKey: string;
   projectKey: string | null;
   projectName: string;
+  projectGroup?: ProjectGroup | null;
   projectKind: WorkspaceDescriptor["projectKind"] | "unknown";
   iconWorkingDir: string;
   hosts: WorkspaceStructureHostPlacement[];
@@ -34,6 +37,7 @@ interface ProjectDraft {
   viewKey: string;
   projectKey: string | null;
   projectName: string;
+  projectGroup?: ProjectGroup | null;
   hasCustomName: boolean;
   projectKind: WorkspaceDescriptor["projectKind"];
   iconWorkingDir: string;
@@ -96,6 +100,7 @@ export function buildWorkspaceStructureProjects(input: {
       viewKey: draft.viewKey,
       projectKey: draft.projectKey,
       projectName: draft.projectName,
+      projectGroup: draft.projectGroup,
       projectKind: draft.projectKind,
       iconWorkingDir: draft.iconWorkingDir,
       hosts: Array.from(draft.hosts.values()),
@@ -159,6 +164,7 @@ function addProjectToView(input: {
     serverId,
     projectId: project.projectId,
     iconWorkingDir: project.projectRootPath,
+    projectGroup: project.projectGroup ?? null,
     worktreeSupport: project.projectKind === "git" ? "supported" : "unsupported",
     customIconRevision: project.projectCustomIconRevision,
     iconRevision: project.projectIconRevision,
@@ -173,6 +179,7 @@ function addProjectToView(input: {
         project.projectDisplayName ??
         projectDisplayNameFromProjectId(project.projectId),
       hasCustomName: Boolean(project.projectCustomName),
+      projectGroup: project.projectGroup,
       projectKind: project.projectKind,
       iconWorkingDir: project.projectRootPath,
       hosts: new Map([[serverId, placement]]),
