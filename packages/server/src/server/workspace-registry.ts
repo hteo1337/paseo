@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
-import { areEquivalentPaths } from "../utils/path.js";
+import { areEquivalentPaths, createRealpathAwarePathMatcher } from "../utils/path.js";
 import {
   generateProjectId,
   type PersistedProjectKind,
@@ -116,6 +116,7 @@ export interface WorkspaceMutation {
 
 export interface WorkspaceMutationContext {
   expectsInitialAgent?: boolean;
+  rehomeProjectId?: string;
 }
 
 export interface WorkspaceArchiveContext {
@@ -161,6 +162,16 @@ export interface WorkspaceRegistry {
     updater: (record: PersistedWorkspaceRecord) => PersistedWorkspaceRecord,
   ): Promise<PersistedWorkspaceRecord | null>;
   upsert(record: PersistedWorkspaceRecord, context?: WorkspaceMutationContext): Promise<void>;
+  getOrCreateActiveByCwd(
+    record: PersistedWorkspaceRecord,
+    context?: WorkspaceMutationContext,
+  ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }>;
+  /** Serialize guarded project removal with new workspace claims. */
+  removeProjectIfUnreferenced?(
+    projectId: string,
+    removeProject: () => Promise<void>,
+    projectStillExists: () => Promise<boolean>,
+  ): Promise<boolean>;
   archive(
     workspaceId: string,
     archivedAt: string,
@@ -511,6 +522,7 @@ export class FileBackedWorkspaceRegistry
   private readonly mutationListeners = new Set<
     (mutation: WorkspaceMutation) => void | Promise<void>
   >();
+  private readonly retiredProjectIds = new Set<string>();
 
   constructor(
     filePath: string,
@@ -554,13 +566,91 @@ export class FileBackedWorkspaceRegistry
     record: PersistedWorkspaceRecord,
     context?: WorkspaceMutationContext,
   ): Promise<void> {
-    await super.upsert(record);
+    const parsed = PersistedWorkspaceRecordSchema.parse(record);
+    await this.mutateCache((records) => {
+      if (this.retiredProjectIds.has(parsed.projectId)) {
+        throw new Error(`Project is being removed: ${parsed.projectId}`);
+      }
+      records.set(parsed.workspaceId, parsed);
+    });
     await this.notifyMutation({
       kind: "upsert",
       workspaceId: record.workspaceId,
       workspace: record,
       ...(context?.expectsInitialAgent ? { expectsInitialAgent: true } : {}),
     });
+  }
+
+  async getOrCreateActiveByCwd(
+    record: PersistedWorkspaceRecord,
+    context?: WorkspaceMutationContext,
+  ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }> {
+    const parsed = PersistedWorkspaceRecordSchema.parse(record);
+    const matchesCwd = createRealpathAwarePathMatcher(parsed.cwd);
+    const result = await this.mutateCache((records) => {
+      if (this.retiredProjectIds.has(context?.rehomeProjectId ?? parsed.projectId)) {
+        throw new Error(
+          `Project is being removed: ${context?.rehomeProjectId ?? parsed.projectId}`,
+        );
+      }
+      const existing = Array.from(records.values())
+        .filter((candidate) => !candidate.archivedAt && matchesCwd(candidate.cwd))
+        .sort(
+          (left, right) =>
+            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+            left.workspaceId.localeCompare(right.workspaceId),
+        )[0];
+      if (existing) {
+        if (context?.rehomeProjectId && existing.projectId !== context.rehomeProjectId) {
+          const updated = {
+            ...existing,
+            projectId: context.rehomeProjectId,
+            updatedAt: new Date().toISOString(),
+          };
+          records.set(existing.workspaceId, updated);
+          return { workspace: updated, created: false, updated: true };
+        }
+        return { workspace: existing, created: false, updated: false };
+      }
+      records.set(parsed.workspaceId, parsed);
+      return { workspace: parsed, created: true, updated: false };
+    });
+    if (result.created || result.updated) {
+      await this.notifyMutation({
+        kind: "upsert",
+        workspaceId: result.workspace.workspaceId,
+        workspace: result.workspace,
+        ...(context?.expectsInitialAgent ? { expectsInitialAgent: true } : {}),
+      });
+    }
+    return { workspace: result.workspace, created: result.created };
+  }
+
+  async removeProjectIfUnreferenced(
+    projectId: string,
+    removeProject: () => Promise<void>,
+    projectStillExists: () => Promise<boolean>,
+  ): Promise<boolean> {
+    return this.mutateCache(
+      (records) =>
+        !Array.from(records.values()).some((workspace) => workspace.projectId === projectId),
+      {
+        forcePersist: (empty) => empty,
+        beforeWrite: async () => {
+          this.retiredProjectIds.add(projectId);
+          try {
+            await removeProject();
+          } catch (error) {
+            // A mutation listener can fail after the project file was committed.
+            // Keep the fence when the commit outcome cannot be proved.
+            if (await projectStillExists().catch(() => false)) {
+              this.retiredProjectIds.delete(projectId);
+            }
+            throw error;
+          }
+        },
+      },
+    );
   }
 
   override async archive(

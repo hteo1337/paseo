@@ -2,7 +2,7 @@ import os from "node:os";
 import path from "node:path";
 import { mkdirSync, mkdtempSync, rmSync, symlinkSync } from "node:fs";
 
-import { beforeEach, afterEach, describe, expect, test } from "vitest";
+import { beforeEach, afterEach, describe, expect, test, vi } from "vitest";
 
 import { createTestLogger } from "../test-utils/test-logger.js";
 import { writeJsonFileAtomic } from "./atomic-file.js";
@@ -447,6 +447,110 @@ describe("workspace registries", () => {
     await workspaceRegistry.remove("/tmp/repo");
     expect(await workspaceRegistry.get("/tmp/repo")).toBeNull();
     expect(await workspaceRegistry.list()).toEqual([]);
+  });
+
+  test("claims one active workspace for concurrent opens of the same real directory", async () => {
+    const checkout = path.join(tmpDir, "checkout");
+    const alias = path.join(tmpDir, "checkout-alias");
+    const other = path.join(tmpDir, "other");
+    mkdirSync(checkout);
+    mkdirSync(other);
+    symlinkSync(checkout, alias);
+    const record = (workspaceId: string, cwd: string) =>
+      createPersistedWorkspaceRecord({
+        workspaceId,
+        projectId: "project-one",
+        cwd,
+        kind: "local_checkout",
+        displayName: workspaceId,
+        createdAt: "2026-03-01T00:00:00.000Z",
+        updatedAt: "2026-03-01T00:00:00.000Z",
+      });
+
+    const [first, second] = await Promise.all([
+      workspaceRegistry.getOrCreateActiveByCwd(record("workspace-one", checkout)),
+      workspaceRegistry.getOrCreateActiveByCwd(record("workspace-two", alias)),
+    ]);
+    const distinct = await workspaceRegistry.getOrCreateActiveByCwd(
+      record("workspace-three", other),
+    );
+
+    expect(first).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-one" }),
+      created: true,
+    });
+    expect(second).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-one" }),
+      created: false,
+    });
+    expect(distinct).toEqual({
+      workspace: expect.objectContaining({ workspaceId: "workspace-three" }),
+      created: true,
+    });
+    expect(
+      (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+    ).toHaveLength(2);
+  });
+
+  test("guarded empty project removal excludes archived references and racing claims", async () => {
+    const record = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: "project-one",
+      cwd: path.join(tmpDir, "checkout"),
+      kind: "local_checkout",
+      displayName: "checkout",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+    await workspaceRegistry.upsert({ ...record, archivedAt: "2026-03-02T00:00:00.000Z" });
+    const remove = vi.fn(async () => {});
+    expect(
+      await workspaceRegistry.removeProjectIfUnreferenced("project-one", remove, async () => true),
+    ).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
+
+    await workspaceRegistry.remove(record.workspaceId);
+    let enterRemoval!: () => void;
+    const removing = new Promise<void>((resolve) => (enterRemoval = resolve));
+    let finishRemoval!: () => void;
+    const removalHeld = new Promise<void>((resolve) => (finishRemoval = resolve));
+    const removal = workspaceRegistry.removeProjectIfUnreferenced(
+      "project-one",
+      async () => {
+        enterRemoval();
+        await removalHeld;
+      },
+      async () => false,
+    );
+    await removing;
+    const claim = workspaceRegistry.getOrCreateActiveByCwd(record);
+    finishRemoval();
+    expect(await removal).toBe(true);
+    await expect(claim).rejects.toThrow("Project is being removed");
+    await expect(workspaceRegistry.upsert(record)).rejects.toThrow("Project is being removed");
+    expect(await workspaceRegistry.list()).toEqual([]);
+  });
+
+  test("failed pre-commit project removal releases its admission fence", async () => {
+    await expect(
+      workspaceRegistry.removeProjectIfUnreferenced(
+        "project-one",
+        async () => {
+          throw new Error("write failed");
+        },
+        async () => true,
+      ),
+    ).rejects.toThrow("write failed");
+    const workspace = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-one",
+      projectId: "project-one",
+      cwd: path.join(tmpDir, "checkout"),
+      kind: "local_checkout",
+      displayName: "checkout",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-01T00:00:00.000Z",
+    });
+    expect((await workspaceRegistry.getOrCreateActiveByCwd(workspace)).created).toBe(true);
   });
 
   test("refreshes workspace archive timestamps when an archive is repeated", async () => {

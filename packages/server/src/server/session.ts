@@ -1,3 +1,4 @@
+import { ownerUnixOrigin } from "./owner-unix-origin.js";
 import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
@@ -1190,6 +1191,7 @@ export class Session {
       listProviderSubagentActivity: async () => this.agentManager.listProviderSubagentActivity(),
       listTerminalActivityContributions: () => this.listTerminalActivityContributions(),
       isProviderVisibleToClient: (provider) => this.isProviderVisibleToClient(provider),
+      isWorkspaceDirectory: (cwd) => this.filesystem.isDirectory(cwd),
       buildWorkspaceDescriptor: (input) => this.buildWorkspaceDescriptor(input),
     });
 
@@ -2326,7 +2328,7 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
       this.dispatchPluginDirectoryMessage(msg) ??
-      this.dispatchPluginMessage(msg) ??
+      this.dispatchPluginMessage(msg, source) ??
       this.dispatchTerminalMessage(msg) ??
       this.dispatchScheduleMessage(msg) ??
       this.dispatchMiscMessage(msg);
@@ -2402,7 +2404,10 @@ export class Session {
     }
   }
 
-  private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchPluginMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     if (msg.type === "plugin.list.request") {
       return (this.pluginRuntime?.listPlugins() ?? Promise.resolve([])).then((plugins) => {
         this.emit({
@@ -2472,13 +2477,14 @@ export class Session {
       return undefined;
     }
     if (msg.type === "plugin.rpc.invoke.request") {
-      return this.handlePluginRpcInvocation(msg);
+      return this.handlePluginRpcInvocation(msg, source);
     }
     return undefined;
   }
 
   private handlePluginRpcInvocation(
     msg: Extract<SessionInboundMessage, { type: "plugin.rpc.invoke.request" }>,
+    source?: object,
   ): Promise<void> {
     const pluginRuntime = this.pluginRuntime;
     if (!pluginRuntime) throw new Error("Plugin service is unavailable");
@@ -2486,6 +2492,7 @@ export class Session {
       pluginRuntime.pluginRpcRequiresScope?.(msg.pluginId, msg.method) ? msg.scope : undefined,
       {
         authorization: this.authorization,
+        origin: () => ownerUnixOrigin(source),
         authentication: { kind: "session", sessionId: this.sessionId, clientId: this.clientId },
         getWorkspace: (id) => this.workspaceRegistry.get(id),
         getAgent: (id) => this.agentStorage.get(id),
@@ -3640,6 +3647,9 @@ export class Session {
       const activeWorkspaceIds = projectWorkspaces
         .filter((workspace) => !workspace.archivedAt)
         .map((workspace) => workspace.workspaceId);
+      if (request.ifEmpty && projectWorkspaces.length > 0) {
+        throw new Error(`Project has workspaces: ${projectId}`);
+      }
 
       if (activeWorkspaceIds.length > 0) {
         this.markWorkspaceArchiving(activeWorkspaceIds, new Date().toISOString());
@@ -3663,7 +3673,19 @@ export class Session {
           removedWorkspaceIds.push(workspaceId);
         }
 
-        await this.projectRegistry.remove(resolvedProjectId);
+        if (request.ifEmpty) {
+          if (!this.workspaceRegistry.removeProjectIfUnreferenced) {
+            throw new Error("Guarded project removal is unavailable");
+          }
+          const removed = await this.workspaceRegistry.removeProjectIfUnreferenced(
+            resolvedProjectId,
+            () => this.projectRegistry.remove(resolvedProjectId),
+            async () => Boolean(await this.projectRegistry.get(resolvedProjectId)),
+          );
+          if (!removed) throw new Error(`Project gained a workspace: ${projectId}`);
+        } else {
+          await this.projectRegistry.remove(resolvedProjectId);
+        }
         await removeProjectCustomIcon({
           paseoHome: this.paseoHome,
           projectId: resolvedProjectId,
@@ -6944,7 +6966,9 @@ export class Session {
       for (const project of await this.projectRegistry.list()) {
         projectsBefore.set(project.projectId, project);
       }
-      const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(cwd);
+      const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(cwd, {
+        exactRoot: true,
+      });
       this.sessionLogger.info(
         {
           requestedCwd,
@@ -6987,7 +7011,9 @@ export class Session {
         { parentPath: request.parentPath, name: request.name },
         {
           registerProject: (directoryPath) =>
-            this.workspaceProvisioning.findOrCreateProjectForDirectory(directoryPath),
+            this.workspaceProvisioning.findOrCreateProjectForDirectory(directoryPath, {
+              exactRoot: true,
+            }),
         },
       );
       this.emit({
@@ -7420,7 +7446,7 @@ export class Session {
         throw new Error(`Workspace not found: ${request.workspaceId}`);
       }
 
-      await archiveByScope(
+      const archive = await archiveByScope(
         {
           paseoHome: this.paseoHome,
           paseoWorktreesBaseRoot: this.worktreesRoot,
@@ -7447,8 +7473,30 @@ export class Session {
         {
           scope: { kind: "workspace", workspaceId: existing.workspaceId },
           requestId: request.requestId,
+          ...(request.ifNoLiveAgents
+            ? {
+                abortIf: () =>
+                  this.agentManager
+                    .listAgentsIncludingInternal()
+                    .filter(
+                      (agent) =>
+                        agent.workspaceId === existing.workspaceId && agent.lifecycle !== "closed",
+                    )
+                    .map((agent) => agent.id),
+                holdNewRuns: () =>
+                  this.agentManager.holdNewRunsForArchive(existing.workspaceId, existing.cwd),
+                keepDirectory: true as const,
+              }
+            : {}),
         },
       );
+
+      if (archive.deferredByAgentIds?.length) {
+        throw new Error(`Workspace has live agents: ${archive.deferredByAgentIds.join(", ")}`);
+      }
+      if (request.ifNoLiveAgents && !archive.archivedWorkspaceIds.includes(existing.workspaceId)) {
+        throw new Error(`Guarded workspace archive did not archive ${existing.workspaceId}`);
+      }
 
       const archivedWorkspace = await this.workspaceRegistry.get(request.workspaceId);
       const archivedAt = archivedWorkspace?.archivedAt ?? new Date().toISOString();

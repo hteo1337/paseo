@@ -1,5 +1,5 @@
 import { execFileSync, spawn } from "node:child_process";
-import { existsSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { afterEach, beforeEach, expect, test } from "vitest";
@@ -10,6 +10,10 @@ import {
   DaemonClient,
   type DaemonTestContext,
 } from "./test-utils/index.js";
+import {
+  createPersistedProjectRecord,
+  createPersistedWorkspaceRecord,
+} from "./workspace-registry.js";
 
 // Model B archive is scoped to a single workspace RECORD (by workspaceId), not
 // to a directory on disk. A directory can back multiple workspaces, so archiving
@@ -118,9 +122,40 @@ function collectWorkspaceTitles(client: DaemonClient): {
 
 test("archiving one of two workspaces sharing a cwd spares the sibling and the directory", async () => {
   const cwd = makeTempDir("workspace-archive-shared-cwd-");
-
-  const workspaceA = await createLocalWorkspace(cwd, "workspace-a");
-  const workspaceB = await createLocalWorkspace(cwd, "workspace-b");
+  const home = makeTempDir("workspace-archive-seeded-home-");
+  const projectsDir = path.join(home, ".paseo", "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  const createdAt = "2026-03-01T00:00:00.000Z";
+  const project = createPersistedProjectRecord({
+    projectId: "prj_legacy_duplicate",
+    rootPath: cwd,
+    kind: "non_git",
+    displayName: path.basename(cwd),
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const seededWorkspace = (workspaceId: string, displayName: string) =>
+    createPersistedWorkspaceRecord({
+      workspaceId,
+      projectId: project.projectId,
+      cwd,
+      kind: "directory",
+      displayName,
+      createdAt,
+      updatedAt: createdAt,
+    });
+  const workspaceA = "wks_legacy_duplicate_a";
+  const workspaceB = "wks_legacy_duplicate_b";
+  writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify([project]));
+  writeFileSync(
+    path.join(projectsDir, "workspaces.json"),
+    JSON.stringify([
+      seededWorkspace(workspaceA, "workspace-a"),
+      seededWorkspace(workspaceB, "workspace-b"),
+    ]),
+  );
+  await ctx.cleanup();
+  ctx = await createDaemonTestContext({ paseoHomeRoot: home });
   expect(workspaceA).not.toBe(workspaceB);
 
   const agentA = await ctx.client.createAgent({
@@ -190,6 +225,70 @@ test("archiving one of two workspaces sharing a cwd spares the sibling and the d
   expect(existsSync(cwd)).toBe(true);
 
   await ctx.client.killTerminal(terminalBId);
+}, 60000);
+
+test("guarded archive refuses a live owner and preserves a shared directory", async () => {
+  const cwd = makeTempDir("workspace-guarded-archive-");
+  const marker = path.join(cwd, "keep.txt");
+  writeFileSync(marker, "keep");
+  const home = makeTempDir("workspace-guarded-home-");
+  const projectsDir = path.join(home, ".paseo", "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  const createdAt = "2026-03-01T00:00:00.000Z";
+  const project = createPersistedProjectRecord({
+    projectId: "prj_guarded_duplicate",
+    rootPath: cwd,
+    kind: "non_git",
+    displayName: path.basename(cwd),
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const ownerId = "wks_guarded_owner";
+  const spareId = "wks_guarded_spare";
+  writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify([project]));
+  writeFileSync(
+    path.join(projectsDir, "workspaces.json"),
+    JSON.stringify(
+      [ownerId, spareId].map((workspaceId) =>
+        createPersistedWorkspaceRecord({
+          workspaceId,
+          projectId: project.projectId,
+          cwd,
+          kind: "directory",
+          displayName: workspaceId,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      ),
+    ),
+  );
+  await ctx.cleanup();
+  ctx = await createDaemonTestContext({ paseoHomeRoot: home });
+
+  const agent = await ctx.client.createAgent({
+    ...getFullAccessConfig("codex"),
+    cwd,
+    workspaceId: ownerId,
+    title: "live owner",
+    initialPrompt: "Say done.",
+  });
+  expect(await activeAgentIds()).toContain(agent.id);
+
+  const refused = await ctx.client.archiveWorkspace(ownerId, undefined, {
+    ifNoLiveAgents: true,
+  });
+  expect(refused.error).toContain("Workspace has live agents");
+  expect(await activeWorkspaceIds()).toContain(ownerId);
+  expect(await activeAgentIds()).toContain(agent.id);
+
+  const archived = await ctx.client.archiveWorkspace(spareId, undefined, {
+    ifNoLiveAgents: true,
+  });
+  expect(archived.error).toBeNull();
+  expect(await activeWorkspaceIds()).not.toContain(spareId);
+  expect(await activeWorkspaceIds()).toContain(ownerId);
+  expect(await activeAgentIds()).toContain(agent.id);
+  expect(existsSync(marker)).toBe(true);
 }, 60000);
 
 test("archiving a workspace removes it from every subscribed client", async () => {
@@ -412,7 +511,7 @@ test.skipIf(process.platform === "win32")(
   60000,
 );
 
-test("worktree archive targets the explicit workspaceId when a directory backs multiple workspaces", async () => {
+test("local create reuses a worktree workspace and explicit archive targets that record", async () => {
   const repoDir = createGitRepo();
 
   const worktreeResult = await ctx.client.createWorkspace({
@@ -429,10 +528,8 @@ test("worktree archive targets the explicit workspaceId when a directory backs m
   }
   const worktreeDir = worktreeWorkspace.workspaceDirectory;
 
-  // A local workspace records the SAME directory as its cwd. Resolving the
-  // archive target by cwd alone is ambiguous; the explicit workspaceId must win.
   const localWorkspaceId = await createLocalWorkspace(worktreeDir, "local-sibling");
-  expect(localWorkspaceId).not.toBe(worktreeWorkspace.id);
+  expect(localWorkspaceId).toBe(worktreeWorkspace.id);
 
   const archive = await ctx.client.archivePaseoWorktree({
     worktreePath: worktreeDir,
@@ -440,7 +537,6 @@ test("worktree archive targets the explicit workspaceId when a directory backs m
   });
   expect(archive.success).toBe(true);
 
-  // Exactly the targeted workspace is archived; the worktree-backed sibling stays.
   await expect
     .poll(async () => (await activeWorkspaceIds()).has(localWorkspaceId), {
       timeout: 10000,
@@ -449,16 +545,10 @@ test("worktree archive targets the explicit workspaceId when a directory backs m
     .toBe(false);
   const remaining = await activeWorkspaceIds();
   expect(remaining.has(localWorkspaceId)).toBe(false);
-  expect(remaining.has(worktreeWorkspace.id)).toBe(true);
-  expect(existsSync(worktreeDir)).toBe(true);
-
-  await ctx.client.archivePaseoWorktree({
-    worktreePath: worktreeDir,
-    workspaceId: worktreeWorkspace.id,
-  });
+  expect(existsSync(worktreeDir)).toBe(false);
 }, 60000);
 
-test("keeps the worktree on disk when a sibling workspace still references it", async () => {
+test("a second create cannot keep a worktree alive after its only workspace is archived", async () => {
   const repoDir = createGitRepo();
 
   const worktreeResult = await ctx.client.createWorkspace({
@@ -476,12 +566,9 @@ test("keeps the worktree on disk when a sibling workspace still references it", 
   const worktreeDir = worktreeWorkspace.workspaceDirectory;
   expect(existsSync(worktreeDir)).toBe(true);
 
-  // A second workspace records the SAME worktree directory as its cwd.
   const siblingWorkspaceId = await createLocalWorkspace(worktreeDir, "sibling");
-  expect(siblingWorkspaceId).not.toBe(worktreeWorkspace.id);
+  expect(siblingWorkspaceId).toBe(worktreeWorkspace.id);
 
-  // Archive the worktree-backed workspace. It is NOT the last reference, so the
-  // directory must survive regardless of the legacy disk flag.
   const archive = await ctx.client.archivePaseoWorktree({
     worktreePath: worktreeDir,
   });
@@ -496,6 +583,5 @@ test("keeps the worktree on disk when a sibling workspace still references it", 
 
   const remaining = await activeWorkspaceIds();
   expect(remaining.has(worktreeWorkspace.id)).toBe(false);
-  expect(remaining.has(siblingWorkspaceId)).toBe(true);
-  expect(existsSync(worktreeDir)).toBe(true);
+  expect(existsSync(worktreeDir)).toBe(false);
 }, 60000);

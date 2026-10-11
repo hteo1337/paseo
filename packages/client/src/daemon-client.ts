@@ -2745,12 +2745,14 @@ export class DaemonClient {
   async archiveWorkspace(
     workspaceId: string,
     requestId?: string,
+    options?: { ifNoLiveAgents?: boolean },
   ): Promise<ArchiveWorkspacePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "archive_workspace_request",
         workspaceId,
+        ifNoLiveAgents: options?.ifNoLiveAgents,
       },
       responseType: "archive_workspace_response",
     });
@@ -3056,12 +3058,14 @@ export class DaemonClient {
   async removeProject(
     projectId: string,
     requestId?: string,
+    options?: { ifEmpty?: boolean },
   ): Promise<{ removedWorkspaceIds: string[] }> {
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"project.remove.response">({
       requestId,
       message: {
         type: "project.remove.request",
         projectId,
+        ifEmpty: options?.ifEmpty,
       },
     });
     if (!payload.accepted) {

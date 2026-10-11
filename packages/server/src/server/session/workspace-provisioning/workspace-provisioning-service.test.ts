@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -44,7 +44,9 @@ async function isDirectory(target: string): Promise<boolean> {
 
 let tmpDir: string;
 let gitRoots: Set<string>;
+let gitMainRoots: Map<string, string>;
 let gitBranches: Map<string, string | null>;
+let gitRemotes: Map<string, string>;
 let checkoutFailure: Error | null;
 let restoredMergedChangeRequestUrl: string | null;
 let workspaceRegistry: FileBackedWorkspaceRegistry;
@@ -88,10 +90,10 @@ function gitService() {
         cwd,
         isGit: worktreeRoot !== null,
         currentBranch: worktreeRoot ? (gitBranches.get(worktreeRoot) ?? "main") : null,
-        remoteUrl: null,
+        remoteUrl: worktreeRoot ? (gitRemotes.get(worktreeRoot) ?? null) : null,
         worktreeRoot,
         isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
+        mainRepoRoot: worktreeRoot ? (gitMainRoots.get(worktreeRoot) ?? null) : null,
       };
     },
   });
@@ -100,7 +102,9 @@ function gitService() {
 beforeEach(async () => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), "workspace-provisioning-"));
   gitRoots = new Set();
+  gitMainRoots = new Map();
   gitBranches = new Map();
+  gitRemotes = new Map();
   checkoutFailure = null;
   restoredMergedChangeRequestUrl = null;
   workspaceRegistry = new FileBackedWorkspaceRegistry(
@@ -137,6 +141,149 @@ test("fresh git repo creates a workspace at the canonical worktree root", async 
   expect(await projectRegistry.list()).toHaveLength(1);
 });
 
+test("linked worktrees share their git-common-dir project while another repo stays separate", async () => {
+  const mainRepo = path.join(tmpDir, "owner-repo");
+  const linked = path.join(tmpDir, "worktrees", "review");
+  const linkedAlias = path.join(tmpDir, "review-alias");
+  const otherRepo = path.join(tmpDir, "other-repo");
+  for (const root of [mainRepo, linked, otherRepo]) {
+    mkdirSync(root, { recursive: true });
+    gitRoots.add(root);
+  }
+  gitMainRoots.set(linked, mainRepo);
+  symlinkSync(linked, linkedAlias, directorySymlinkType);
+  gitRoots.add(realpathSync(linked));
+  gitMainRoots.set(realpathSync(linked), mainRepo);
+  expect((await gitService().getCheckout(linked)).mainRepoRoot).toBe(mainRepo);
+  expect((await gitService().getCheckout(otherRepo)).mainRepoRoot).toBeNull();
+
+  const mainWorkspace = await provisioning.createWorkspaceForDirectory(mainRepo);
+  const legacyProject = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: linked,
+    kind: "git",
+    displayName: "review",
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  const legacyWorkspace = createPersistedWorkspaceRecord({
+    workspaceId: "wks_legacy_linked",
+    projectId: legacyProject.projectId,
+    cwd: linked,
+    kind: "directory",
+    displayName: "review",
+    createdAt: "2026-01-01T00:00:00.000Z",
+    updatedAt: "2026-01-01T00:00:00.000Z",
+  });
+  await workspaceRegistry.upsert(legacyWorkspace);
+  const linkedWorkspace = await provisioning.createWorkspaceForDirectory(linked);
+  const aliasWorkspace = await provisioning.createWorkspaceForDirectory(linkedAlias);
+  const explicitLegacy = await provisioning.createWorkspaceForDirectory(
+    linked,
+    null,
+    legacyProject.projectId,
+  );
+  const otherWorkspace = await provisioning.createWorkspaceForDirectory(otherRepo);
+
+  expect(linkedWorkspace.workspaceId).toBe(legacyWorkspace.workspaceId);
+  expect(aliasWorkspace.workspaceId).toBe(linkedWorkspace.workspaceId);
+  expect(aliasWorkspace.projectId).toBe(mainWorkspace.projectId);
+  expect(explicitLegacy.projectId).toBe(mainWorkspace.projectId);
+  expect(linkedWorkspace.projectId).toBe(mainWorkspace.projectId);
+  expect(otherWorkspace.projectId).not.toBe(mainWorkspace.projectId);
+  expect((await projectRegistry.get(linkedWorkspace.projectId))?.rootPath).toBe(mainRepo);
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+  ).toHaveLength(3);
+});
+
+test("a review clone with the same remote rejoins its main project", async () => {
+  const main = path.join(tmpDir, "repo");
+  const clone = path.join(tmpDir, "reviews", "branch", "repo");
+  const other = path.join(tmpDir, "other");
+  for (const root of [main, clone, other]) mkdirSync(root, { recursive: true });
+  mkdirSync(path.join(main, "src"));
+  mkdirSync(path.join(clone, "src"));
+  const cloneProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    isDirectory,
+    logger,
+    workspaceGitService: createNoopWorkspaceGitService({
+      peekSnapshot: () => null,
+      getCheckout: async (cwd: string) => {
+        let worktreeRoot = cwd;
+        if (cwd.startsWith(clone)) worktreeRoot = clone;
+        else if (cwd.startsWith(main)) worktreeRoot = main;
+        return {
+          cwd,
+          isGit: true,
+          currentBranch: "main",
+          remoteUrl:
+            cwd === other
+              ? "https://github.com/acme/other.git"
+              : "https://github.com/acme/repo.git",
+          worktreeRoot,
+          isPaseoOwnedWorktree: false,
+          mainRepoRoot: null,
+        };
+      },
+    }),
+  });
+  const mainWorkspace = await cloneProvisioning.createWorkspaceForDirectory(main);
+  const originalNested = await cloneProvisioning.createWorkspaceForDirectory(
+    path.join(main, "src"),
+  );
+  const nestedProject = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: path.join(main, "src"),
+    kind: "git",
+    displayName: "src",
+    projectKey: "remote:github.com/acme/repo",
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  const selectedNested = await cloneProvisioning.createWorkspaceForDirectory(
+    path.join(main, "src"),
+    null,
+    nestedProject.projectId,
+  );
+  const legacyCloneProject = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: clone,
+    kind: "git",
+    displayName: "repo",
+    projectKey: "remote:github.com/acme/repo",
+    timestamp: "2026-01-01T00:00:00.000Z",
+  });
+  await workspaceRegistry.upsert(
+    createPersistedWorkspaceRecord({
+      workspaceId: "wks_legacy_clone",
+      projectId: legacyCloneProject.projectId,
+      cwd: clone,
+      kind: "directory",
+      displayName: "repo",
+      createdAt: "2026-01-01T00:00:00.000Z",
+      updatedAt: "2026-01-01T00:00:00.000Z",
+    }),
+  );
+
+  const joined = await cloneProvisioning.createWorkspaceForDirectory(
+    clone,
+    null,
+    legacyCloneProject.projectId,
+  );
+  const subdirectory = await cloneProvisioning.createWorkspaceForDirectory(path.join(clone, "src"));
+  const addedClone = await cloneProvisioning.findOrCreateProjectForDirectory(clone, {
+    exactRoot: true,
+  });
+  const distinct = await cloneProvisioning.createWorkspaceForDirectory(other);
+
+  expect(joined.workspaceId).toBe("wks_legacy_clone");
+  expect(selectedNested.workspaceId).toBe(originalNested.workspaceId);
+  expect(selectedNested.projectId).toBe(nestedProject.projectId);
+  expect(joined.projectId).toBe(mainWorkspace.projectId);
+  expect(subdirectory.projectId).toBe(mainWorkspace.projectId);
+  expect(addedClone.projectId).toBe(mainWorkspace.projectId);
+  expect(distinct.projectId).not.toBe(mainWorkspace.projectId);
+  expect((await projectRegistry.get(mainWorkspace.projectId))?.rootPath).toBe(main);
+});
+
 test("fresh non-git directory creates a directory workspace at the exact path", async () => {
   const dir = path.join(tmpDir, "plain");
 
@@ -154,6 +301,50 @@ test("re-opening an active workspace by exact path returns the same record witho
 
   expect(second.workspaceId).toBe(first.workspaceId);
   expect(await workspaceRegistry.list()).toHaveLength(1);
+});
+
+test("two launch paths into the same branch and cwd share one workspace", async () => {
+  const repo = path.join(tmpDir, "repo");
+  const branchCwd = path.join(tmpDir, "branch");
+  const otherCwd = path.join(tmpDir, "other-branch");
+  mkdirSync(repo);
+  mkdirSync(branchCwd);
+  mkdirSync(otherCwd);
+  gitRoots.add(repo);
+  const otherSession = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  const input = {
+    sourceCwd: repo,
+    repoRoot: repo,
+    cwd: branchCwd,
+    worktreeRoot: branchCwd,
+    branch: "feature/shared",
+    baseBranch: "main",
+    title: null,
+  };
+
+  const [first, second] = await Promise.all([
+    provisioning.createWorkspaceForWorktree(input),
+    otherSession.createWorkspaceForWorktree({ ...input, workspaceId: "second-request" }),
+  ]);
+  const distinct = await provisioning.createWorkspaceForWorktree({
+    ...input,
+    cwd: otherCwd,
+    worktreeRoot: otherCwd,
+    branch: "feature/other",
+  });
+
+  expect(second.workspaceId).toBe(first.workspaceId);
+  expect(second.cwd).toBe(branchCwd);
+  expect(distinct.workspaceId).not.toBe(first.workspaceId);
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+  ).toHaveLength(2);
 });
 
 test("re-opening Windows-equivalent workspace cwd spellings reuses the active and archived record", async () => {
@@ -663,15 +854,15 @@ test("create-agent reuses only active directory workspaces and groups disposable
   expect(aliasId).toBe("wks-alias");
 });
 
-test("createWorkspaceForDirectory always mints a fresh workspace even when one already occupies the cwd", async () => {
+test("createWorkspaceForDirectory reuses the active workspace at the same cwd", async () => {
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
 
   const first = await provisioning.createWorkspaceForDirectory(repo);
   const second = await provisioning.createWorkspaceForDirectory(repo);
 
-  expect(second.workspaceId).not.toBe(first.workspaceId);
-  expect(await workspaceRegistry.list()).toHaveLength(2);
+  expect(second.workspaceId).toBe(first.workspaceId);
+  expect(await workspaceRegistry.list()).toHaveLength(1);
 });
 
 test("directory creation persists the live branch and a trimmed title", async () => {
@@ -750,14 +941,43 @@ test("createWorkspaceForDirectory classifies unknown and archived explicit proje
 test("findOrCreateProjectForDirectory keeps nested selected roots independent", async () => {
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
+  gitRemotes.set(repo, "https://github.com/example/repo.git");
 
-  const first = await provisioning.findOrCreateProjectForDirectory(repo);
-  const second = await provisioning.findOrCreateProjectForDirectory(path.join(repo, "sub"));
+  const first = await provisioning.findOrCreateProjectForDirectory(repo, { exactRoot: true });
+  const second = await provisioning.findOrCreateProjectForDirectory(path.join(repo, "sub"), {
+    exactRoot: true,
+  });
 
   expect(second.projectId).not.toBe(first.projectId);
   expect(first.rootPath).toBe(repo);
   expect(second.rootPath).toBe(path.join(repo, "sub"));
   expect(await projectRegistry.list()).toHaveLength(2);
+  const workspace = await provisioning.createWorkspaceForDirectory(
+    path.join(repo, "sub"),
+    null,
+    second.projectId,
+  );
+  expect(workspace.projectId).toBe(second.projectId);
+});
+
+test("an existing nested non-git project is retained when its checkout gains a remote", async () => {
+  const repo = path.join(tmpDir, "repo");
+  const sub = path.join(repo, "sub");
+  mkdirSync(sub, { recursive: true });
+  gitRoots.add(repo);
+  gitRemotes.set(repo, "git@github.com:example/repo.git");
+  const nested = await projectRegistry.getOrCreateActiveByRoot({
+    rootPath: sub,
+    kind: "non_git",
+    displayName: "sub",
+    timestamp: ARCHIVED_AT,
+  });
+
+  const workspace = await provisioning.createWorkspaceForDirectory(sub, null, nested.projectId);
+  const added = await provisioning.findOrCreateProjectForDirectory(sub, { exactRoot: true });
+  expect(workspace.projectId).toBe(nested.projectId);
+  expect(added.projectId).toBe(nested.projectId);
+  expect(await projectRegistry.get(nested.projectId)).toMatchObject({ rootPath: sub, kind: "git" });
 });
 
 test("runInImportWorkspace uses an active requested workspace without creating another", async () => {
@@ -920,8 +1140,121 @@ test("runInImportWorkspace creates one fresh workspace for an untargeted import"
   expect(await workspaceRegistry.list()).toEqual([result.createdWorkspace]);
 });
 
+test("a failed import cannot remove a successful import from another session", async () => {
+  const cwd = path.join(tmpDir, "concurrent-import");
+  mkdirSync(cwd);
+  const otherSessionProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  let signalEntered!: () => void;
+  let releaseFirst!: () => void;
+  const entered = new Promise<void>((resolve) => {
+    signalEntered = resolve;
+  });
+  const firstMayFinish = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const first = provisioning.runInImportWorkspace({ cwd }, async () => {
+    signalEntered();
+    await firstMayFinish;
+    throw new Error("first provider import failed");
+  });
+  await entered;
+  const second = otherSessionProvisioning.runInImportWorkspace(
+    { cwd },
+    async (workspace) => workspace.workspaceId,
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFirst();
+
+  await expect(first).rejects.toThrow("first provider import failed");
+  const successful = await second;
+  expect(successful.createdWorkspace).toBeNull();
+  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+    successful.value,
+  ]);
+});
+
+test("a targeted import keeps the workspace after another import fails", async () => {
+  const cwd = path.join(tmpDir, "targeted-concurrent-import");
+  mkdirSync(cwd);
+  const otherSessionProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  let signalEntered!: (workspaceId: string) => void;
+  let releaseFirst!: () => void;
+  const entered = new Promise<string>((resolve) => {
+    signalEntered = resolve;
+  });
+  const firstMayFinish = new Promise<void>((resolve) => {
+    releaseFirst = resolve;
+  });
+  const first = provisioning.runInImportWorkspace({ cwd }, async (workspace) => {
+    signalEntered(workspace.workspaceId);
+    await firstMayFinish;
+    throw new Error("first provider import failed");
+  });
+  const requestedWorkspaceId = await entered;
+  let targetedOperationRan = false;
+  const targeted = otherSessionProvisioning.runInImportWorkspace(
+    { cwd, requestedWorkspaceId },
+    async () => {
+      targetedOperationRan = true;
+    },
+  );
+  await new Promise((resolve) => setImmediate(resolve));
+  releaseFirst();
+
+  await expect(first).rejects.toThrow("first provider import failed");
+  expect((await targeted).createdWorkspace).toBeNull();
+  expect(targetedOperationRan).toBe(true);
+  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+    requestedWorkspaceId,
+  ]);
+});
+
+test("create-agent keeps a workspace reused during a failed provider import", async () => {
+  const cwd = path.join(tmpDir, "create-agent-during-import");
+  mkdirSync(path.join(cwd, ".git"), { recursive: true });
+  gitRoots.add(cwd);
+  let signalEntered!: (workspaceId: string) => void;
+  let releaseImport!: () => void;
+  const entered = new Promise<string>((resolve) => {
+    signalEntered = resolve;
+  });
+  const importMayFinish = new Promise<void>((resolve) => {
+    releaseImport = resolve;
+  });
+  const imported = provisioning.runInImportWorkspace({ cwd }, async (workspace) => {
+    signalEntered(workspace.workspaceId);
+    await importMayFinish;
+    throw new Error("provider import failed");
+  });
+  const importedWorkspaceId = await entered;
+  const agentWorkspaceId = await provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    cwd,
+    createdWorktree: null,
+    initialTitle: null,
+  });
+  expect(agentWorkspaceId).toBe(importedWorkspaceId);
+  releaseImport();
+
+  await expect(imported).rejects.toThrow("provider import failed");
+  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+    agentWorkspaceId,
+  ]);
+});
+
 test.each(["missing", "archived"] as const)(
-  "runInImportWorkspace restores the exact %s project state when an untargeted import fails",
+  "runInImportWorkspace retains its %s project after an untargeted import fails",
   async (state) => {
     const cwd = path.join(tmpDir, `failed-import-${state}`);
     mkdirSync(cwd);
@@ -938,8 +1271,18 @@ test.each(["missing", "archived"] as const)(
       }),
     ).rejects.toThrow("provider session is unavailable");
 
-    expect(await workspaceRegistry.list()).toEqual([]);
-    expect(await projectRegistry.list()).toEqual(previousProject ? [previousProject] : []);
+    const workspaces = await workspaceRegistry.list();
+    const projects = await projectRegistry.list();
+    const activeProjects = projects.filter((project) => !project.archivedAt);
+    expect(workspaces).toHaveLength(1);
+    expect(activeProjects).toHaveLength(1);
+    expect(workspaces[0]?.projectId).toBe(activeProjects[0]?.projectId);
+    expect(workspaces[0]?.archivedAt).toBeNull();
+    if (previousProject) {
+      expect(projects.find((project) => project.projectId === previousProject.projectId)).toEqual(
+        previousProject,
+      );
+    }
   },
 );
 

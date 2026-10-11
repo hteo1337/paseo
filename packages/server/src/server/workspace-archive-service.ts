@@ -142,10 +142,10 @@ async function archiveByScopeWithPriority(
   const target = await resolveArchiveTarget(dependencies, request.scope);
   const targetWorkspaceIds = target.workspaceIds;
 
-  await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
-
   const earlyAbort = archiveAbortResult(request.abortIf?.());
   if (earlyAbort) return earlyAbort;
+
+  await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
 
   const releaseRunHold = request.holdNewRuns?.();
   let removedDirectory = false;
@@ -165,9 +165,14 @@ async function archiveByScopeWithPriority(
       for (const workspaceId of targetWorkspaceIds) {
         storedRecordsByWorkspace.set(
           workspaceId,
-          await listStoredAgentRecords(dependencies, workspaceId),
+          await listStoredAgentRecords(dependencies, workspaceId, Boolean(request.holdNewRuns)),
         );
       }
+      const storedAbort = abortForNonClosedStoredAgents(
+        storedRecordsByWorkspace,
+        Boolean(request.holdNewRuns),
+      );
+      if (storedAbort) return storedAbort;
       const lateAbort = archiveAbortResult(request.abortIf?.());
       if (lateAbort) return lateAbort;
     }
@@ -249,6 +254,18 @@ function archiveAbortResult(
     };
   }
   return null;
+}
+
+function abortForNonClosedStoredAgents(
+  recordsByWorkspace: ReadonlyMap<string, StoredAgentRecord[]>,
+  guarded: boolean,
+): ArchiveResult | null {
+  if (!guarded) return null;
+  const ids = [...recordsByWorkspace.values()]
+    .flat()
+    .filter((record) => !record.archivedAt && record.lastStatus !== "closed")
+    .map((record) => record.id);
+  return archiveAbortResult(ids);
 }
 
 async function resolveArchiveTarget(
@@ -416,6 +433,9 @@ async function archiveTargetRecords(
       );
     }
   }
+  if (requireClosedAgents && teardownResults.some((result) => result.status === "rejected")) {
+    throw new Error("Guarded workspace teardown failed before record archive");
+  }
 
   const deferredByAgentIds = requireClosedAgents
     ? dependencies.agentManager
@@ -444,6 +464,9 @@ async function archiveTargetRecords(
         "archiveByScope workspace teardown failed; continuing",
       );
     }
+  }
+  if (requireClosedAgents && archiveResults.some((result) => result.status === "rejected")) {
+    throw new Error("Guarded workspace record archive failed");
   }
 
   return { archivedAgents, archivedWorkspaceIds, deferredByAgentIds };
@@ -576,10 +599,12 @@ export type ArchiveWorkspaceContentsDependencies = Pick<
 async function listStoredAgentRecords(
   dependencies: Pick<ArchiveDependencies, "agentStorage" | "sessionLogger">,
   workspaceId: string,
+  failClosed = false,
 ): Promise<StoredAgentRecord[]> {
   try {
     return await dependencies.agentStorage.listByWorkspace(workspaceId);
   } catch (error) {
+    if (failClosed) throw error;
     dependencies.sessionLogger?.warn(
       { err: error, workspaceId },
       "Failed to list stored agents during workspace archive; continuing",
@@ -637,6 +662,9 @@ export async function archiveWorkspaceContents(
         "Workspace archive teardown step failed; continuing",
       );
     }
+  }
+  if (requireIdleClose && archiveResults.some((result) => result.status === "rejected")) {
+    throw new Error(`Guarded agent teardown failed for workspace ${workspaceId}`);
   }
 
   return archivedAgents;

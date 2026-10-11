@@ -383,17 +383,48 @@ describe("archiveByScope", () => {
     });
     const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
 
-    const result = await archiveByScope(deps, {
-      scope: { kind: "workspace", workspaceId },
-      requestId: "auto-archive-on-merge",
-      keepDirectory: true,
-      abortIf: () => null,
-      holdNewRuns: () => () => {},
-    });
-
-    expect(result.deferredByAgentIds).toEqual(["target-agent"]);
+    await expect(
+      archiveByScope(deps, {
+        scope: { kind: "workspace", workspaceId },
+        requestId: "auto-archive-on-merge",
+        keepDirectory: true,
+        abortIf: () => null,
+        holdNewRuns: () => () => {},
+      }),
+    ).rejects.toThrow("Guarded workspace teardown failed");
     expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
     expect(existsSync(worktree.worktreePath)).toBe(true);
+  });
+
+  test("guarded repair refuses a failed closed snapshot archive", async () => {
+    const { tempDir, repoDir } = createGitRepo();
+    const paseoHome = path.join(tempDir, ".paseo");
+    const workspaceId = "ws-failed-snapshot-archive";
+    const deps = createArchiveDeps({
+      paseoHome,
+      activeWorkspaces: [{ workspaceId, cwd: repoDir, kind: "local_checkout" }],
+    });
+    deps.agentStorage.listByWorkspace = async () =>
+      [
+        { id: "closed-agent", workspaceId, lastStatus: "closed", archivedAt: null },
+      ] as StoredAgentRecord[];
+    deps.agentManager.archiveSnapshot = vi.fn(async () => {
+      throw new Error("snapshot write failed");
+    });
+    const archiveWorkspaceRecord = vi.spyOn(deps, "archiveWorkspaceRecord");
+
+    await expect(
+      archiveByScope(deps, {
+        scope: { kind: "workspace", workspaceId },
+        requestId: "guarded-duplicate-repair",
+        keepDirectory: true,
+        abortIf: () => null,
+        holdNewRuns: () => () => {},
+      }),
+    ).rejects.toThrow("Guarded workspace teardown failed");
+    expect(archiveWorkspaceRecord).not.toHaveBeenCalled();
+    expect(deps.activeWorkspaces).toHaveLength(1);
+    expect(existsSync(repoDir)).toBe(true);
   });
 
   test("cancellation after teardown begins commits the archive", async () => {
