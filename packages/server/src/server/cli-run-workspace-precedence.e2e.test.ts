@@ -1,3 +1,6 @@
+import { execFile, execFileSync } from "node:child_process";
+import { promisify } from "node:util";
+import { mkdirSync, writeFileSync, readFileSync, realpathSync } from "node:fs";
 import { test, expect } from "vitest";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -138,3 +141,189 @@ test("daemon resolves human and managed CLI workspace ownership", async () => {
     rmSync(otherCwd, { recursive: true, force: true });
   }
 }, 180000);
+
+test("project grouping CLI and real git paths preserve one repository owner", async () => {
+  const root = realpathSync(mkdtempSync(path.join(tmpdir(), "paseo-group-real-")));
+  const repo = path.join(root, "repo");
+  const linked = path.join(root, "feat-any-name");
+  const clone = path.join(root, "reviews", "final");
+  const other = path.join(root, "different", "final");
+  const git = (cwd: string, ...args: string[]) =>
+    execFileSync("git", ["-C", cwd, ...args], { encoding: "utf8", stdio: "pipe" });
+  mkdirSync(repo);
+  git(repo, "-c", "init.defaultBranch=main", "init");
+  writeFileSync(path.join(repo, "marker.txt"), "kept\n");
+  git(repo, "add", "marker.txt");
+  git(
+    repo,
+    "-c",
+    "user.name=Grouping Test",
+    "-c",
+    "user.email=grouping@example.invalid",
+    "commit",
+    "-m",
+    "fixture",
+  );
+  git(repo, "remote", "add", "origin", "https://github.com/BlackHubTechnologies/bf-fixture.git");
+  git(repo, "worktree", "add", "-b", "feature", linked);
+  mkdirSync(path.dirname(clone), { recursive: true });
+  git(root, "clone", repo, clone);
+  git(clone, "remote", "set-url", "origin", "git@github.com:BlackHubTechnologies/bf-fixture.git");
+  mkdirSync(path.dirname(other), { recursive: true });
+  git(root, "clone", repo, other);
+  git(
+    other,
+    "remote",
+    "set-url",
+    "origin",
+    "https://github.com/BlackHubTechnologies/company-fixture.git",
+  );
+  expect(git(linked, "rev-parse", "--git-common-dir").trim()).not.toBe(
+    git(other, "rev-parse", "--git-common-dir").trim(),
+  );
+  expect(git(clone, "remote", "get-url", "origin").trim()).not.toBe(
+    git(other, "remote", "get-url", "origin").trim(),
+  );
+  const daemon = await createTestPaseoDaemon();
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.11.2",
+  });
+  const runCli = async (...args: string[]) => {
+    const result = await promisify(execFile)(
+      process.execPath,
+      [
+        path.resolve(__dirname, "../../../cli/dist/index.js"),
+        "--host",
+        `127.0.0.1:${daemon.port}`,
+        "--json",
+        ...args,
+      ],
+      {
+        env: {
+          ...process.env,
+          PASEO_HOME: daemon.paseoHome,
+          PASEO_PASSWORD: "",
+          PASEO_AGENT_ID: "",
+          PASEO_WORKSPACE_ID: "",
+          PASEO_HOST: "",
+        },
+        timeout: 30_000,
+      },
+    );
+    return JSON.parse(result.stdout);
+  };
+  try {
+    await client.connect();
+    await client.fetchAgents({ subscribe: {} });
+    const main = await client.createWorkspace({ source: { kind: "directory", path: repo } });
+    expect(main.error).toBeNull();
+    expect(main.workspace?.projectGroup).toBeUndefined();
+    await runCli(
+      "project",
+      "group",
+      "rule",
+      "add",
+      "platform",
+      "Nexus Platform",
+      "--repo-prefix",
+      "bf-",
+      "--order",
+      "1",
+    );
+    await runCli(
+      "project",
+      "group",
+      "rule",
+      "add",
+      "company",
+      "BlackForge",
+      "--owner",
+      "BlackHubTechnologies",
+    );
+    const worktree = await client.createWorkspace({ source: { kind: "directory", path: linked } });
+    const review = await client.createWorkspace({ source: { kind: "directory", path: clone } });
+    const control = await client.createWorkspace({ source: { kind: "directory", path: other } });
+    expect(worktree.workspace?.projectId).toBe(main.workspace?.projectId);
+    expect(review.workspace?.projectId).toBe(main.workspace?.projectId);
+    expect(control.workspace?.projectId).not.toBe(main.workspace?.projectId);
+    expect(worktree.workspace?.projectGroup?.name).toBe("Nexus Platform");
+    expect(review.workspace?.projectGroup?.name).toBe("Nexus Platform");
+    expect(control.workspace?.projectGroup?.name).toBe("BlackForge");
+    const grouped = await runCli("workspace", "ls", "--group", "Nexus Platform");
+    expect(grouped).toHaveLength(3);
+    expect(grouped.map((workspace: { cwd: string }) => workspace.cwd).sort()).toEqual(
+      [repo, linked, clone].sort(),
+    );
+    expect(
+      grouped.every(
+        (workspace: { group: { name: string } }) => workspace.group.name === "Nexus Platform",
+      ),
+    ).toBe(true);
+    expect(await runCli("workspace", "ls", "--group", "No such group")).toEqual([]);
+    const projectId = main.workspace!.projectId;
+    await client.fetchWorkspaces({ subscribe: {} });
+    const updates = new Map<string, string | null>();
+    const stopUpdates = client.on("workspace_update", (message) => {
+      if (message.payload.kind === "upsert")
+        updates.set(
+          message.payload.workspace.id,
+          message.payload.workspace.projectGroup?.name ?? null,
+        );
+    });
+    await runCli(
+      "project",
+      "group",
+      "set",
+      projectId,
+      "Fleet tooling",
+      "--order",
+      "2",
+      "--collapsed",
+    );
+    await expect
+      .poll(() => updates.get(main.workspace!.id), { timeout: 5000 })
+      .toBe("Fleet tooling");
+    expect(updates.get(control.workspace!.id)).not.toBe("Fleet tooling");
+    const manuallyGrouped = await runCli("project", "ls");
+    expect(
+      manuallyGrouped.find((project: { projectId: string }) => project.projectId === projectId)
+        .group,
+    ).toEqual({ name: "Fleet tooling", order: 2, collapsed: true });
+    await runCli("project", "group", "set", control.workspace!.projectId, "Fleet tooling");
+    const defaulted = await runCli("project", "ls");
+    expect(
+      defaulted.find(
+        (project: { projectId: string }) => project.projectId === control.workspace!.projectId,
+      ).group,
+    ).toEqual({ name: "Fleet tooling", order: 2, collapsed: true });
+    await runCli("project", "group", "set", projectId, "Fleet tooling", "--expanded");
+    const expanded = await runCli("project", "ls");
+    expect(
+      expanded
+        .filter(
+          (project: { group: { name: string } | null }) => project.group?.name === "Fleet tooling",
+        )
+        .every((project: { group: { collapsed: boolean } }) => project.group.collapsed === false),
+    ).toBe(true);
+    await runCli("project", "group", "unset", control.workspace!.projectId);
+    await runCli("project", "group", "unset", projectId);
+    await expect.poll(() => updates.get(main.workspace!.id), { timeout: 5000 }).toBeNull();
+    stopUpdates();
+    expect(await runCli("workspace", "ls", "--group", "Fleet tooling")).toEqual([]);
+    await runCli("project", "group", "rule", "rm", "company");
+    const groups = await runCli("project", "group", "ls");
+    expect(
+      groups.find((group: { name: string }) => group.name === "Nexus Platform").rules[0].id,
+    ).toBe("platform");
+    expect(
+      JSON.parse(readFileSync(path.join(daemon.paseoHome, "config.json"), "utf8")).projectGrouping
+        .rules,
+    ).toHaveLength(1);
+    expect(readFileSync(path.join(repo, "marker.txt"), "utf8")).toBe("kept\n");
+  } finally {
+    await client.close().catch(() => undefined);
+    await daemon.close();
+    rmSync(root, { recursive: true, force: true });
+  }
+}, 180_000);
