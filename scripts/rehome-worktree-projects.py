@@ -131,9 +131,18 @@ def apply_one(home, item):
         raise RuntimeError(f"project id did not change for {item['workspaceId']}")
     old_project = projects.get(item["oldProjectId"])
     if old_project and linked_owner(Path(old_project["rootPath"]), old_project, projects) == Path(item["ownerRoot"]):
-        if any(w["projectId"] == item["oldProjectId"] for w in by_id.values()):
+        old_refs = [w for w in by_id.values() if w["projectId"] == item["oldProjectId"]]
+        if any(not w.get("archivedAt") for w in old_refs):
             return {**item, "newProjectId": workspace["projectId"], "result": "rehomed_old_project_still_used"}
-        cli("project", "delete", item["oldProjectId"], "--if-empty")
+        old_root = Path(old_project["rootPath"])
+        live_agents = cli("agent", "ls", "--global")
+        if any(agent.get("status") != "closed" and agent.get("cwd") and
+               (os.path.realpath(os.path.expanduser(agent["cwd"])) == os.path.realpath(old_root) or
+                os.path.realpath(os.path.expanduser(agent["cwd"])).startswith(os.path.realpath(old_root) + os.sep))
+               for agent in live_agents):
+            return {**item, "newProjectId": workspace["projectId"], "result": "rehomed_old_project_has_live_agent"}
+        cli("project", "delete", item["oldProjectId"],
+            "--if-no-active-workspaces" if old_refs else "--if-empty")
         _, after_projects = records(home)
         if item["oldProjectId"] in after_projects:
             raise RuntimeError(f"empty legacy project was not removed: {item['oldProjectId']}")
