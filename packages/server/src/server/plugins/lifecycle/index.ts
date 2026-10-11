@@ -53,7 +53,18 @@ export const beforeHookNames = [
 ] as const;
 
 const beforeSchemas = {
-  "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true }).strict(),
+  "agent.create": CreateAgentRequestMessageSchema.pick({ config: true, env: true })
+    .extend({
+      creation: z
+        .object({
+          source: z.enum(["cli", "agent", "system"]),
+          callerAgentId: z.string().nullable(),
+          labels: z.record(z.string(), z.string()),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   "agent.set_model": z
     .object({
       agentId: z.string(),
@@ -211,6 +222,22 @@ export function publishAgentStream(
   }
 }
 
+function validateAgentCreateResult(
+  previous: PluginBeforeRequests["agent.create"],
+  next: PluginBeforeRequests["agent.create"],
+): PluginBeforeRequests["agent.create"] {
+  if (previous.config.cwd !== next.config.cwd) {
+    throw new Error("agent.create hooks cannot change the workspace directory");
+  }
+  if (next.creation !== undefined && !isDeepStrictEqual(previous.creation, next.creation)) {
+    throw new Error("agent.create hooks cannot change creation provenance");
+  }
+  // COMPAT(create-provenance): added in TH1-728; remove after 2027-04-12.
+  // Older plugins may return only config/env. Keep server-owned provenance
+  // for the next hook instead of letting an omission erase the caller.
+  return previous.creation === undefined ? next : { ...next, creation: previous.creation };
+}
+
 export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests>(
   name: Name,
   input: PluginWireBeforeRequests[Name],
@@ -256,11 +283,10 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
   }
 
   if (name === "agent.create") {
-    const previous = beforeSchemas["agent.create"].parse(input);
-    const next = beforeSchemas["agent.create"].parse(result);
-    if (previous.config.cwd !== next.config.cwd) {
-      throw new Error("agent.create hooks cannot change the workspace directory");
-    }
+    return validateAgentCreateResult(
+      beforeSchemas["agent.create"].parse(input),
+      beforeSchemas["agent.create"].parse(result),
+    ) as PluginBeforeRequests[Name];
   }
   return result;
 }
