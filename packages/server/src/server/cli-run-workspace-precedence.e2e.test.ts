@@ -9,7 +9,7 @@ import { getFullAccessConfig } from "./daemon-e2e/agent-configs.js";
 import { PARENT_AGENT_ID_LABEL } from "@getpaseo/protocol/agent-labels";
 
 // The daemon-level workspace contract that `paseo run` depends on: each
-// local-backed createWorkspace for a cwd mints a fresh, distinct workspace,
+// local-backed createWorkspace for a cwd reuses its active workspace,
 // createAgent stamps the agent with the workspaceId it is given, and attaching
 // to an existing workspace by id creates no new record. The CLI's own flag
 // precedence (--workspace > $PASEO_WORKSPACE_ID > --worktree > bare) is covered
@@ -42,7 +42,7 @@ test("daemon resolves human and managed CLI workspace ownership", async () => {
     await client.connect();
     await client.fetchAgents({ subscribe: {} });
 
-    // A bare run mints a fresh local workspace for the cwd, then the agent is
+    // A bare run resolves a local workspace for the cwd, then the agent is
     // stamped with that workspace's id.
     const firstWorkspaceId = await mintLocalWorkspace(client, cwd);
 
@@ -58,7 +58,19 @@ test("daemon resolves human and managed CLI workspace ownership", async () => {
     const fetchedFirst = await client.fetchAgent({ agentId: firstAgent.id });
     expect(fetchedFirst?.agent.workspaceId).toBe(firstWorkspaceId);
 
-    // A second bare run mints a distinct workspace with its own authoritative cwd.
+    const idsBeforeSameCwdRun = await workspaceIds(client);
+    const repeatedWorkspaceId = await mintLocalWorkspace(client, cwd);
+    expect(repeatedWorkspaceId).toBe(firstWorkspaceId);
+    const repeatedAgent = await client.createAgent({
+      ...getFullAccessConfig("codex"),
+      cwd,
+      workspaceId: repeatedWorkspaceId,
+      title: "Repeated cwd run agent",
+    });
+    expect(repeatedAgent.workspaceId).toBe(firstWorkspaceId);
+    expect(await workspaceIds(client)).toEqual(idsBeforeSameCwdRun);
+
+    // A different cwd gets a distinct workspace with its own authoritative cwd.
     const secondWorkspaceId = await mintLocalWorkspace(client, otherCwd);
     expect(secondWorkspaceId).not.toBe(firstWorkspaceId);
 
