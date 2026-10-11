@@ -4033,6 +4033,24 @@ test("project.remove.request retains archived workspace references until truly e
     if (!existing) return;
     workspaces.set(workspaceId, { ...existing, updatedAt: archivedAt, archivedAt });
   };
+  session.workspaceRegistry.removeProjectIfUnreferenced = async (
+    projectId,
+    removeProject,
+    _projectStillExists,
+    options,
+  ) => {
+    if (
+      Array.from(workspaces.values()).some(
+        (workspace) =>
+          workspace.projectId === projectId &&
+          (!options?.allowArchivedReferences || !workspace.archivedAt),
+      )
+    ) {
+      return false;
+    }
+    await removeProject();
+    return true;
+  };
   await session.handleMessage({
     type: "fetch_workspaces_request",
     requestId: "sub-empty-project-remove",
@@ -4056,6 +4074,41 @@ test("project.remove.request retains archived workspace references until truly e
     accepted: false,
     removedWorkspaceIds: [],
   });
+
+  const activeWorkspace = {
+    ...archivedWorkspace,
+    workspaceId: "ws-project-remove-new-active",
+    archivedAt: null,
+  };
+  workspaces.set(activeWorkspace.workspaceId, activeWorkspace);
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: project.projectId,
+    requestId: "req-refuse-active-project",
+    ifEmpty: true,
+    ifNoActiveWorkspaces: true,
+  });
+  expect(projects.has(project.projectId)).toBe(true);
+  expect(workspaces.get(activeWorkspace.workspaceId)?.archivedAt).toBeNull();
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toMatchObject({
+    accepted: false,
+    removedWorkspaceIds: [],
+  });
+  workspaces.delete(activeWorkspace.workspaceId);
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: project.projectId,
+    requestId: "req-remove-archived-only-project",
+    ifEmpty: true,
+    ifNoActiveWorkspaces: true,
+  });
+  expect(projects.has(project.projectId)).toBe(false);
+  expect(workspaces.get(archivedWorkspace.workspaceId)).toEqual(archivedWorkspace);
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toMatchObject({
+    accepted: true,
+    removedWorkspaceIds: [],
+  });
+  projects.set(project.projectId, project);
   workspaces.clear();
   await session.handleMessage({
     type: "project.remove.request",
