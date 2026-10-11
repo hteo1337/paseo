@@ -1,0 +1,14 @@
+f7bf45b5974f2dd0c0f1f77233ddacdc0282dc857315fcc7d8a2c7d92eb44e32  handoffs/astra-r3/REVIEW-p0020-round3.md
+92533de056fcaa42348175d3b3a010b804366f3732d95a02f107f8030356f119  handoffs/astra-r3/round3-probes.test.ts
+03940e63928919b2607baf3d0e7c314f4749a938b0c36569744f2d40400fad03  handoffs/astra-r4/REVIEW-p0020-round4.md
+298aa1fc2043323fb2d3ed851af1ce92700eed847b80fe2838108cbce6407b65  handoffs/astra-r4/round4-probes.test.ts
+6ccb52f2dd9de9ab61b8c47f81eeb0f10b174cab6624d5b4f1c8c7cf6ad82197  handoffs/astra-r5/REVIEW-p0020-round5.md
+71d7aa575feb001128a7e459f9a2b9fd903ef7037d3a335ed96157c3a5d908b5  handoffs/astra-r5/round5-close-probes.test.ts
+7a5f7ab4f7291eddb62787f7a1a3d2b3242df7d2356d9377202d035c5c2c48ab  handoffs/astra-r5/round5-probes.test.ts
+afb5b8bb8ca2fc75a3660b809b14e4e2279fc6f0ca678f44f3ada7f2ebc241fa  handoffs/astra-r6/REVIEW-p0020-round6.md
+711dc5ffc622a171721dd49fa402c5e329b5aaba7f239e8a3c3795ad1e079730  handoffs/astra-r6/round6-deferral-probes.test.ts
+5c753437141a7bc204c2ddc280fde37df03cfefd1beb05c9453efdaf94b0f249  handoffs/astra-r6/round6-hold-probes.test.ts
+78439eaf5053feefe358aa1814836d6d703f7e12bb1c9b07a7581cbf56778933  handoffs/astra-r6/round6-manual-probes.test.ts
+e63d4a65da6bb1fb1fb1c517e690503dac0c8279e99c6a96aa30ee02fd1fa05c  handoffs/astra-r6/round6-probes.test.ts
+f415ecbe9b5209914631e4a90377aff34b7e1d56e9854bc38b1dfcfd2071f011  handoffs/sol-r7/REVIEW-p0020-round7.md
+3dbf23db131f57e50b454c4d09898415e7b1a88dbeb125714ae77423598e7703  handoffs/sol-r7/round6-probes.test.ts
