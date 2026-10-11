@@ -10,6 +10,7 @@ import {
 } from "./session/workspace-base-branch/service.js";
 import type { WorkspaceBaseBranchSetRequest } from "@getpaseo/protocol/messages";
 
+import { projectGroupOperation, projectGroupMetadata } from "./project-grouping.js";
 import { searchTimeline } from "./agent/chat-search/index.js";
 import type { BrowserToolsBroker } from "./browser-tools/broker.js";
 import { BrowserAutomationHostCapabilitySchema } from "@getpaseo/protocol/browser-automation/capabilities";
@@ -3489,6 +3490,8 @@ export class Session {
     msg: SessionInboundMessage,
   ): Promise<void> | undefined {
     switch (msg.type) {
+      case "project.group.request":
+        return this.handleProjectGroupRequest(msg);
       case "fetch_workspaces_request":
         return this.handleFetchWorkspacesRequest(msg);
       case "project.list.request":
@@ -4083,6 +4086,49 @@ export class Session {
           agentId,
           accepted: false,
           error: getErrorMessageOr(error, "Failed to update agent"),
+        },
+      });
+    }
+  }
+
+  private async handleProjectGroupRequest(
+    msg: Extract<SessionInboundMessage, { type: "project.group.request" }>,
+  ): Promise<void> {
+    try {
+      const result = await projectGroupOperation({
+        projects: this.projectRegistry,
+        paseoHome: this.paseoHome,
+        operation: msg.operation,
+      });
+      if (result.changedProjects.length) {
+        for (const project of result.changedProjects)
+          await this.emitProjectUpdate({ kind: "upsert", project });
+        const changedIds = new Set(result.changedProjects.map((project) => project.projectId));
+        await this.emitWorkspaceUpdatesForWorkspaceIds(
+          (await this.workspaceRegistry.list())
+            .filter((workspace) => !workspace.archivedAt && changedIds.has(workspace.projectId))
+            .map((workspace) => workspace.workspaceId),
+        );
+      }
+      this.emit({
+        type: "project.group.response",
+        payload: {
+          requestId: msg.requestId,
+          accepted: true,
+          groups: result.groups,
+          rules: result.rules,
+          error: null,
+        },
+      });
+    } catch (error) {
+      this.emit({
+        type: "project.group.response",
+        payload: {
+          requestId: msg.requestId,
+          accepted: false,
+          groups: [],
+          rules: [],
+          error: error instanceof Error ? error.message : "Project grouping failed",
         },
       });
     }
@@ -6352,6 +6398,7 @@ export class Session {
         ? resolveProjectDisplayName(resolvedProjectRecord)
         : workspace.projectId,
       projectCustomName: resolvedProjectRecord?.customName ?? null,
+      ...projectGroupMetadata(resolvedProjectRecord),
       projectCustomIconRevision: resolvedProjectRecord?.customIconRevision ?? null,
       projectRootPath: resolvedProjectRecord?.rootPath ?? workspace.cwd,
       workspaceDirectory: workspace.cwd,
@@ -6447,6 +6494,7 @@ export class Session {
         ? resolveProjectDisplayName(projectRecord)
         : result.workspace.projectId,
       projectCustomName: projectRecord?.customName ?? null,
+      ...projectGroupMetadata(projectRecord),
       projectCustomIconRevision: projectRecord?.customIconRevision ?? null,
       projectRootPath: projectRecord?.rootPath ?? result.repoRoot,
       workspaceDirectory: result.workspace.cwd,
@@ -6638,6 +6686,7 @@ export class Session {
       ...(project.projectKey ? { projectKey: project.projectKey } : {}),
       projectDisplayName: resolveProjectDisplayName(project),
       projectCustomName: project.customName ?? null,
+      ...projectGroupMetadata(project),
       projectCustomIconRevision: project.customIconRevision ?? null,
       projectIconRevision: icon.revision,
       projectRootPath: project.rootPath,
