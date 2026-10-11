@@ -94,6 +94,11 @@ test("session create forwards clientMessageId to the initial prompt run options"
   expect(streamAgent).toHaveBeenCalledWith("agent-1", "hello from create", {
     clientMessageId: "msg-create-1",
   });
+  expect(dependencies.agentManager.createAgent).toHaveBeenCalledWith(
+    expect.anything(),
+    undefined,
+    expect.objectContaining({ creationSource: "cli", callerAgentId: undefined, labels: {} }),
+  );
 });
 
 test("session create validates the requested mode against the provider's modes", async () => {
@@ -223,6 +228,8 @@ test("mcp create accepts provider-only internal input and leaves model undefined
     undefined,
     expect.objectContaining({
       workspaceId: "ws-create-test",
+      creationSource: "agent",
+      callerAgentId: undefined,
     }),
   );
 });
