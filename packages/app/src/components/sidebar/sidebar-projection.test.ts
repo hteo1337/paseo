@@ -1,3 +1,4 @@
+import { buildProjectGroupTree, liveWorkspaceKeys, isScratchWorkspace } from "./project-group-tree";
 import { i18n } from "@/i18n/i18next";
 import { describe, expect, it } from "vitest";
 import type {
@@ -175,4 +176,171 @@ describe("buildSidebarProjection", () => {
       { serverId: "srv", workspaceId: "unpinned" },
     ]);
   });
+});
+
+describe("project group tree", () => {
+  it("projects groups/workspaces, rolls counts and attention up, and applies per-client collapse overrides", () => {
+    const input = twoProjectInput("project");
+    input.projects[0].projectGroup = { name: "Nexus Platform", order: 1, collapsed: false };
+    input.projects[1].projectGroup = { name: "Fleet tooling", order: 2, collapsed: true };
+    const groups = buildProjectGroupTree(input);
+    expect(
+      groups.map(({ name, workspaceCount, attentionCount, collapsed }) => ({
+        name,
+        workspaceCount,
+        attentionCount,
+        collapsed,
+      })),
+    ).toEqual([
+      { name: "Nexus Platform", workspaceCount: 1, attentionCount: 0, collapsed: false },
+      { name: "Fleet tooling", workspaceCount: 1, attentionCount: 1, collapsed: true },
+    ]);
+    const overrideKey = groups[1].key;
+    const local = buildProjectGroupTree({ ...input, collapseOverrides: { [overrideKey]: false } });
+    expect(local[1].collapsed).toBe(false);
+    expect(groups[1].collapsed).toBe(true);
+    expect(buildSidebarProjection(input).shortcutModel.shortcutTargets).not.toEqual(
+      buildSidebarProjection({ ...input, groupCollapseOverrides: { [overrideKey]: false } })
+        .shortcutModel.shortcutTargets,
+    );
+  });
+  it("splits temporary workspaces into collapsed Scratch and keeps ungrouped and non-temporary workspaces visible", () => {
+    const active = makeWorkspace("main", "needs_input");
+    const scratch = makeWorkspace("review", "attention");
+    active.entry.workspaceDirectory = "/work/repo";
+    scratch.entry.workspaceDirectory = "/Users/teo/.paseo/ops-scratch/grouping";
+    const groups = buildProjectGroupTree({
+      projects: [makeProject([active.placement, scratch.placement])],
+      workspaceEntriesByKey: new Map([
+        [active.entry.workspaceKey, active.entry],
+        [scratch.entry.workspaceKey, scratch.entry],
+      ]),
+    });
+    expect(
+      groups.map(({ name, workspaceCount, attentionCount, collapsed }) => ({
+        name,
+        workspaceCount,
+        attentionCount,
+        collapsed,
+      })),
+    ).toEqual([
+      { name: "Ungrouped", workspaceCount: 1, attentionCount: 1, collapsed: false },
+      { name: "Scratch", workspaceCount: 1, attentionCount: 1, collapsed: true },
+    ]);
+    expect(groups[0].projects[0].workspaces[0].workspaceId).toBe("main");
+    expect(groups[1].projects[0].workspaces[0].workspaceId).toBe("review");
+    expect(isScratchWorkspace("/tmp/review")).toBe(true);
+    expect(isScratchWorkspace("/work/tmp/review")).toBe(false);
+    expect(isScratchWorkspace("/work/ops-scratch-other")).toBe(false);
+  });
+  it("live filter retains idle/running/initializing agents and excludes archived/closed/error agents", () => {
+    const keys = liveWorkspaceKeys([
+      {
+        serverId: "srv",
+        agents: [
+          { workspaceId: "idle", status: "idle", archivedAt: null },
+          { workspaceId: "running", status: "running", archivedAt: null },
+          { workspaceId: "starting", status: "initializing", archivedAt: null },
+          { workspaceId: "closed", status: "closed", archivedAt: null },
+          { workspaceId: "error", status: "error", archivedAt: null },
+          { workspaceId: "archived", status: "running", archivedAt: new Date(0) },
+        ],
+      },
+    ]);
+    expect([...keys]).toEqual(["srv:idle", "srv:running", "srv:starting"]);
+  });
+});
+
+it("places equivalent repositories under each host's group without changing preference keys", () => {
+  const a = makeWorkspace("a");
+  const b = makeWorkspace("b");
+  b.placement.serverId = "other";
+  const project = makeProject([a.placement, b.placement]);
+  const group = (name: string) => ({ name, order: 1, collapsed: false });
+  project.hosts = [
+    {
+      serverId: "srv",
+      projectId: "a",
+      iconWorkingDir: "/a",
+      worktreeSupport: "supported",
+      projectGroup: group("Nexus Platform"),
+    },
+    {
+      serverId: "other",
+      projectId: "b",
+      iconWorkingDir: "/b",
+      worktreeSupport: "supported",
+      projectGroup: group("Fleet tooling"),
+    },
+  ];
+  const build = () =>
+    buildProjectGroupTree({ projects: [project], workspaceEntriesByKey: new Map() });
+  expect(
+    build().map((section) => [
+      section.name,
+      section.projects[0].viewKey,
+      section.projects[0].workspaces.map((ws) => ws.workspaceId),
+    ]),
+  ).toEqual([
+    ["Fleet tooling", "project", ["b"]],
+    ["Nexus Platform", "project", ["a"]],
+  ]);
+  expect(build().map((section) => section.projects[0].hosts.length)).toEqual([1, 1]);
+  project.hosts[0].projectGroup = null;
+  expect(
+    build().map((section) => [
+      section.name,
+      section.projects[0].workspaces.map((ws) => ws.workspaceId),
+    ]),
+  ).toEqual([
+    ["Fleet tooling", ["b"]],
+    ["Ungrouped", ["a"]],
+  ]);
+});
+
+it("retains empty or fully pinned host placements beside occupied equivalent repositories", () => {
+  const a = makeWorkspace("a");
+  const project = makeProject([a.placement]);
+  project.hosts = [
+    {
+      serverId: "srv",
+      projectId: "a",
+      iconWorkingDir: "/a",
+      worktreeSupport: "supported",
+      projectGroup: { name: "Nexus Platform", order: 1, collapsed: false },
+    },
+    {
+      serverId: "empty",
+      projectId: "b",
+      iconWorkingDir: "/b",
+      worktreeSupport: "supported",
+      projectGroup: { name: "Fleet tooling", order: 2, collapsed: false },
+    },
+  ];
+  const groups = buildProjectGroupTree({ projects: [project], workspaceEntriesByKey: new Map() });
+  expect(groups.map((group) => [group.name, group.workspaceCount])).toEqual([
+    ["Nexus Platform", 1],
+    ["Fleet tooling", 0],
+  ]);
+  expect(groups[1].projects[0].hosts.map((host) => host.serverId)).toEqual(["empty"]);
+  expect(groups[1].projects[0].viewKey).toBe("project");
+  const b = makeWorkspace("b");
+  b.placement.serverId = "empty";
+  project.workspaces.push(b.placement);
+  const projection = buildSidebarProjection({
+    ...projectionInput(),
+    projects: [project],
+    pinnedKeys: { pinnedWorkspaceKeys: [b.placement.workspaceKey], pinnedAtByKey: {} },
+    workspaceEntriesByKey: new Map([
+      [a.entry.workspaceKey, a.entry],
+      [b.entry.workspaceKey, b.entry],
+    ]),
+  });
+  const unpinnedTree = buildProjectGroupTree({
+    projects: projection.pinnedGroups.unpinnedProjects,
+    workspaceEntriesByKey: new Map(),
+  });
+  expect(
+    unpinnedTree.find((group) => group.name === "Fleet tooling")?.projects[0].hosts[0].serverId,
+  ).toBe("empty");
 });

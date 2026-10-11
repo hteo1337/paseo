@@ -941,6 +941,7 @@ export async function createPaseoDaemon(
   const projectRegistry = new FileBackedProjectRegistry(
     path.join(config.paseoHome, "projects", "projects.json"),
     logger,
+    { paseoHome: config.paseoHome },
   );
   workspaceRegistry = new FileBackedWorkspaceRegistry(
     path.join(config.paseoHome, "projects", "workspaces.json"),

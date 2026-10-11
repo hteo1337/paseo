@@ -1,3 +1,5 @@
+import { ProjectGroupSchema } from "@getpaseo/protocol/project-groups";
+import { applyProjectGroupRules, initializeProjectGrouping } from "./project-grouping.js";
 import { promises as fs } from "node:fs";
 
 import type { Logger } from "pino";
@@ -30,6 +32,9 @@ const PersistedProjectRecordSchema = z.object({
     .nullable()
     .optional()
     .transform((value) => value ?? null),
+  // Legacy records omit group; explicit unset overrides automatic rules.
+  group: ProjectGroupSchema.nullable().optional(),
+  groupSource: z.enum(["manual", "rule"]).optional(),
   // User-set override layered over the derived displayName. Reconciliation
   // never touches this. Null means "use the derived name". Added for #987.
   customName: z
@@ -372,6 +377,7 @@ export class FileBackedProjectRegistry
 {
   private allocationQueue: Promise<void> = Promise.resolve();
   private readonly projectIdFactory: () => string;
+  private readonly groupingHome?: string;
   private readonly mutationListeners = new Set<
     (mutation: {
       kind: "upsert" | "archive" | "remove";
@@ -385,6 +391,7 @@ export class FileBackedProjectRegistry
     logger: Logger,
     options?: {
       projectIdFactory?: () => string;
+      paseoHome?: string;
       writeRecords?: (
         filePath: string,
         records: readonly PersistedProjectRecord[],
@@ -400,6 +407,12 @@ export class FileBackedProjectRegistry
       writeRecords: options?.writeRecords,
     });
     this.projectIdFactory = options?.projectIdFactory ?? generateProjectId;
+    this.groupingHome = options?.paseoHome;
+  }
+
+  override async initialize(): Promise<void> {
+    await super.initialize();
+    if (this.groupingHome) await initializeProjectGrouping(this, this.groupingHome);
   }
 
   async getOrCreateActiveByRoot(input: {
@@ -433,7 +446,7 @@ export class FileBackedProjectRegistry
           updatedAt: input.timestamp,
         };
         await this.upsert(refreshed);
-        return refreshed;
+        return (await this.get(active.projectId)) ?? refreshed;
       }
 
       for (;;) {
@@ -449,7 +462,7 @@ export class FileBackedProjectRegistry
           updatedAt: input.timestamp,
         });
         await this.upsert(record);
-        return record;
+        return (await this.get(projectId)) ?? record;
       }
     } finally {
       release();
@@ -468,15 +481,25 @@ export class FileBackedProjectRegistry
   }
 
   override async upsert(record: PersistedProjectRecord): Promise<void> {
-    await super.upsert(record);
-    await this.notifyMutation({ kind: "upsert", projectId: record.projectId, project: record });
+    const [grouped] = await this.mutateMany((records) => {
+      const current = records.get(record.projectId);
+      // Reconciliation can supply a snapshot taken before a manual set/unset.
+      const merged = current
+        ? { ...record, group: current.group, groupSource: current.groupSource }
+        : record;
+      return [this.groupingHome ? applyProjectGroupRules(merged, this.groupingHome) : merged];
+    });
+    await this.notifyMutation({ kind: "upsert", projectId: grouped.projectId, project: grouped });
   }
 
   override async update(
     projectId: string,
     updater: (record: PersistedProjectRecord) => PersistedProjectRecord,
   ): Promise<PersistedProjectRecord | null> {
-    const project = await super.update(projectId, updater);
+    const project = await super.update(projectId, (record) => {
+      const updated = updater(record);
+      return this.groupingHome ? applyProjectGroupRules(updated, this.groupingHome) : updated;
+    });
     if (!project) return null;
     await this.notifyMutation({ kind: "upsert", projectId, project });
     return project;
