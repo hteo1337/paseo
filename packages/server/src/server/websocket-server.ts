@@ -1819,6 +1819,7 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         usageSources: true,
+        projectGroups: true,
         ownedSubscriptions: true,
         agentRequestReceipts: true,
         ...(this.keeperControl?.enabled ? { keeperControl: true } : {}),
