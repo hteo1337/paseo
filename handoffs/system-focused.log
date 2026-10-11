@@ -1,0 +1,9 @@
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/35a69bia/th1-728-create-provenance
+
+
+ Test Files  3 passed (3)
+      Tests  4 passed | 79 skipped (83)
+   Start at  02:29:22
+   Duration  5.78s (transform 5.10s, setup 0ms, import 6.88s, tests 959ms, environment 0ms)
+

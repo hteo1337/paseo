@@ -55,6 +55,7 @@ export type EnsureWorkspaceForCreate = (
 
 export interface CreateAgentFromSessionInput {
   kind: "session";
+  callerAgentId?: string;
   onAgentReady?: (agent: ManagedAgent) => Promise<void>;
   agentId?: string;
   config: AgentSessionConfig;
@@ -80,6 +81,8 @@ export interface CreateAgentFromSessionInput {
 
 export interface CreateAgentFromMcpInput {
   kind: "mcp";
+  /** Server-only provenance; public MCP arguments must never populate this field. */
+  creationSource?: "agent" | "system";
   provider: string;
   title: string;
   initialPrompt?: string;
@@ -283,6 +286,8 @@ async function resolveSessionCreateAgent(
   return {
     config: sessionConfig,
     createOptions: {
+      creationSource: input.callerAgentId ? "agent" : "cli",
+      callerAgentId: input.callerAgentId,
       labels: input.labels,
       initialPrompt: trimmedPrompt,
       env: input.env,
@@ -358,6 +363,8 @@ async function resolveMcpCreateAgent(
       resolvedFeatures: resolvedCreateConfig.featureValues,
     }),
     createOptions: {
+      creationSource: input.creationSource ?? "agent",
+      callerAgentId: input.callerAgentId,
       ...(Object.keys(intent.labels).length > 0 ? { labels: intent.labels } : {}),
       workspaceId: intent.workspaceId,
       owner: input.owner,

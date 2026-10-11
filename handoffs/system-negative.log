@@ -1,0 +1,57 @@
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/35a69bia/th1-728-create-provenance
+
+ ❯ packages/server/src/server/agent/create-agent/create.test.ts (11 tests | 1 failed | 10 skipped) 6ms
+   × mcp create preserves trusted source system while callerless external MCP defaults to agent 5ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  packages/server/src/server/agent/create-agent/create.test.ts > mcp create preserves trusted source system while callerless external MCP defaults to agent
+AssertionError: expected "vi.fn()" to be called with arguments: [ Array(3) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
++   {
++     "cwd": "/tmp/paseo-create-test",
++     "internal": undefined,
++     "modeId": undefined,
+      "model": undefined,
+      "provider": "claude",
++     "thinkingOptionId": undefined,
++     "title": "provider default",
+    },
+    undefined,
+-   ObjectContaining {
++   {
+      "callerAgentId": undefined,
+-     "creationSource": "system",
++     "creationSource": "agent",
++     "env": undefined,
++     "owner": undefined,
+      "workspaceId": "ws-create-test",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ packages/server/src/server/agent/create-agent/create.test.ts:226:25
+    224|     });
+    225|
+    226|     expect(createAgent).toHaveBeenCalledWith(
+       |                         ^
+    227|       expect.objectContaining({
+    228|         provider: "claude",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 10 skipped (11)
+   Start at  02:29:49
+   Duration  2.17s (transform 1.53s, setup 0ms, import 2.09s, tests 6ms, environment 0ms)
+

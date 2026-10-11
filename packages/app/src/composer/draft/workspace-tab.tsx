@@ -193,6 +193,7 @@ async function submitDraftCreateRequest(input: {
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
   const imagesData = await encodeImages(images);
   const options = {
+    labels: { direct: "operator" },
     idempotencyKey: input.draftId,
     config,
     workspaceId,

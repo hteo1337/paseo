@@ -93,6 +93,11 @@ test("session create forwards clientMessageId to the initial prompt run options"
   expect(streamAgent).toHaveBeenCalledWith("agent-1", "hello from create", {
     clientMessageId: "msg-create-1",
   });
+  expect(dependencies.agentManager.createAgent).toHaveBeenCalledWith(
+    expect.anything(),
+    undefined,
+    expect.objectContaining({ creationSource: "cli", callerAgentId: undefined, labels: {} }),
+  );
 });
 
 test("session create validates the requested mode against the provider's modes", async () => {
@@ -181,51 +186,57 @@ test("session create applies the resolved mode from the provider create config",
   );
 });
 
-test("mcp create accepts provider-only internal input and leaves model undefined", async () => {
-  const snapshot = {
-    id: "agent-1",
-    provider: "claude",
-    cwd: "/tmp/paseo-create-test",
-    runtimeInfo: null,
-  } as ManagedAgent;
-  const createAgent = vi.fn(async () => snapshot);
-  const dependencies: Parameters<typeof createAgentCommand>[0] = {
-    agentManager: {
-      createAgent,
-      getAgent: vi.fn(() => snapshot),
-    } as unknown as Parameters<typeof createAgentCommand>[0]["agentManager"],
-    agentStorage: {} as Parameters<typeof createAgentCommand>[0]["agentStorage"],
-    logger: createTestLogger(),
-    providerSnapshotManager: {
-      resolveCreateConfig: vi.fn(async (input) => {
-        expect(input.provider).toBe("claude");
-        return {};
-      }),
-    } as Parameters<typeof createAgentCommand>[0]["providerSnapshotManager"],
-  };
-
-  await createAgentCommand(dependencies, {
-    kind: "mcp",
-    provider: "claude",
-    cwd: "/tmp/paseo-create-test",
-    workspaceId: "ws-create-test",
-    title: "provider default",
-    initialPrompt: "hello",
-    background: true,
-    notifyOnFinish: false,
-  });
-
-  expect(createAgent).toHaveBeenCalledWith(
-    expect.objectContaining({
+test.each([undefined, "system"] as const)(
+  "mcp create preserves trusted source %s while callerless external MCP defaults to agent",
+  async (creationSource) => {
+    const snapshot = {
+      id: "agent-1",
       provider: "claude",
-      model: undefined,
-    }),
-    undefined,
-    expect.objectContaining({
+      cwd: "/tmp/paseo-create-test",
+      runtimeInfo: null,
+    } as ManagedAgent;
+    const createAgent = vi.fn(async () => snapshot);
+    const dependencies: Parameters<typeof createAgentCommand>[0] = {
+      agentManager: {
+        createAgent,
+        getAgent: vi.fn(() => snapshot),
+      } as unknown as Parameters<typeof createAgentCommand>[0]["agentManager"],
+      agentStorage: {} as Parameters<typeof createAgentCommand>[0]["agentStorage"],
+      logger: createTestLogger(),
+      providerSnapshotManager: {
+        resolveCreateConfig: vi.fn(async (input) => {
+          expect(input.provider).toBe("claude");
+          return {};
+        }),
+      } as Parameters<typeof createAgentCommand>[0]["providerSnapshotManager"],
+    };
+
+    await createAgentCommand(dependencies, {
+      kind: "mcp",
+      provider: "claude",
+      cwd: "/tmp/paseo-create-test",
       workspaceId: "ws-create-test",
-    }),
-  );
-});
+      title: "provider default",
+      creationSource,
+      initialPrompt: "hello",
+      background: true,
+      notifyOnFinish: false,
+    });
+
+    expect(createAgent).toHaveBeenCalledWith(
+      expect.objectContaining({
+        provider: "claude",
+        model: undefined,
+      }),
+      undefined,
+      expect.objectContaining({
+        workspaceId: "ws-create-test",
+        creationSource: creationSource ?? "agent",
+        callerAgentId: undefined,
+      }),
+    );
+  },
+);
 
 test("session create stamps the requested workspaceId when no worktree setup runs", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "create-agent-test-"));
