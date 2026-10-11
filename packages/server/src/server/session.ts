@@ -4543,10 +4543,14 @@ export class Session {
     workspacePromptTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
-    const callerAgent = request.callerAgentId
-      ? this.agentManager.getAgent(request.callerAgentId)
+    // Parentage is durable metadata; an idle closed parent needs no provider turn.
+    const storedCaller = request.callerAgentId
+      ? await this.agentStorage.get(request.callerAgentId)
       : null;
-    if (request.callerAgentId && !callerAgent) {
+    const callerAgent = request.callerAgentId
+      ? (this.agentManager.getAgent(request.callerAgentId) ?? storedCaller)
+      : null;
+    if (request.callerAgentId && (!callerAgent || storedCaller?.archivedAt)) {
       throw new Error(`Caller agent ${request.callerAgentId} not found`);
     }
 

@@ -3175,6 +3175,26 @@ export class DaemonClient {
     return this.lastServerInfoMessage?.features?.backgroundWorkspaces === true;
   }
 
+  /** Reads an existing receipt without initiating or subscribing to creation. */
+  async readAgentCreation(idempotencyKey: string): Promise<CreationSnapshot | null> {
+    const result = await this.sendCorrelatedSessionRequest({
+      message: {
+        type: "creation.subscribe.request",
+        kind: "agent",
+        idempotencyKey,
+        subscribe: false,
+      },
+      responseType: "creation.subscribe.response",
+    });
+    if (result.error)
+      throw new DaemonRpcError({
+        requestId: result.requestId,
+        requestType: "creation.subscribe.request",
+        error: result.error,
+      });
+    return result.snapshot;
+  }
+
   async createAgent(options: CreateAgentRequestOptions): Promise<AgentSnapshotPayload> {
     if (options.git !== undefined || options.worktreeName !== undefined) {
       throw new Error(
