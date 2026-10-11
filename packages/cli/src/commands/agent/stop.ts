@@ -1,4 +1,5 @@
 import { Command } from "commander";
+import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
 import { connectToDaemon } from "../../utils/client.js";
 import { isSameOrDescendantPath } from "../../utils/paths.js";
 import type {
@@ -55,7 +56,7 @@ export async function runStopCommand(
 
   try {
     const fetchPayload = await client.fetchAgents({ filter: { includeArchived: true } });
-    let agents = fetchPayload.entries.map((entry) => entry.agent);
+    let agents = fetchPayload.entries.map((entry: { agent: AgentSnapshotPayload }) => entry.agent);
     const stoppedIds: string[] = [];
 
     if (options.all) {
