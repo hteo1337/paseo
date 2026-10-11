@@ -1019,6 +1019,7 @@ export const ProjectIconSetRequestSchema = z.object({
 export const ProjectRemoveRequestSchema = z.object({
   type: z.literal("project.remove.request"),
   projectId: z.string(),
+  ifEmpty: z.boolean().optional(),
   requestId: z.string(),
 });
 
@@ -2797,9 +2798,8 @@ export const ArchiveWorkspaceRequestSchema = z.object({
   requestId: z.string(),
 });
 
-// Create a new workspace record. Unlike open_project, this never deduplicates by
-// directory: it always produces a fresh workspace. The source discriminates
-// between an existing local directory and a newly created paseo worktree.
+// Create or reuse the active workspace record for a directory. The source
+// discriminates an existing local directory from a paseo worktree request.
 export const WorkspaceCreateRequestSchema = z.object({
   type: z.literal("workspace.create.request"),
   workspaceId: z
