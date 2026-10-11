@@ -2741,6 +2741,8 @@ export const ProjectGithubCloneRequestSchema = z.object({
 export const ArchiveWorkspaceRequestSchema = z.object({
   type: z.literal("archive_workspace_request"),
   workspaceId: z.string(),
+  // Repair callers refuse to archive a record if an agent can still use it.
+  ifNoLiveAgents: z.boolean().optional(),
   requestId: z.string(),
 });
 
