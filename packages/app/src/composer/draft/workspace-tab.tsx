@@ -166,6 +166,7 @@ async function submitDraftCreateRequest(input: {
   const attachmentsArray = Array.isArray(attachments) ? attachments : undefined;
   const imagesData = await encodeImages(images);
   const request = {
+    labels: { direct: "operator" },
     config,
     workspaceId,
     initialPrompt: text,
