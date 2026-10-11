@@ -12,8 +12,9 @@ import os
 from pathlib import Path
 import subprocess
 import sys
+import time
 
-LIVE = {"running", "idle"}
+TERMINAL = {"closed"}
 
 
 def cli(*args):
@@ -23,14 +24,14 @@ def cli(*args):
     return json.loads(result.stdout)
 
 
-def inventory(home):
+def inventory_once(home):
     active = cli("workspace", "ls")
     agents = cli("agent", "ls", "--global")
     stored = json.loads((home / "projects/workspaces.json").read_text())
     by_id = {record["workspaceId"]: record for record in stored}
     if len(by_id) != len(stored):
         raise RuntimeError("duplicate workspace IDs in persistent store")
-    live = {agent["id"]: agent for agent in agents if agent.get("status") in LIVE}
+    live = {agent["id"]: agent for agent in agents if agent.get("status") not in TERMINAL}
     owners = collections.defaultdict(set)
     found = set()
     if live:
@@ -56,6 +57,20 @@ def inventory(home):
         key = os.path.realpath(cwd)
         groups[key].append(record)
     return active, groups, owners
+
+
+def inventory(home):
+    # Another archive can commit between the daemon's listing response and
+    # reading its JSON store. Retry that bounded snapshot race, never a durable
+    # identity or agent-record mismatch.
+    for attempt in range(4):
+        try:
+            return inventory_once(home)
+        except RuntimeError as error:
+            if not str(error).startswith("active workspace/store mismatch:") or attempt == 3:
+                raise
+            time.sleep(0.25)
+    raise AssertionError("unreachable")
 
 
 def plan(home):
