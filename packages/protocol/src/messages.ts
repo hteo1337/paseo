@@ -1041,6 +1041,7 @@ export const ProjectRemoveRequestSchema = z.object({
   type: z.literal("project.remove.request"),
   projectId: z.string(),
   ifEmpty: z.boolean().optional(),
+  ifNoActiveWorkspaces: z.boolean().optional(),
   requestId: z.string(),
 });
 
@@ -3808,6 +3809,7 @@ export const ServerInfoStatusPayloadSchema = z
         // COMPAT(workspaceLabels): added in v0.5.0, remove after 2027-08-14.
         workspaceLabels: z.boolean().optional(),
         projectGroups: z.boolean().optional(),
+        guardedProjectRemove: z.boolean().optional(),
         // COMPAT(workspaceSetupRun): added in v0.8.0, remove gate after 2027-09-02.
         workspaceSetupRun: z.boolean().optional(),
         // COMPAT(workspaceTerminals): added in v0.8.0, remove gate after 2027-09-05.
