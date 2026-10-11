@@ -3963,7 +3963,7 @@ test("project.remove.request archives active workspaces and removes the project 
   });
 });
 
-test("project.remove.request removes an already-empty project", async () => {
+test("project.remove.request retains archived workspace references until truly empty", async () => {
   const emitted: SessionOutboundMessage[] = [];
   const session = createSessionForWorkspaceTests({
     onMessage: (message) => emitted.push(message),
@@ -4019,25 +4019,29 @@ test("project.remove.request removes an already-empty project", async () => {
     ifEmpty: true,
   });
 
-  expect(projects.has(project.projectId)).toBe(false);
+  expect(projects.has(project.projectId)).toBe(true);
   expect(workspaces.get(archivedWorkspace.workspaceId)).toEqual(archivedWorkspace);
-  expect(findByType(emitted, "project.remove.response")?.payload).toEqual({
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toMatchObject({
     requestId: "req-remove-empty-project",
+    projectId: project.projectId,
+    accepted: false,
+    removedWorkspaceIds: [],
+  });
+  workspaces.clear();
+  await session.handleMessage({
+    type: "project.remove.request",
+    projectId: project.projectId,
+    requestId: "req-remove-truly-empty-project",
+    ifEmpty: true,
+  });
+  expect(projects.has(project.projectId)).toBe(false);
+  expect(filterByType(emitted, "project.remove.response").at(-1)?.payload).toEqual({
+    requestId: "req-remove-truly-empty-project",
     projectId: project.projectId,
     accepted: true,
     removedWorkspaceIds: [],
     error: null,
   });
-  expect(filterByType(emitted, "workspace_update")).toEqual([
-    {
-      type: "workspace_update",
-      payload: {
-        kind: "remove",
-        id: archivedWorkspace.workspaceId,
-        removedProjectId: project.projectId,
-      },
-    },
-  ]);
 });
 
 test("create paseo worktree response preserves an explicit non-Git project", async () => {
