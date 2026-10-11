@@ -1,4 +1,20 @@
-import { describe, expect, test } from "vitest";
+import { describe, expect, test, vi } from "vitest";
+import { requestWorkspaceDraftAgent } from "./create-agent-request";
+
+vi.mock("@/utils/encode-images", () => ({ encodeImages: async () => [] }));
+
+test("human workspace draft requests carry the explicit operator escape label", async () => {
+  const createAgent = vi.fn(async () => ({ id: "human-agent" }));
+  await requestWorkspaceDraftAgent({ createAgent } as never, {
+    workspaceId: "workspace",
+    config: { provider: "codex", cwd: "/project" },
+    text: "Read README",
+    clientMessageId: "human-message",
+  });
+  expect(createAgent).toHaveBeenCalledWith(
+    expect.objectContaining({ labels: { direct: "operator" } }),
+  );
+});
 
 import { shouldAllowEmptyDraftText, validateDraftSubmission } from "./workspace-tab-core";
 
