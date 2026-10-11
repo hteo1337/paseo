@@ -246,6 +246,7 @@ test("agent creation hooks change the provider and environment before the sessio
     acknowledgeClose: true,
     hooks: `
   server.addHook("agent.create.before", async ({ request }) => {
+    console.log(JSON.stringify({ hook: "agent.create.before", creation: request.creation }));
     return { ...request, config: { ...request.config, provider: "${PROVIDER_ID}", model: "shutdown-model" }, env: { ...request.env, HOOK_CREATE: "created" } };
   });
   server.addHook("agent.open.before", async ({ request }) => {
@@ -265,9 +266,8 @@ test("agent creation hooks change the provider and environment before the sessio
     await client.patchDaemonConfig({ pluginsEnabled: true });
     await client.installDirectoryPlugin(pluginDirectory);
     const agent = await client.createAgent({
-      provider: "claude",
-      cwd: directory,
-      title: "Hook test",
+      config: { provider: "claude", cwd: directory, title: "Hook test" },
+      labels: { direct: "operator" },
     });
     expect(agent.provider).toBe(PROVIDER_ID);
     expect(await daemon.daemon.agentStorage.get(agent.id)).toMatchObject({
@@ -286,6 +286,10 @@ test("agent creation hooks change the provider and environment before the sessio
           });
       })
       .toMatchObject([
+        {
+          hook: "agent.create.before",
+          creation: { source: "cli", callerAgentId: null, labels: { direct: "operator" } },
+        },
         {
           hook: "agent.open.before",
           request: { agentId: agent.id, env: { HOOK_CREATE: "created" } },
