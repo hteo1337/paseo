@@ -301,11 +301,9 @@ export function createWorkspaceProvisioningService(deps: {
         updatedAt: timestamp,
         ...(await resolveCreationMetadata(context)),
       });
-      await workspaceRegistry.upsert(workspace, {
-        expectsInitialAgent: context?.expectsInitialAgent,
-      });
-      emitWorkspaceCreated(workspace);
-      return workspace;
+      const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, { expectsInitialAgent: context?.expectsInitialAgent });
+      if (claimed.created) emitWorkspaceCreated(claimed.workspace);
+      return claimed.workspace;
     };
     return deps.withCheckoutLock && checkout.isGit && checkout.isPaseoOwnedWorktree
       ? deps.withCheckoutLock(checkout.worktreeRoot ?? normalizedCwd, create)
@@ -344,11 +342,13 @@ export function createWorkspaceProvisioningService(deps: {
       ...(input.untrustedSource ? { untrustedSource: input.untrustedSource } : {}),
       ...(await resolveCreationMetadata(input)),
     });
-    await workspaceRegistry.upsert(workspace, {
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, {
       expectsInitialAgent: input.expectsInitialAgent,
     });
-    emitWorkspaceCreated(workspace);
-    return workspace;
+    if (claimed.created) {
+      emitWorkspaceCreated(claimed.workspace);
+    }
+    return claimed.workspace;
   }
 
   function emitWorkspaceCreated(workspace: PersistedWorkspaceRecord): void {
