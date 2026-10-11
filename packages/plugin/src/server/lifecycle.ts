@@ -109,8 +109,19 @@ export interface PluginLifecycleEvents {
   "workspace.archived": { workspace: PluginHookWorkspace };
 }
 
+export interface PluginAgentCreation {
+  /** Server-derived entry point; operator UI creates carry direct=operator. */
+  source: "cli" | "agent" | "system";
+  callerAgentId: string | null;
+  labels: Record<string, string>;
+}
+
 export interface PluginBeforeRequests {
-  "agent.create": { config: AgentSessionConfig; env?: Record<string, string> };
+  "agent.create": {
+    config: AgentSessionConfig;
+    env?: Record<string, string>;
+    creation?: PluginAgentCreation;
+  };
   "agent.set_model": PluginSetModelRequest;
   "agent.session_open": PluginSessionOpenRequest;
   "agent.session_opened": PluginSessionOpenedRequest;
