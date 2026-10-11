@@ -132,4 +132,19 @@ describe("project commands", () => {
 
     expect(removeProject).toHaveBeenCalledWith("project-1", undefined, { ifEmpty: true });
   });
+
+  it("requests the archived-history-safe project guard", async () => {
+    await runDeleteCommand(
+      "project-1",
+      {
+        daemonTarget: { kind: "instance", home: "/tmp/project-test" },
+        ifNoActiveWorkspaces: true,
+      },
+      {} as never,
+    );
+
+    expect(removeProject).toHaveBeenCalledWith("project-1", undefined, {
+      ifNoActiveWorkspaces: true,
+    });
+  });
 });

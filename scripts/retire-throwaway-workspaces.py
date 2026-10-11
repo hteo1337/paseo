@@ -105,6 +105,15 @@ def is_git_checkout(path):
     return probe.returncode == 0 and os.path.realpath(probe.stdout.strip()) == os.path.realpath(path)
 
 
+def has_nested_git_metadata(path):
+    for root, dirs, files in os.walk(path, followlinks=False):
+        if Path(root) != path and (".git" in dirs or ".git" in files):
+            return True
+        if ".git" in dirs:
+            dirs.remove(".git")
+    return False
+
+
 def clean_and_fully_pushed(path):
     def git(*args):
         return subprocess.run(["git", "-C", str(path), *args], text=True, capture_output=True)
@@ -127,6 +136,8 @@ def clean_and_fully_pushed(path):
 def move_eligible(path, reason, trash):
     if not path.is_dir() or reason in {"missing_directory", "empty_worktree_container"}:
         return None
+    if has_nested_git_metadata(path):
+        return None
     if is_git_checkout(path):
         # A Git checkout moves only when clean and fully pushed to its upstream.
         if not clean_and_fully_pushed(path):
@@ -142,6 +153,10 @@ def move_eligible(path, reason, trash):
         else:
             path.rename(destination)
         return str(destination)
+    # A broken gitfile or a nested checkout still contains Git data. Without a
+    # working repo identity, its clean/pushed state cannot be proved.
+    if os.path.lexists(path / ".git"):
+        return None
     # Only explicitly approved non-git scratch older than four full days.
     if reason not in {"private_tmp", "hermes_scratch", "keeper_canary", "keeper_candidate",
                       "app_support_scratch", "codexbar_probe", "claude_state", "codex_oct04", "sandbox"}:
@@ -198,31 +213,36 @@ def apply_one(home, include_sandbox, item, trash):
         raise RuntimeError(f"workspace still active after archive: {item['workspaceId']}")
     if directory_existed and not path.is_dir():
         raise RuntimeError(f"guarded archive removed a directory: {path}")
-    # Delete only an empty project row created for this exact scratch path.
-    workspaces = json.loads((home / ".paseo/projects/workspaces.json").read_text())
-    if item["projectRoot"] and os.path.realpath(item["projectRoot"]) == str(path):
-        if not any(not w.get("archivedAt") and w["projectId"] == item["projectId"] for w in workspaces):
-            cli("project", "delete", item["projectId"], "--if-empty")
-    destination = move_eligible(path, item["reason"], trash)
-    return {**item, "result": "archived", "movedTo": destination}
+    return finalize_archived(home, include_sandbox, item, trash)
 
 
-def remove_empty_throwaway_projects(home, include_sandbox, project_ids):
+def finalize_archived(home, include_sandbox, item, trash):
+    """Finish an archive and remove its project only through an atomic CLI guard."""
+    path = Path(item["path"])
+    if approved_reason(path, home, include_sandbox) != item["reason"]:
+        raise RuntimeError(f"scratch classification changed: {path}")
     workspaces = json.loads((home / ".paseo/projects/workspaces.json").read_text())
     projects = {p["projectId"]: p for p in json.loads((home / ".paseo/projects/projects.json").read_text())}
-    removed = []
-    for project_id in sorted(project_ids):
-        project = projects.get(project_id)
-        if not project:
-            continue
-        root = Path(os.path.realpath(project["rootPath"]))
-        if not approved_reason(root, home, include_sandbox):
-            continue
-        if any(not w.get("archivedAt") and w["projectId"] == project_id for w in workspaces):
-            continue
-        cli("project", "delete", project_id, "--if-empty")
-        removed.append(project_id)
-    return removed
+    workspace = next((w for w in workspaces if w["workspaceId"] == item["workspaceId"]), None)
+    if not workspace or not workspace.get("archivedAt") or workspace["projectId"] != item["projectId"]:
+        raise RuntimeError(f"workspace not archived under expected project: {item['workspaceId']}")
+    if any(not w.get("archivedAt") and w["projectId"] == item["projectId"] for w in workspaces):
+        raise RuntimeError(f"project acquired an active workspace: {item['projectId']}")
+    if has_live_agent(item["workspaceId"], path, active_agents()):
+        raise RuntimeError(f"scratch path acquired a live agent: {path}")
+    project = projects.get(item["projectId"])
+    removed_project = False
+    if project:
+        if os.path.realpath(project["rootPath"]) != str(path):
+            raise RuntimeError(f"project root differs from scratch path: {item['projectId']}")
+        has_history = any(w["projectId"] == item["projectId"] for w in workspaces)
+        cli("project", "delete", item["projectId"],
+            "--if-no-active-workspaces" if has_history else "--if-empty")
+        removed_project = True
+    destination = move_eligible(path, item["reason"], trash)
+    return {**{key: value for key, value in item.items() if key != "error"},
+            "result": "archived", "projectRemoved": removed_project,
+            "movedTo": destination}
 
 
 def main():
@@ -231,25 +251,28 @@ def main():
     parser.add_argument("--apply", action="store_true")
     parser.add_argument("--guard-verified", action="store_true", help="Required for --apply after a live-owner refusal probe on this daemon")
     parser.add_argument("--include-sandbox", action="store_true", help="Only after current sandbox work is finished")
+    parser.add_argument("--resume-results", type=Path, help="Finish previously archived rows from an interrupted apply JSON")
     args = parser.parse_args()
     if args.apply and not args.guard_verified:
         raise RuntimeError("--apply requires --guard-verified after testing this daemon's live-owner refusal")
     before = plan(args.user_home, args.include_sandbox)
     output = {"mode": "apply" if args.apply else "dry-run", "before": before}
+    resume = []
+    if args.resume_results:
+        previous = json.loads(args.resume_results.read_text())
+        resume = [r for r in previous["results"] if r["result"] == "failed"]
+        output["resumeCandidates"] = resume
     if args.apply:
         output["results"] = []
         trash = args.user_home / "_to_delete" / "TH1-630"
-        for item in before["candidates"]:
+        for item in resume + before["candidates"]:
             try:
-                result = apply_one(args.user_home, args.include_sandbox, item, trash)
+                result = (finalize_archived(args.user_home, args.include_sandbox, item, trash)
+                          if item in resume else apply_one(args.user_home, args.include_sandbox, item, trash))
             except Exception as error:
                 result = {**item, "result": "failed", "error": str(error)}
             output["results"].append(result)
             print(json.dumps(result), file=sys.stderr, flush=True)
-        output["removedEmptyProjects"] = remove_empty_throwaway_projects(
-            args.user_home, args.include_sandbox,
-            {r["projectId"] for r in output["results"] if r["result"] == "archived"},
-        )
         output["after"] = plan(args.user_home, args.include_sandbox)
     print(json.dumps(output, indent=2))
     return int(args.apply and any(r["result"] == "failed" for r in output["results"]))

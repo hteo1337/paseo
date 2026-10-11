@@ -35,7 +35,8 @@ export function createProjectCommand(): Command {
       .command("delete")
       .description("Delete a project and its workspaces")
       .argument("<project-id>", "Project id")
-      .option("--if-empty", "Refuse to delete a project with active workspaces"),
+      .option("--if-empty", "Refuse to delete a project with any workspace history")
+      .option("--if-no-active-workspaces", "Refuse to delete a project with active workspaces"),
   ).action(withOutput(runDeleteCommand));
 
   return project;

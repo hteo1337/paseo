@@ -3676,6 +3676,30 @@ test("sends project.remove.request", async () => {
   );
 
   await expect(removePromise).resolves.toEqual({ removedWorkspaceIds: ["ws-main"] });
+
+  const guarded = client.removeProject("remote:github.com/acme/app", "req-guarded-remove", {
+    ifNoActiveWorkspaces: true,
+  });
+  expect(parseSentFrame(mock.sent[1])).toEqual({
+    type: "project.remove.request",
+    requestId: "req-guarded-remove",
+    projectId: "remote:github.com/acme/app",
+    ifEmpty: true,
+    ifNoActiveWorkspaces: true,
+  });
+  mock.triggerMessage(
+    wrapSessionMessage({
+      type: "project.remove.response",
+      payload: {
+        requestId: "req-guarded-remove",
+        projectId: "remote:github.com/acme/app",
+        accepted: true,
+        removedWorkspaceIds: [],
+        error: null,
+      },
+    }),
+  );
+  await expect(guarded).resolves.toEqual({ removedWorkspaceIds: [] });
 });
 
 test("sends worktree base-ref fields in create_paseo_worktree_request", async () => {

@@ -991,6 +991,7 @@ export const ProjectRemoveRequestSchema = z.object({
   type: z.literal("project.remove.request"),
   projectId: z.string(),
   ifEmpty: z.boolean().optional(),
+  ifNoActiveWorkspaces: z.boolean().optional(),
   requestId: z.string(),
 });
 

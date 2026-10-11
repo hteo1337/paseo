@@ -3058,14 +3058,18 @@ export class DaemonClient {
   async removeProject(
     projectId: string,
     requestId?: string,
-    options?: { ifEmpty?: boolean },
+    options?: { ifEmpty?: boolean; ifNoActiveWorkspaces?: boolean },
   ): Promise<{ removedWorkspaceIds: string[] }> {
     const payload = await this.sendNamespacedCorrelatedSessionRequest<"project.remove.response">({
       requestId,
       message: {
         type: "project.remove.request",
         projectId,
-        ifEmpty: options?.ifEmpty,
+        // COMPAT(projectNoActiveGuard): added in v0.11.2, remove after 2027-04-11.
+        // Older daemons ignore the new field; their strict empty guard must
+        // reject archived-only projects rather than delete them unguarded.
+        ifEmpty: options?.ifEmpty || options?.ifNoActiveWorkspaces,
+        ifNoActiveWorkspaces: options?.ifNoActiveWorkspaces,
       },
     });
     if (!payload.accepted) {
