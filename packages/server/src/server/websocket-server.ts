@@ -1982,6 +1982,7 @@ export class VoiceAssistantWebSocketServer {
         relayProtectedSecurity: true,
         usageSources: true,
         projectGroups: true,
+        guardedProjectRemove: true,
         ownedSubscriptions: true,
         agentRequestReceipts: true,
         ...(this.keeperControl?.enabled ? { keeperControl: true } : {}),
