@@ -182,6 +182,7 @@ test("agent creation hooks change the provider and environment before the sessio
       `
 export default function contribute(server) {
   server.before("agent.create", ({ request }) => {
+    console.log(JSON.stringify({ hook: "agent.create", creation: request.creation }));
     return { ...request, config: { ...request.config, provider: "codex" }, env: { ...request.env, HOOK_CREATE: "created" } };
   });
   server.before("agent.session_open", ({ request }) => {
@@ -200,9 +201,8 @@ export default function contribute(server) {
     await client.patchDaemonConfig({ pluginsEnabled: true });
     await client.installDirectoryPlugin(directory);
     const agent = await client.createAgent({
-      provider: "claude",
-      cwd: directory,
-      title: "Hook test",
+      config: { provider: "claude", cwd: directory, title: "Hook test" },
+      labels: { direct: "operator" },
     });
     expect(agent.provider).toBe("codex");
     await expect
@@ -217,6 +217,10 @@ export default function contribute(server) {
           });
       })
       .toMatchObject([
+        {
+          hook: "agent.create",
+          creation: { source: "cli", callerAgentId: null, labels: { direct: "operator" } },
+        },
         {
           hook: "agent.session_open",
           request: { agentId: agent.id, env: { HOOK_CREATE: "created" } },
