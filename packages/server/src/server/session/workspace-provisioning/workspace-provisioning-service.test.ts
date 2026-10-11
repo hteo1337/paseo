@@ -1,6 +1,6 @@
 import os from "node:os";
 import path from "node:path";
-import { mkdirSync, mkdtempSync, rmSync, statSync, symlinkSync } from "node:fs";
+import { mkdirSync, mkdtempSync, realpathSync, rmSync, statSync, symlinkSync } from "node:fs";
 
 import { afterEach, beforeEach, expect, test } from "vitest";
 
@@ -142,12 +142,16 @@ test("fresh git repo creates a workspace at the canonical worktree root", async 
 test("linked worktrees share their git-common-dir project while another repo stays separate", async () => {
   const mainRepo = path.join(tmpDir, "owner-repo");
   const linked = path.join(tmpDir, "worktrees", "review");
+  const linkedAlias = path.join(tmpDir, "review-alias");
   const otherRepo = path.join(tmpDir, "other-repo");
   for (const root of [mainRepo, linked, otherRepo]) {
     mkdirSync(root, { recursive: true });
     gitRoots.add(root);
   }
   gitMainRoots.set(linked, mainRepo);
+  symlinkSync(linked, linkedAlias, directorySymlinkType);
+  gitRoots.add(realpathSync(linked));
+  gitMainRoots.set(realpathSync(linked), mainRepo);
   expect((await gitService().getCheckout(linked)).mainRepoRoot).toBe(mainRepo);
   expect((await gitService().getCheckout(otherRepo)).mainRepoRoot).toBeNull();
 
@@ -169,6 +173,7 @@ test("linked worktrees share their git-common-dir project while another repo sta
   });
   await workspaceRegistry.upsert(legacyWorkspace);
   const linkedWorkspace = await provisioning.createWorkspaceForDirectory(linked);
+  const aliasWorkspace = await provisioning.createWorkspaceForDirectory(linkedAlias);
   const explicitLegacy = await provisioning.createWorkspaceForDirectory(
     linked,
     null,
@@ -177,6 +182,8 @@ test("linked worktrees share their git-common-dir project while another repo sta
   const otherWorkspace = await provisioning.createWorkspaceForDirectory(otherRepo);
 
   expect(linkedWorkspace.workspaceId).toBe(legacyWorkspace.workspaceId);
+  expect(aliasWorkspace.workspaceId).toBe(linkedWorkspace.workspaceId);
+  expect(aliasWorkspace.projectId).toBe(mainWorkspace.projectId);
   expect(explicitLegacy.projectId).toBe(mainWorkspace.projectId);
   expect(linkedWorkspace.projectId).toBe(mainWorkspace.projectId);
   expect(otherWorkspace.projectId).not.toBe(mainWorkspace.projectId);
