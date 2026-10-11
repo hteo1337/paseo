@@ -557,6 +557,64 @@ describe("workspace registries", () => {
     expect(await workspaceRegistry.list()).toEqual([]);
   });
 
+  test("archived-history project removal rejects active records and racing claims", async () => {
+    const archived = createPersistedWorkspaceRecord({
+      workspaceId: "workspace-archived",
+      projectId: "project-history",
+      cwd: path.join(tmpDir, "history"),
+      kind: "local_checkout",
+      displayName: "history",
+      createdAt: "2026-03-01T00:00:00.000Z",
+      updatedAt: "2026-03-02T00:00:00.000Z",
+      archivedAt: "2026-03-02T00:00:00.000Z",
+    });
+    const active = createPersistedWorkspaceRecord({
+      ...archived,
+      workspaceId: "workspace-active",
+      projectId: "project-active",
+      cwd: path.join(tmpDir, "active"),
+      archivedAt: null,
+    });
+    await workspaceRegistry.upsert(archived);
+    await workspaceRegistry.upsert(active);
+    const remove = vi.fn(async () => {});
+    expect(
+      await workspaceRegistry.removeProjectIfUnreferenced(
+        "project-active",
+        remove,
+        async () => true,
+        { allowArchivedReferences: true },
+      ),
+    ).toBe(false);
+    expect(remove).not.toHaveBeenCalled();
+
+    let entered!: () => void;
+    const removing = new Promise<void>((resolve) => (entered = resolve));
+    let release!: () => void;
+    const held = new Promise<void>((resolve) => (release = resolve));
+    const removeHistory = vi.fn(async () => {
+      entered();
+      await held;
+    });
+    const removal = workspaceRegistry.removeProjectIfUnreferenced(
+      "project-history",
+      removeHistory,
+      async () => false,
+      { allowArchivedReferences: true },
+    );
+    await removing;
+    const claim = workspaceRegistry.getOrCreateActiveByCwd({
+      ...archived,
+      workspaceId: "workspace-late",
+      archivedAt: null,
+    });
+    release();
+    expect(await removal).toBe(true);
+    await expect(claim).rejects.toThrow("Project is being removed");
+    expect(await workspaceRegistry.get(archived.workspaceId)).toEqual(archived);
+    expect(removeHistory).toHaveBeenCalledOnce();
+  });
+
   test("failed pre-commit project removal releases its admission fence", async () => {
     await expect(
       workspaceRegistry.removeProjectIfUnreferenced(
