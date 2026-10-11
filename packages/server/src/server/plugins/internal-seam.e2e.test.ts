@@ -10,6 +10,67 @@ import { BuiltinPluginLoader } from "./builtin/index.js";
 const directory = fileURLToPath(new URL("./test-fixtures/internal-seam/", import.meta.url));
 const fixtureRoot = fileURLToPath(new URL("./test-fixtures/", import.meta.url));
 
+test("a real plugin child advertises scoped RPC authority before invocation", async () => {
+  const root = await mkdtemp(path.join(tmpdir(), "paseo-scoped-ready-"));
+  const plugin = path.join(root, "plugin");
+  const project = path.join(root, "project");
+  await mkdir(plugin);
+  await mkdir(project);
+  await writeFile(
+    path.join(plugin, "paseo-plugin.json"),
+    JSON.stringify({
+      id: "scoped-ready",
+      requirements: { paseo: ">=0.8.0" },
+    }),
+  );
+  await writeFile(
+    path.join(plugin, "index.server.ts"),
+    `
+import { defineRpc } from '@getpaseo/plugin';
+import { z } from 'zod';
+const read = defineRpc({ name: 'read', authorization: { scope: 'workspace', permission: 'workspace.read' }, input: z.object({}).strict(), output: z.object({ workspace: z.string(), session: z.boolean(), read: z.boolean() }).strict() });
+export default function contribute(server) {
+  server.handle(read, async (_, { invocation }) => ({ workspace: invocation.workspaceId, session: invocation.authentication.kind === 'session', read: invocation.permissions.includes('workspace.read') }));
+  return () => {};
+}
+`,
+  );
+  const daemon = await createTestPaseoDaemon({
+    daemonVersion: "0.11.2",
+    pluginsEnabled: true,
+    plugins: {
+      "scoped-ready": { source: "directory", path: plugin, enabled: true },
+    },
+  });
+  const client = new DaemonClient({
+    url: `ws://127.0.0.1:${daemon.port}/ws`,
+    appVersion: "0.11.2",
+  });
+  try {
+    await client.connect();
+    const created = await client.createWorkspace({
+      idempotencyKey: "scoped-ready-workspace",
+      source: { kind: "directory", path: project },
+    });
+    if (!created.workspace) throw new Error("Fixture workspace creation failed");
+    expect(
+      await client.invokePluginRpc(
+        "scoped-ready",
+        "read",
+        {},
+        { workspaceId: created.workspace.id },
+      ),
+    ).toEqual({ workspace: created.workspace.id, session: true, read: true });
+    await expect(client.invokePluginRpc("scoped-ready", "read", {})).rejects.toThrow(
+      "Plugin invocation access denied",
+    );
+  } finally {
+    await client.close();
+    await daemon.close();
+    await rm(root, { recursive: true, force: true });
+  }
+}, 60_000);
+
 test("built-in and directory plugins share RPC and lifecycle behavior while built-ins stay hidden and enabled", async () => {
   const workspaceDirectory = await mkdtemp(path.join(tmpdir(), "paseo-internal-seam-"));
   const daemon = await createTestPaseoDaemon({
