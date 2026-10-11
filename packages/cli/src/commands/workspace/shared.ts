@@ -5,6 +5,7 @@ export interface WorkspaceRow {
   workspaceId: string;
   project: string;
   name: string;
+  group: import("@getpaseo/protocol/project-groups").ProjectGroup | null;
   isolation: "local" | "worktree";
   cwd: string;
   background: boolean;
@@ -35,6 +36,7 @@ export function toWorkspaceRow(workspace: WorkspaceDescriptorPayload): Workspace
     workspaceId: workspace.id,
     project: workspace.projectDisplayName,
     name: workspace.name,
+    group: workspace.projectGroup ?? null,
     isolation: workspace.workspaceKind === "worktree" ? "worktree" : "local",
     cwd: workspace.workspaceDirectory,
     background: workspace.background === true,

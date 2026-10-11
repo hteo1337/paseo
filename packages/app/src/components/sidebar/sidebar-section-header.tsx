@@ -15,12 +15,16 @@ export function SidebarSectionHeader({
   onToggle,
   testID,
   children,
+  counts,
+  attentionCount,
 }: {
   title: string;
   collapsed?: boolean;
   onToggle?: () => void;
   testID?: string;
   children?: ReactNode;
+  counts?: string;
+  attentionCount?: number;
 }) {
   return (
     <View style={styles.header}>
@@ -30,6 +34,8 @@ export function SidebarSectionHeader({
           collapsed={collapsed ?? false}
           onToggle={onToggle}
           testID={testID}
+          counts={counts}
+          attentionCount={attentionCount}
         />
       ) : (
         <Text style={styles.title} testID={testID}>
@@ -46,11 +52,15 @@ function CollapsibleTitle({
   collapsed,
   onToggle,
   testID,
+  counts,
+  attentionCount = 0,
 }: {
   title: string;
   collapsed: boolean;
   onToggle: () => void;
   testID?: string;
+  counts?: string;
+  attentionCount?: number;
 }) {
   const isCompact = useIsCompactFormFactor();
   const accessibilityState = useMemo(() => ({ expanded: !collapsed }), [collapsed]);
@@ -67,6 +77,15 @@ function CollapsibleTitle({
       {({ hovered }) => (
         <>
           <Text style={styles.title}>{title}</Text>
+          {counts ? <Text style={styles.counts}>{counts}</Text> : null}
+          {attentionCount > 0 ? (
+            <Text
+              style={styles.attention}
+              accessibilityLabel={`${attentionCount} workspaces need attention`}
+            >
+              ● {attentionCount}
+            </Text>
+          ) : null}
           {hovered || isNative || isCompact ? (
             <DensityIcon
               icon={collapsed ? ChevronRight : ChevronDown}
@@ -102,6 +121,16 @@ const styles = StyleSheet.create((theme) => ({
     gap: theme.spacing[1],
     marginLeft: -theme.spacing[2],
     paddingHorizontal: theme.spacing[2],
+  },
+  counts: {
+    color: theme.colors.foregroundMuted,
+    fontSize: theme.fontSize.sm - 2,
+    flexShrink: 1,
+  },
+  attention: {
+    color: theme.colors.destructive,
+    fontSize: theme.fontSize.sm - 2,
+    fontWeight: theme.fontWeight.medium,
   },
   title: {
     color: theme.colors.foregroundMuted,
