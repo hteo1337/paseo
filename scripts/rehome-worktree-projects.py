@@ -131,7 +131,7 @@ def apply_one(home, item):
         raise RuntimeError(f"project id did not change for {item['workspaceId']}")
     old_project = projects.get(item["oldProjectId"])
     if old_project and linked_owner(Path(old_project["rootPath"]), old_project, projects) == Path(item["ownerRoot"]):
-        if any(not w.get("archivedAt") and w["projectId"] == item["oldProjectId"] for w in by_id.values()):
+        if any(w["projectId"] == item["oldProjectId"] for w in by_id.values()):
             return {**item, "newProjectId": workspace["projectId"], "result": "rehomed_old_project_still_used"}
         cli("project", "delete", item["oldProjectId"], "--if-empty")
         _, after_projects = records(home)
