@@ -4988,6 +4988,9 @@ export class Session {
     workspacePromptTitle: string | null;
   }): Promise<ResolvedSessionCreateAgentIntent> {
     const { request, createdWorktree } = input;
+    if (request.callerAgentId && (await this.agentStorage.get(request.callerAgentId))?.archivedAt) {
+      throw new Error(`Caller agent ${request.callerAgentId} not found`);
+    }
     const callerAgent = await this.resolveCreationCaller(request.callerAgentId);
 
     let config = request.config;
