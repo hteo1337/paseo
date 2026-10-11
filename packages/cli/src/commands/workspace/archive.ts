@@ -19,7 +19,11 @@ const workspaceArchiveSchema: OutputSchema<WorkspaceArchiveResult> = {
 
 export async function runArchiveCommand(
   workspaceId: string,
-  options: { host?: string; daemonTarget: import("../../utils/daemon-target.js").DaemonTarget },
+  options: {
+    host?: string;
+    daemonTarget: import("../../utils/daemon-target.js").DaemonTarget;
+    ifNoLiveAgents?: boolean;
+  },
   _command: Command,
 ): Promise<SingleResult<WorkspaceArchiveResult>> {
   const host = getDaemonHost({ target: options.daemonTarget });
@@ -31,7 +35,9 @@ export async function runArchiveCommand(
     } satisfies CommandError;
   });
   try {
-    const payload = await client.archiveWorkspace(workspaceId);
+    const payload = await client.archiveWorkspace(workspaceId, undefined, {
+      ifNoLiveAgents: options.ifNoLiveAgents,
+    });
     if (payload.error) {
       throw new Error(payload.error);
     }
