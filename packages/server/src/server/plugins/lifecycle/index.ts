@@ -128,10 +128,18 @@ const beforeSchemas = {
     .strict(),
 
   "worktree.create.before": worktreeRequestSchema,
-  "agent.create.before": CreateAgentRequestMessageSchema.pick({
-    config: true,
-    env: true,
-  }).strict(),
+  "agent.create.before": CreateAgentRequestMessageSchema.pick({ config: true, env: true })
+    .extend({
+      creation: z
+        .object({
+          source: z.enum(["cli", "agent", "system"]),
+          callerAgentId: z.string().nullable(),
+          labels: z.record(z.string(), z.string()),
+        })
+        .strict()
+        .optional(),
+    })
+    .strict(),
   "agent.open.before": z
     .object({
       agentId: z.string(),
@@ -255,6 +263,22 @@ export function publishAgentStream(
   }
 }
 
+function validateAgentCreateResult(
+  previous: PluginHookRequests["agent.create.before"],
+  next: PluginHookRequests["agent.create.before"],
+): PluginHookRequests["agent.create.before"] {
+  if (previous.config.cwd !== next.config.cwd) {
+    throw new Error("agent.create.before hooks cannot change the workspace directory");
+  }
+  if (next.creation !== undefined && !isDeepStrictEqual(previous.creation, next.creation)) {
+    throw new Error("agent.create.before hooks cannot change creation provenance");
+  }
+  // COMPAT(create-provenance): added in TH1-728; remove after 2027-04-12.
+  // Older plugins may return only config/env. Keep server-owned provenance
+  // for the next hook instead of letting an omission erase the caller.
+  return previous.creation === undefined ? next : { ...next, creation: previous.creation };
+}
+
 export async function validateBeforeResult<Name extends keyof PluginWireBeforeRequests>(
   name: Name,
   input: PluginWireBeforeRequests[Name],
@@ -290,11 +314,10 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
   }
 
   if (name === "agent.create.before") {
-    const previous = beforeSchemas["agent.create.before"].parse(input);
-    const next = beforeSchemas["agent.create.before"].parse(result);
-    if (previous.config.cwd !== next.config.cwd) {
-      throw new Error("agent.create.before hooks cannot change the workspace directory");
-    }
+    return validateAgentCreateResult(
+      beforeSchemas["agent.create.before"].parse(input),
+      beforeSchemas["agent.create.before"].parse(result),
+    ) as PluginWireBeforeRequests[Name];
   }
   if (name === "worktree.create.before") {
     const previous = beforeSchemas["worktree.create.before"].parse(input);
