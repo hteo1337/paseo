@@ -2745,12 +2745,14 @@ export class DaemonClient {
   async archiveWorkspace(
     workspaceId: string,
     requestId?: string,
+    options?: { ifNoLiveAgents?: boolean },
   ): Promise<ArchiveWorkspacePayload> {
     return this.sendCorrelatedSessionRequest({
       requestId,
       message: {
         type: "archive_workspace_request",
         workspaceId,
+        ifNoLiveAgents: options?.ifNoLiveAgents,
       },
       responseType: "archive_workspace_response",
     });
