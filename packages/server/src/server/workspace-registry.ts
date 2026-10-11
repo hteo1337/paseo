@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
-import { areEquivalentPaths } from "../utils/path.js";
+import { createRealpathAwarePathMatcher } from "../utils/path.js";
 import {
   generateProjectId,
   type PersistedProjectKind,
@@ -18,6 +18,28 @@ const UntrustedWorkspaceSourceSchema = z.object({
   number: z.number().int().positive(),
   headRepository: z.string(),
 });
+
+const workspaceLifecycleLocks = new WeakMap<WorkspaceRegistry, Promise<void>>();
+
+/** Serialize workspace allocation and last-workspace project archival across session instances. */
+export async function withWorkspaceLifecycleLock<T>(
+  registry: WorkspaceRegistry,
+  operation: () => Promise<T>,
+): Promise<T> {
+  const previous = workspaceLifecycleLocks.get(registry);
+  let release!: () => void;
+  const current = new Promise<void>((resolveLock) => {
+    release = resolveLock;
+  });
+  workspaceLifecycleLocks.set(registry, current);
+  if (previous) await previous;
+  try {
+    return await operation();
+  } finally {
+    if (workspaceLifecycleLocks.get(registry) === current) workspaceLifecycleLocks.delete(registry);
+    release();
+  }
+}
 
 const PersistedProjectRecordSchema = z.object({
   projectId: z.string(),
@@ -415,12 +437,19 @@ export class FileBackedProjectRegistry
     this.allocationQueue = new Promise<void>((resolve) => (release = resolve));
     await previous;
     try {
+      const matchesRoot = createRealpathAwarePathMatcher(input.rootPath);
       const active = (await this.list())
         .filter(
-          (project) => !project.archivedAt && areEquivalentPaths(project.rootPath, input.rootPath),
+          (project) =>
+            !project.archivedAt &&
+            (input.projectKey && project.projectKey === input.projectKey
+              ? true
+              : matchesRoot(project.rootPath)),
         )
         .sort(
           (left, right) =>
+            Number(input.projectKey !== left.projectKey) -
+              Number(input.projectKey !== right.projectKey) ||
             Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
             left.projectId.localeCompare(right.projectId),
         )[0];

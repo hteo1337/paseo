@@ -73,6 +73,9 @@ function spawnJsonlRpcProcess(launch: JsonlRpcLaunch): ChildProcessWithoutNullSt
 }
 
 export class JsonlRpcProcess {
+  get processId(): number | null {
+    return this.child.pid ?? null;
+  }
   private readonly child: ChildProcessWithoutNullStreams;
   private readonly diagnosticName: string;
   private readonly pending = new Map<string, PendingRequest>();
@@ -224,8 +227,16 @@ export class JsonlRpcProcess {
   }
 
   async close(error = new Error(`${this.diagnosticName} process is closed`)): Promise<void> {
-    if (this.disposed) return;
-    this.failAll(error);
+    if (this.closing) {
+      try {
+        await this.closing;
+        return;
+      } catch {
+        if (this.exited) return;
+        // Retry a previous shutdown whose SIGKILL did not confirm an exit.
+      }
+    }
+    if (!this.disposed) this.failAll(error);
     this.closing = this.terminate();
     await this.closing;
   }
@@ -247,10 +258,7 @@ export class JsonlRpcProcess {
       },
     });
     if (result === "kill-timeout") {
-      this.options.logger.warn(
-        { timeoutMs: FORCE_SHUTDOWN_TIMEOUT_MS },
-        `${this.diagnosticName} process did not report exit after SIGKILL`,
-      );
+      throw new Error(`${this.diagnosticName} process did not report exit after SIGKILL`);
     }
   }
 

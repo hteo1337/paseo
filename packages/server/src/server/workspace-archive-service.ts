@@ -15,9 +15,11 @@ import {
 import type { TerminalManager } from "../terminal/terminal-manager.js";
 import type {
   PersistedWorkspaceRecord,
+  ProjectRegistry,
   WorkspaceArchiveContext,
   WorkspaceRegistry,
 } from "./workspace-registry.js";
+import { withWorkspaceLifecycleLock } from "./workspace-registry.js";
 import { createRealpathAwarePathMatcher } from "../utils/path.js";
 import { runWithGitCommandPriority } from "../utils/run-git-command.js";
 import { WorkspaceAutomationBlockedError } from "./workspace-automation-gate.js";
@@ -714,8 +716,6 @@ export async function killTerminalsForWorkspace(
   );
 }
 
-// Archiving the last workspace of a project leaves the project record active.
-// The user removes the project explicitly, so we never archive the parent here.
 export async function archivePersistedWorkspaceRecord(input: {
   workspaceId: string;
   workspaceRegistry: Pick<WorkspaceRegistry, "get" | "archive">;
@@ -735,4 +735,25 @@ export async function archivePersistedWorkspaceRecord(input: {
   await input.workspaceRegistry.archive(input.workspaceId, archivedAt, input.context);
 
   return existingWorkspace;
+}
+
+export async function archiveWorkspaceAndEmptyProject(input: {
+  workspaceId: string;
+  workspaceRegistry: WorkspaceRegistry;
+  projectRegistry: Pick<ProjectRegistry, "archive">;
+  archivedAt?: string;
+  context?: WorkspaceArchiveContext;
+}): Promise<PersistedWorkspaceRecord | null> {
+  return withWorkspaceLifecycleLock(input.workspaceRegistry, async () => {
+    const archivedAt = input.archivedAt ?? new Date().toISOString();
+    const existingWorkspace = await archivePersistedWorkspaceRecord({ ...input, archivedAt });
+    if (!existingWorkspace || existingWorkspace.archivedAt) return existingWorkspace;
+    const activeSibling = (await input.workspaceRegistry.list()).some(
+      (workspace) => workspace.projectId === existingWorkspace.projectId && !workspace.archivedAt,
+    );
+    if (!activeSibling) {
+      await input.projectRegistry.archive(existingWorkspace.projectId, archivedAt);
+    }
+    return existingWorkspace;
+  });
 }

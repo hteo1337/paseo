@@ -18,6 +18,7 @@ import {
   type WorkspaceRegistry,
 } from "../../workspace-registry.js";
 import { checkoutLiteFromGitSnapshot } from "../../workspace-registry-model.js";
+import { archiveWorkspaceAndEmptyProject } from "../../workspace-archive-service.js";
 import type { CreatePaseoWorktreeWorkflowResult } from "../../worktree-session.js";
 import {
   createWorkspaceProvisioningService,
@@ -44,6 +45,7 @@ async function isDirectory(target: string): Promise<boolean> {
 
 let tmpDir: string;
 let gitRoots: Set<string>;
+let mainRepoRoots: Map<string, string>;
 let gitBranches: Map<string, string | null>;
 let checkoutFailure: Error | null;
 let restoredMergedChangeRequestUrl: string | null;
@@ -91,7 +93,7 @@ function gitService() {
         remoteUrl: null,
         worktreeRoot,
         isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
+        mainRepoRoot: worktreeRoot ? (mainRepoRoots.get(worktreeRoot) ?? null) : null,
       };
     },
   });
@@ -100,6 +102,7 @@ function gitService() {
 beforeEach(async () => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), "workspace-provisioning-"));
   gitRoots = new Set();
+  mainRepoRoots = new Map();
   gitBranches = new Map();
   checkoutFailure = null;
   restoredMergedChangeRequestUrl = null;
@@ -145,12 +148,17 @@ test("fresh non-git directory creates a directory workspace at the exact path", 
   expect(workspace.cwd).toBe(dir);
 });
 
-test("re-opening an active workspace by exact path returns the same record without duplicating", async () => {
+test("concurrent canonical and symlink workspace opens reuse one record", async () => {
   const repo = path.join(tmpDir, "repo");
+  const alias = path.join(tmpDir, "alias");
+  mkdirSync(repo);
+  symlinkSync(repo, alias, directorySymlinkType);
   gitRoots.add(repo);
 
-  const first = await provisioning.findOrCreateWorkspaceForDirectory(repo);
-  const second = await provisioning.findOrCreateWorkspaceForDirectory(repo);
+  const [first, second] = await Promise.all([
+    provisioning.findOrCreateWorkspaceForDirectory(repo),
+    provisioning.findOrCreateWorkspaceForDirectory(alias),
+  ]);
 
   expect(second.workspaceId).toBe(first.workspaceId);
   expect(await workspaceRegistry.list()).toHaveLength(1);
@@ -558,12 +566,19 @@ test("create-agent reuses only active directory workspaces and groups disposable
       });
     }
   });
+  const peerProvisioning = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
   const [concurrentA, concurrentB] = await Promise.all(
-    ["First agent", "Second agent"].map((initialTitle) =>
-      provisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+    [provisioning, peerProvisioning].map((service, index) =>
+      service.resolveOrCreateWorkspaceIdForCreateAgent({
         createdWorktree: null,
         cwd: concurrentCwd,
-        initialTitle,
+        initialTitle: index === 0 ? "First agent" : "Second agent",
       }),
     ),
   );
@@ -674,6 +689,48 @@ test("createWorkspaceForDirectory always mints a fresh workspace even when one a
   expect(await workspaceRegistry.list()).toHaveLength(2);
 });
 
+test("last-workspace archive serializes a concurrent reopen across provisioning instances", async () => {
+  const cwd = path.join(tmpDir, "archive-race");
+  mkdirSync(cwd);
+  const first = await provisioning.createWorkspaceForDirectory(cwd);
+  const archiveProject = projectRegistry.archive.bind(projectRegistry);
+  let markArchiveEntered!: () => void;
+  const archiveEntered = new Promise<void>((resolve) => {
+    markArchiveEntered = resolve;
+  });
+  let releaseArchive!: () => void;
+  const archiveGate = new Promise<void>((resolve) => {
+    releaseArchive = resolve;
+  });
+  projectRegistry.archive = async (projectId, archivedAt) => {
+    markArchiveEntered();
+    await archiveGate;
+    return archiveProject(projectId, archivedAt);
+  };
+  const archive = archiveWorkspaceAndEmptyProject({
+    workspaceId: first.workspaceId,
+    workspaceRegistry,
+    projectRegistry,
+  });
+  await archiveEntered;
+  const peer = createWorkspaceProvisioningService({
+    workspaceRegistry,
+    projectRegistry,
+    workspaceGitService: gitService(),
+    isDirectory,
+    logger,
+  });
+  const reopen = peer.findOrCreateWorkspaceForDirectory(cwd, { reuseArchived: false });
+  releaseArchive();
+  await archive;
+  const second = await reopen;
+
+  expect(second.workspaceId).not.toBe(first.workspaceId);
+  expect(second.projectId).not.toBe(first.projectId);
+  expect((await projectRegistry.get(first.projectId))?.archivedAt).not.toBeNull();
+  expect((await projectRegistry.get(second.projectId))?.archivedAt).toBeNull();
+});
+
 test("directory creation persists the live branch and a trimmed title", async () => {
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
@@ -747,17 +804,23 @@ test("createWorkspaceForDirectory classifies unknown and archived explicit proje
   } satisfies Partial<WorkspaceProvisioningError>);
 });
 
-test("findOrCreateProjectForDirectory keeps nested selected roots independent", async () => {
+test("findOrCreateProjectForDirectory groups subdirectories and worktrees under the main repo", async () => {
   const repo = path.join(tmpDir, "repo");
+  const worktree = path.join(tmpDir, "worktree");
   gitRoots.add(repo);
+  gitRoots.add(worktree);
+  mainRepoRoots.set(worktree, repo);
 
   const first = await provisioning.findOrCreateProjectForDirectory(repo);
   const second = await provisioning.findOrCreateProjectForDirectory(path.join(repo, "sub"));
+  const third = await provisioning.findOrCreateProjectForDirectory(path.join(worktree, "sub"));
 
-  expect(second.projectId).not.toBe(first.projectId);
+  expect(second.projectId).toBe(first.projectId);
+  expect(third.projectId).toBe(first.projectId);
   expect(first.rootPath).toBe(repo);
-  expect(second.rootPath).toBe(path.join(repo, "sub"));
-  expect(await projectRegistry.list()).toHaveLength(2);
+  expect(second.rootPath).toBe(repo);
+  expect(third.rootPath).toBe(repo);
+  expect(await projectRegistry.list()).toHaveLength(1);
 });
 
 test("runInImportWorkspace uses an active requested workspace without creating another", async () => {

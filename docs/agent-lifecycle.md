@@ -25,8 +25,13 @@ Reload releases the old runtime before resuming its durable session: an idle pro
 still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
 replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+The daemon unloads a resident agent after 15 minutes without a turn, pending permission, queued
+prompt, in-flight resume, client timeline stream, or live ACP terminal. It closes the provider runtime and
+keeps the durable agent record for on-demand resume. Set `agents.idleUnloadMinutes` in the daemon
+config, or override it with `PASEO_AGENT_IDLE_UNLOAD_MINUTES`; `0` disables idle unloading. The
+daemon checks once a minute. Opening a chat or asking for prompt suggestions can resume it and reset
+the idle clock. If descendant cleanup fails after the provider closes, the runtime enters an error
+state and rejects prompts. The next access retries cleanup before it can resume the durable session.
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
@@ -69,7 +74,7 @@ the marker. Closing a tab sets that client's label to `false`. Any `true` client
 open. Detach clears the parent and every open-tab label. The surviving child therefore becomes a
 normal root agent immediately, and closing its still-open tab archives it.
 
-Runtime ownership is resolved from explicit workspace ID and caller context, never from `cwd`. Workspace creation is a separate operation with `local | worktree` isolation; agent creation only selects an existing workspace.
+Runtime ownership is resolved from the explicit workspace ID. Implicit agent creation reuses an active workspace for the same real directory or creates one if absent; explicit worktree creation retains its own workspace ID. An agent's `cwd` remains its execution directory even when its project is rooted at the main repository.
 
 Users can also detach an existing subagent from the subagents track. Detach is deliberately a manual lifecycle gesture, not an agent-facing MCP tool. It removes the parent and open-tab lifecycle labels: it does not stop, archive, move, or restart the agent. The agent keeps its current `cwd` and `workspaceId`, leaves the former parent's track, and behaves like a root agent for tab close, workspace activity, and future parent archive.
 

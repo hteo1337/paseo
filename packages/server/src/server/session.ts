@@ -188,7 +188,7 @@ import type { HubExecutionAgents } from "./hub/daemon-executions.js";
 import { DownloadTokenStore } from "./file-download/token-store.js";
 import type { PushNotifications } from "./push/index.js";
 import {
-  archivePersistedWorkspaceRecord,
+  archiveWorkspaceAndEmptyProject,
   archiveWorkspaceContents,
 } from "./workspace-archive-service.js";
 import type { ServiceProxySubsystem } from "./service-proxy.js";
@@ -755,6 +755,7 @@ export class Session {
     string,
     { owner: OwnedSubscription; agentIds: Set<string> }
   >();
+  private readonly legacyTimelineHolds = new Map<object, () => void>();
   private readonly clientSources = new Map<
     object,
     {
@@ -1236,6 +1237,7 @@ export class Session {
         activity: this.clientSources.get(source)?.activity ?? null,
         pushToken: this.clientSources.get(source)?.pushToken ?? null,
       });
+      this.syncLegacyTimelineHold(source);
       this.refreshObservationProducers();
       // COMPAT(ownedSubscriptions): added in v0.8.0, remove capability-driven legacy host registration after 2027-03-09.
       if (
@@ -1261,6 +1263,8 @@ export class Session {
   }
 
   clearAgentTimelineSubscription(source: object): void {
+    this.legacyTimelineHolds.get(source)?.();
+    this.legacyTimelineHolds.delete(source);
     void this.delivery
       .detach(source)
       .catch((err) => this.sessionLogger.error({ err }, "Failed to release source subscriptions"));
@@ -1269,13 +1273,33 @@ export class Session {
   }
 
   private subscribeAgentTimelines(agentIds: string[]): OwnedSubscription {
+    let releaseHolds: Array<() => void> = [];
     const owner = this.delivery.begin("timelines", undefined, (id) => {
       this.timelineSubscriptions.delete(id);
+      for (const release of releaseHolds) release();
       this.refreshObservationProducers();
     });
+    releaseHolds = [...new Set(agentIds)].map((agentId) =>
+      this.agentManager.holdClientStream(agentId),
+    );
     this.timelineSubscriptions.set(owner.id, { owner, agentIds: new Set(agentIds) });
     this.refreshObservationProducers();
     return owner;
+  }
+
+  private syncLegacyTimelineHold(source: object): void {
+    const capabilities = this.clientSources.get(source)?.capabilities;
+    const receivesAllTimelines =
+      capabilities !== undefined &&
+      !this.delivery.isModern(source) &&
+      !capabilities.has(CLIENT_CAPS.selectiveAgentTimeline);
+    const release = this.legacyTimelineHolds.get(source);
+    if (receivesAllTimelines && !release) {
+      this.legacyTimelineHolds.set(source, this.agentManager.holdGlobalClientStream());
+    } else if (!receivesAllTimelines && release) {
+      release();
+      this.legacyTimelineHolds.delete(source);
+    }
   }
 
   // COMPAT(timelineItemCapabilities): plugin items added in v0.8.0, notifications in v0.7.2.
@@ -1495,6 +1519,7 @@ export class Session {
         pushToken: null,
       };
       this.clientSources.set(source, metadata);
+      this.syncLegacyTimelineHold(source);
     }
     return metadata;
   }
@@ -5965,10 +5990,11 @@ export class Session {
 
   private async archiveWorkspaceRecord(workspaceId: string, archivedAt?: string): Promise<void> {
     const archiveTimestamp = archivedAt ?? new Date().toISOString();
-    const existingWorkspace = await archivePersistedWorkspaceRecord({
+    const existingWorkspace = await archiveWorkspaceAndEmptyProject({
       workspaceId,
       archivedAt: archiveTimestamp,
       workspaceRegistry: this.workspaceRegistry,
+      projectRegistry: this.projectRegistry,
     });
     if (!existingWorkspace) {
       this.workspaceGitObserver.removeForWorkspaceId(workspaceId);
@@ -6724,18 +6750,38 @@ export class Session {
 
     const explicitTitle = request.title?.trim() || null;
     const promptTitle = resolveFirstAgentPromptTitle(request.firstAgentContext);
-    const workspace = await this.workspaceProvisioning.createWorkspaceForDirectory(
-      cwd,
-      explicitTitle ?? promptTitle,
-      request.source.projectId,
-      { expectsInitialAgent: Boolean(request.firstAgentContext), workspaceId },
-    );
+    let created = Boolean(request.workspaceId);
+    let workspace = request.workspaceId
+      ? await this.workspaceProvisioning.createWorkspaceForDirectory(
+          cwd,
+          explicitTitle ?? promptTitle,
+          request.source.projectId,
+          { expectsInitialAgent: Boolean(request.firstAgentContext), workspaceId },
+        )
+      : await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
+          title: explicitTitle ?? promptTitle,
+          projectId: request.source.projectId,
+          expectsInitialAgent: Boolean(request.firstAgentContext),
+          workspaceId,
+          reuseArchived: false,
+          onResult: (didCreate) => {
+            created = didCreate;
+          },
+        });
+    if (!created && explicitTitle && workspace.title !== explicitTitle) {
+      workspace = { ...workspace, title: explicitTitle, updatedAt: new Date().toISOString() };
+      await this.workspaceRegistry.upsert(workspace);
+    }
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
-    await this.emitCreatedWorkspaceUpdate(
-      descriptor,
-      request.firstAgentContext ? "running" : undefined,
-    );
+    if (created) {
+      await this.emitCreatedWorkspaceUpdate(
+        descriptor,
+        request.firstAgentContext ? "running" : undefined,
+      );
+    } else {
+      await this.emitWorkspaceUpdateForWorkspaceId(workspace.workspaceId);
+    }
     void this.workspaceGitService
       .getSnapshot(workspace.cwd, { force: true, includeForge: true, reason: "open_project" })
       .catch((error) => {
@@ -6744,7 +6790,7 @@ export class Session {
           "Background snapshot refresh failed after workspace.create",
         );
       });
-    if (request.firstAgentContext) {
+    if (request.firstAgentContext && created) {
       const firstAgentContext = request.firstAgentContext;
       this.workspaceAutoName.scheduleForDirectory(
         {
@@ -8512,6 +8558,8 @@ export class Session {
    * Clean up session resources
    */
   public async cleanup(): Promise<void> {
+    for (const release of this.legacyTimelineHolds.values()) release();
+    this.legacyTimelineHolds.clear();
     this.sessionLogger.trace({}, "agent.session.lifecycle.cleanup");
     this.isCleanedUp = true;
     await this.delivery.close();

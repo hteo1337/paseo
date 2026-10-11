@@ -319,9 +319,29 @@ describe("workspace registries", () => {
 
     expect(second).toEqual(first);
     expect(await projectRegistry.list()).toEqual([first]);
+
+    const rootPath = path.join(tmpDir, "main");
+    const matching = await projectRegistry.getOrCreateActiveByRoot({
+      rootPath,
+      kind: "git",
+      displayName: "main",
+      projectKey: "remote:github.com/acme/repo",
+      timestamp: "2026-03-01T00:00:00.000Z",
+    });
+    const reused = await projectRegistry.getOrCreateActiveByRoot({
+      rootPath: path.join(tmpDir, "worktree"),
+      kind: "git",
+      displayName: "worktree",
+      projectKey: "remote:github.com/acme/repo",
+      timestamp: "2026-03-02T00:00:00.000Z",
+    });
+
+    expect(reused.projectId).toBe(matching.projectId);
+    expect(reused.rootPath).toBe(rootPath);
+    expect(await projectRegistry.list()).toHaveLength(2);
   });
 
-  test("keeps lexical and symlink root spellings distinct without realpath", async () => {
+  test("reuses a project across lexical and symlink root spellings", async () => {
     await projectRegistry.initialize();
     const target = path.join(tmpDir, "target");
     const link = path.join(tmpDir, "link");
@@ -341,8 +361,8 @@ describe("workspace registries", () => {
       timestamp: "2026-03-02T00:00:00.000Z",
     });
 
-    expect(linkProject.projectId).not.toBe(targetProject.projectId);
-    expect(await projectRegistry.list()).toEqual([targetProject, linkProject]);
+    expect(linkProject.projectId).toBe(targetProject.projectId);
+    expect(await projectRegistry.list()).toEqual([targetProject]);
   });
 
   test("retries a generated project ID collision", async () => {

@@ -4918,6 +4918,10 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.currentThreadId = null;
   }
 
+  getOwnedProcessIds(): number[] {
+    return this.client?.processId ? [this.client.processId] : [];
+  }
+
   private clearPendingPermissions(options?: { preservePlanApprovals?: boolean }): void {
     for (const [requestId, pending] of this.pendingPermissionHandlers) {
       if (options?.preservePlanApprovals && pending.kind === "plan") {

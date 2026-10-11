@@ -2,7 +2,7 @@
 
 ## Project identity
 
-Projects are allocated for the exact root selected by the caller, normalized lexically with `path.resolve` (never `realpath`). New project IDs are opaque `prj_<16 hex>` values. Existing remote-shaped or path-shaped IDs are retained as readable compatibility records and are never rekeyed. An active exact root is idempotent; archived-only matches do not resurrect an old project. Workspace `projectId` is stable membership: reconciliation may update git-derived kind and branch metadata, but never rehomes a workspace or changes a project's root, ID, or default name.
+Projects created from a directory use the Git main repository root when present, then the checkout root, then the directory itself. The stored root is lexically normalized with `path.resolve`; active lookup also compares real paths so symlink spellings reuse the same project. A matching `projectKey` takes priority over the root. New project IDs are opaque `prj_<16 hex>` values. Existing remote-shaped or path-shaped IDs remain readable and are never rekeyed. Archived-only matches do not resurrect an old project. Workspace `projectId` is stable membership: reconciliation may update Git metadata, but never rehomes a workspace or changes a project's root, ID, or default name.
 
 `projectKey` is a persisted, opaque equivalence key used only to group the same logical project
 across hosts. It is separate from the host-local `projectId`; today's producer prefers a normalized
@@ -10,11 +10,11 @@ Git remote and otherwise uses the local project root. Consumers never derive it 
 Creation persists it with the project, and normal boot reconciliation fills it for
 older records where the field is absent—there is no migration.
 
-`kind` and `projectKey` are mutable metadata, not identity. Workspace reconciliation watches active project roots and
+`kind` and `projectKey` are mutable metadata; the project ID remains the identity. Workspace reconciliation watches active project roots and
 updates those fields and `updatedAt` when Git facts change, preserving the project's ID, root path,
 names, and workspace foreign keys. Attached workspaces are independently refreshed
-from their own cwd, so an explicit project root never implies a workspace checkout. Empty projects
-are observed too.
+from their own cwd, so a project root never replaces the workspace's exact execution directory.
+Archiving the last active workspace archives its project; an explicitly added empty project remains active.
 
 The workspace registry model defines placement once: initial directory/worktree construction,
 mutable reconciliation fields, and the persisted-to-wire checkout projection. Its update policy
@@ -465,7 +465,7 @@ receives or fetches the URL; it validates the uploaded bytes, stores them, and r
 `customIconRevision`. Going back to automatic deletes the stored image, as does removing the
 project.
 
-Active exact roots are idempotent using lexical platform-equivalence semantics. Existing legacy
+Active roots are idempotent using realpath-aware equivalence, with a matching `projectKey` preferred when present. Existing legacy
 remote-shaped and path-shaped IDs remain readable, including duplicate roots; reconciliation never
 merges them, transfers names, archives them, or moves workspace foreign keys. An explicit
 workspace `projectId` is authoritative when it names an active project, regardless of cwd
