@@ -227,6 +227,70 @@ test("archiving one of two workspaces sharing a cwd spares the sibling and the d
   await ctx.client.killTerminal(terminalBId);
 }, 60000);
 
+test("guarded archive refuses a live owner and preserves a shared directory", async () => {
+  const cwd = makeTempDir("workspace-guarded-archive-");
+  const marker = path.join(cwd, "keep.txt");
+  writeFileSync(marker, "keep");
+  const home = makeTempDir("workspace-guarded-home-");
+  const projectsDir = path.join(home, ".paseo", "projects");
+  mkdirSync(projectsDir, { recursive: true });
+  const createdAt = "2026-03-01T00:00:00.000Z";
+  const project = createPersistedProjectRecord({
+    projectId: "prj_guarded_duplicate",
+    rootPath: cwd,
+    kind: "non_git",
+    displayName: path.basename(cwd),
+    createdAt,
+    updatedAt: createdAt,
+  });
+  const ownerId = "wks_guarded_owner";
+  const spareId = "wks_guarded_spare";
+  writeFileSync(path.join(projectsDir, "projects.json"), JSON.stringify([project]));
+  writeFileSync(
+    path.join(projectsDir, "workspaces.json"),
+    JSON.stringify(
+      [ownerId, spareId].map((workspaceId) =>
+        createPersistedWorkspaceRecord({
+          workspaceId,
+          projectId: project.projectId,
+          cwd,
+          kind: "directory",
+          displayName: workspaceId,
+          createdAt,
+          updatedAt: createdAt,
+        }),
+      ),
+    ),
+  );
+  await ctx.cleanup();
+  ctx = await createDaemonTestContext({ paseoHomeRoot: home });
+
+  const agent = await ctx.client.createAgent({
+    ...getFullAccessConfig("codex"),
+    cwd,
+    workspaceId: ownerId,
+    title: "live owner",
+    initialPrompt: "Say done.",
+  });
+  expect(await activeAgentIds()).toContain(agent.id);
+
+  const refused = await ctx.client.archiveWorkspace(ownerId, undefined, {
+    ifNoLiveAgents: true,
+  });
+  expect(refused.error).toContain("Workspace has live agents");
+  expect(await activeWorkspaceIds()).toContain(ownerId);
+  expect(await activeAgentIds()).toContain(agent.id);
+
+  const archived = await ctx.client.archiveWorkspace(spareId, undefined, {
+    ifNoLiveAgents: true,
+  });
+  expect(archived.error).toBeNull();
+  expect(await activeWorkspaceIds()).not.toContain(spareId);
+  expect(await activeWorkspaceIds()).toContain(ownerId);
+  expect(await activeAgentIds()).toContain(agent.id);
+  expect(existsSync(marker)).toBe(true);
+}, 60000);
+
 test("archiving a workspace removes it from every subscribed client", async () => {
   const cwd = makeTempDir("workspace-archive-global-");
   const workspaceId = await createLocalWorkspace(cwd, "shared workspace");
