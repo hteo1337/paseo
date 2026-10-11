@@ -74,6 +74,11 @@ Provider checks follow the signals their runtimes expose:
 These checks do not discover arbitrary detached processes or work hidden by third-party
 extensions. A provider plugin adds its own veto through the [runtime safety contract](../public-docs/plugins/providers.md#permit-idle-runtime-cleanup).
 
+Child creation can use an unarchived closed parent from durable storage. Resolving
+parentage does not resume the parent's provider or start a turn. Archived parents
+remain unavailable.
+
+
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
 workflows all live in the CLI process, and the completion notification that would have woken the
