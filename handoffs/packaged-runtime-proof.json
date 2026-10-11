@@ -1,0 +1,44 @@
+{
+  "bundle": "/Users/hteo/.paseo/worktrees/35a69bia/th1-728-packaged-final/packages/desktop/release/mac-arm64/Paseo.app",
+  "series_hash": "eced871ef432dde1",
+  "isolated_home": "/Users/hteo/Paseo/Sandbox/th1-728-package-smoke/home",
+  "listen": "127.0.0.1:17687",
+  "modes_actually_differed": ["warn", "enforce"],
+  "created_agent_count": 2,
+  "agents": [
+    {
+      "id": "0abe4b8c-00f3-4252-ae42-02be2bd81231",
+      "title": "TH1-728 packaged WARN probe",
+      "warning_in_prompt": true
+    },
+    {
+      "id": "8316f070-1b5b-45ae-8b6f-a421d38a7664",
+      "title": "TH1-728 packaged dispatch positive",
+      "warning_in_prompt": false
+    }
+  ],
+  "observed_creation": [
+    {
+      "source": "cli",
+      "callerAgentId": null,
+      "labels": {}
+    },
+    {
+      "source": "cli",
+      "callerAgentId": null,
+      "labels": {}
+    },
+    {
+      "source": "cli",
+      "callerAgentId": null,
+      "labels": {
+        "dispatch_task_id": "th1-728-package-probe",
+        "dispatch_branch": "th1-728/probe"
+      }
+    }
+  ],
+  "negative_refusal_has_guidance": true,
+  "guard_source_sha256": "4734719f02441f3d6b3ba9021058ffe3259b15aedc623456dbbb0bab0817d7ce",
+  "isolated_daemon_stopped": true,
+  "workspace_archive_exit_verified": true
+}
