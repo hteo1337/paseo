@@ -101,7 +101,7 @@ def apply_one(home, item):
         return {**item, "result": "skipped_revalidation_changed"}
     before_dir = Path(item["path"]).is_dir()
     try:
-        result = cli("workspace", "archive", item["retire"])
+        result = cli("workspace", "archive", item["retire"], "--if-no-live-agents")
     except RuntimeError as error:
         # The archive RPC can commit the registry mutation before the CLI's
         # 60-second response deadline. The fresh registry check below decides.
