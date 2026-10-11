@@ -8115,7 +8115,7 @@ export class Session {
           if (!existing) {
             throw new Error(`Workspace not found: ${request.workspaceId}`);
           }
-          return archiveByScope(
+          const archive = await archiveByScope(
             {
               paseoHome: this.paseoHome,
               paseoWorktreesBaseRoot: this.worktreesRoot,
@@ -8143,9 +8143,31 @@ export class Session {
             {
               scope: { kind: "workspace", workspaceId: existing.workspaceId },
               requestId: request.requestId,
+          ...(request.ifNoLiveAgents
+            ? {
+                abortIf: () =>
+                  this.agentManager
+                    .listAgentsIncludingInternal()
+                    .filter(
+                      (agent) =>
+                        agent.workspaceId === existing.workspaceId && agent.lifecycle !== "closed",
+                    )
+                    .map((agent) => agent.id),
+                holdNewRuns: () =>
+                  this.agentManager.holdNewRunsForArchive(existing.workspaceId, existing.cwd),
+                keepDirectory: true as const,
+              }
+            : {}),
               signal,
             },
           );
+          if (archive.deferredByAgentIds?.length) {
+            throw new Error(`Workspace has live agents: ${archive.deferredByAgentIds.join(", ")}`);
+          }
+          if (request.ifNoLiveAgents && !archive.archivedWorkspaceIds.includes(existing.workspaceId)) {
+            throw new Error(`Guarded workspace archive did not archive ${existing.workspaceId}`);
+          }
+          return archive;
         },
       );
 
