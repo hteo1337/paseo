@@ -490,6 +490,9 @@ async function archiveTargetRecords(
       );
     }
   }
+  if (requireClosedAgents && teardownResults.some((result) => result.status === "rejected")) {
+    throw new Error("Guarded workspace teardown failed before record archive");
+  }
 
   const deferredByAgentIds = requireClosedAgents
     ? dependencies.agentManager
@@ -519,6 +522,9 @@ async function archiveTargetRecords(
         "archiveByScope workspace teardown failed; continuing",
       );
     }
+  }
+  if (requireClosedAgents && archiveResults.some((result) => result.status === "rejected")) {
+    throw new Error("Guarded workspace record archive failed");
   }
 
   return { archivedAgents, archivedWorkspaceIds, deferredByAgentIds };
@@ -746,6 +752,9 @@ export async function archiveWorkspaceContents(
       { err: terminalResult.reason, workspaceId },
       "Workspace archive teardown step failed; continuing",
     );
+  }
+  if (requireIdleClose && agentResults.some((result) => result.status === "rejected")) {
+    throw new Error(`Guarded agent teardown failed for workspace ${workspaceId}`);
   }
 
   return archivedAgents;
