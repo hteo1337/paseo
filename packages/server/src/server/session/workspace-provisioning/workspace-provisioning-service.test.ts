@@ -44,6 +44,7 @@ async function isDirectory(target: string): Promise<boolean> {
 
 let tmpDir: string;
 let gitRoots: Set<string>;
+let mainRepoRoots: Map<string, string>;
 let gitBranches: Map<string, string | null>;
 let checkoutFailure: Error | null;
 let restoredMergedChangeRequestUrl: string | null;
@@ -91,7 +92,7 @@ function gitService() {
         remoteUrl: null,
         worktreeRoot,
         isPaseoOwnedWorktree: false,
-        mainRepoRoot: null,
+        mainRepoRoot: worktreeRoot ? (mainRepoRoots.get(worktreeRoot) ?? null) : null,
       };
     },
   });
@@ -100,6 +101,7 @@ function gitService() {
 beforeEach(async () => {
   tmpDir = mkdtempSync(path.join(os.tmpdir(), "workspace-provisioning-"));
   gitRoots = new Set();
+  mainRepoRoots = new Map();
   gitBranches = new Map();
   checkoutFailure = null;
   restoredMergedChangeRequestUrl = null;
@@ -145,12 +147,17 @@ test("fresh non-git directory creates a directory workspace at the exact path", 
   expect(workspace.cwd).toBe(dir);
 });
 
-test("re-opening an active workspace by exact path returns the same record without duplicating", async () => {
+test("concurrent canonical and symlink workspace opens reuse one record", async () => {
   const repo = path.join(tmpDir, "repo");
+  const alias = path.join(tmpDir, "alias");
+  mkdirSync(repo);
+  symlinkSync(repo, alias, directorySymlinkType);
   gitRoots.add(repo);
 
-  const first = await provisioning.findOrCreateWorkspaceForDirectory(repo);
-  const second = await provisioning.findOrCreateWorkspaceForDirectory(repo);
+  const [first, second] = await Promise.all([
+    provisioning.findOrCreateWorkspaceForDirectory(repo),
+    provisioning.findOrCreateWorkspaceForDirectory(alias),
+  ]);
 
   expect(second.workspaceId).toBe(first.workspaceId);
   expect(await workspaceRegistry.list()).toHaveLength(1);
@@ -747,17 +754,23 @@ test("createWorkspaceForDirectory classifies unknown and archived explicit proje
   } satisfies Partial<WorkspaceProvisioningError>);
 });
 
-test("findOrCreateProjectForDirectory keeps nested selected roots independent", async () => {
+test("findOrCreateProjectForDirectory groups subdirectories and worktrees under the main repo", async () => {
   const repo = path.join(tmpDir, "repo");
+  const worktree = path.join(tmpDir, "worktree");
   gitRoots.add(repo);
+  gitRoots.add(worktree);
+  mainRepoRoots.set(worktree, repo);
 
   const first = await provisioning.findOrCreateProjectForDirectory(repo);
   const second = await provisioning.findOrCreateProjectForDirectory(path.join(repo, "sub"));
+  const third = await provisioning.findOrCreateProjectForDirectory(path.join(worktree, "sub"));
 
-  expect(second.projectId).not.toBe(first.projectId);
+  expect(second.projectId).toBe(first.projectId);
+  expect(third.projectId).toBe(first.projectId);
   expect(first.rootPath).toBe(repo);
-  expect(second.rootPath).toBe(path.join(repo, "sub"));
-  expect(await projectRegistry.list()).toHaveLength(2);
+  expect(second.rootPath).toBe(repo);
+  expect(third.rootPath).toBe(repo);
+  expect(await projectRegistry.list()).toHaveLength(1);
 });
 
 test("runInImportWorkspace uses an active requested workspace without creating another", async () => {

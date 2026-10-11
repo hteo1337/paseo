@@ -1068,10 +1068,12 @@ export async function createPaseoDaemon(
     cwd: string,
     firstAgentContext?: FirstAgentContext,
   ): Promise<string> => {
-    const workspace = await workspaceProvisioning.createWorkspaceForDirectory(
-      cwd,
-      resolveFirstAgentPromptTitle(firstAgentContext),
-    );
+    const workspace = await workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
+      title: resolveFirstAgentPromptTitle(firstAgentContext),
+      expectsInitialAgent: Boolean(firstAgentContext),
+      excludeWorktrees: true,
+      reuseArchived: false,
+    });
     if (firstAgentContext) {
       workspaceAutoName.scheduleForDirectory({
         workspaceId: workspace.workspaceId,

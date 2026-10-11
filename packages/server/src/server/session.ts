@@ -6004,6 +6004,9 @@ export class Session {
       const activeSiblings = (await this.workspaceRegistry.list()).filter(
         (workspace) => workspace.projectId === existingWorkspace.projectId && !workspace.archivedAt,
       );
+      if (activeSiblings.length === 0) {
+        await this.projectRegistry.archive(existingWorkspace.projectId, archiveTimestamp);
+      }
       this.sessionLogger.info(
         {
           workspaceId,
@@ -6749,12 +6752,13 @@ export class Session {
 
     const explicitTitle = request.title?.trim() || null;
     const promptTitle = resolveFirstAgentPromptTitle(request.firstAgentContext);
-    const workspace = await this.workspaceProvisioning.createWorkspaceForDirectory(
-      cwd,
-      explicitTitle ?? promptTitle,
-      request.source.projectId,
-      { expectsInitialAgent: Boolean(request.firstAgentContext), workspaceId },
-    );
+    const workspace = await this.workspaceProvisioning.findOrCreateWorkspaceForDirectory(cwd, {
+      title: explicitTitle ?? promptTitle,
+      projectId: request.source.projectId,
+      expectsInitialAgent: Boolean(request.firstAgentContext),
+      workspaceId,
+      reuseArchived: false,
+    });
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
     const descriptor = await this.describeWorkspaceRecord(workspace);
     await this.emitCreatedWorkspaceUpdate(

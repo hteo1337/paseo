@@ -4,7 +4,7 @@ import type { Logger } from "pino";
 import { z } from "zod";
 
 import { writeJsonFileAtomic } from "./atomic-file.js";
-import { areEquivalentPaths } from "../utils/path.js";
+import { createRealpathAwarePathMatcher } from "../utils/path.js";
 import {
   generateProjectId,
   type PersistedProjectKind,
@@ -415,12 +415,19 @@ export class FileBackedProjectRegistry
     this.allocationQueue = new Promise<void>((resolve) => (release = resolve));
     await previous;
     try {
+      const matchesRoot = createRealpathAwarePathMatcher(input.rootPath);
       const active = (await this.list())
         .filter(
-          (project) => !project.archivedAt && areEquivalentPaths(project.rootPath, input.rootPath),
+          (project) =>
+            !project.archivedAt &&
+            (input.projectKey && project.projectKey === input.projectKey
+              ? true
+              : matchesRoot(project.rootPath)),
         )
         .sort(
           (left, right) =>
+            Number(input.projectKey !== left.projectKey) -
+              Number(input.projectKey !== right.projectKey) ||
             Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
             left.projectId.localeCompare(right.projectId),
         )[0];

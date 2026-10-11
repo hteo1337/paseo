@@ -538,6 +538,7 @@ describe("workspace git watch targets", () => {
     ).archiveWorkspaceRecord("ws-10");
 
     expect(runtimeStore.listForWorkspace("ws-10")).toEqual([]);
+    expect(projects.get("proj-1")?.archivedAt).not.toBeNull();
 
     await session.cleanup();
   });
@@ -556,11 +557,17 @@ describe("workspace git watch targets", () => {
       cwd: REPO_CWD,
       name: "main",
     });
+    workspaces.set("ws-11", {
+      ...workspaces.get("ws-10")!,
+      workspaceId: "ws-11",
+      cwd: path.join(REPO_CWD, "sibling"),
+    });
 
     syncGitObserver(session, REPO_CWD, "ws-10");
     expect(subscriptions).toHaveLength(1);
 
     await sessionAny.archiveWorkspaceRecord("ws-10");
+    expect(projects.get("proj-1")?.archivedAt).toBeNull();
 
     // Re-observing the directory establishes a fresh subscription only if archive
     // tore down the prior one, which is keyed by cwd — not the opaque workspace id.

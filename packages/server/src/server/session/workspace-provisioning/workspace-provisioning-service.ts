@@ -59,7 +59,17 @@ export interface WorkspaceProvisioningService {
     input: ImportWorkspaceInput,
     operation: (workspace: PersistedWorkspaceRecord) => Promise<T>,
   ): Promise<ImportWorkspaceResult<T>>;
-  findOrCreateWorkspaceForDirectory(cwd: string): Promise<PersistedWorkspaceRecord>;
+  findOrCreateWorkspaceForDirectory(
+    cwd: string,
+    options?: {
+      title?: string | null;
+      projectId?: string;
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      excludeWorktrees?: boolean;
+      reuseArchived?: boolean;
+    },
+  ): Promise<PersistedWorkspaceRecord>;
   resolveOrCreateWorkspaceIdForCreateAgent(input: ResolveOrCreateWorkspaceIdInput): Promise<string>;
   createWorkspaceForDirectory(
     cwd: string,
@@ -102,7 +112,29 @@ export function createWorkspaceProvisioningService(deps: {
   lifecycle?: PluginLifecycle;
 }): WorkspaceProvisioningService {
   const { serverId, workspaceRegistry, projectRegistry, workspaceGitService, logger } = deps;
-  const createAgentWorkspaceLocks = new Map<string, Promise<void>>();
+  const workspaceLookupLocks = new Map<string, Promise<void>>();
+
+  async function withWorkspaceLookupLock<T>(cwd: string, operation: () => Promise<T>): Promise<T> {
+    let lockKey: string;
+    try {
+      lockKey = realpathSync(cwd);
+    } catch {
+      lockKey = resolve(cwd);
+    }
+    const previous = workspaceLookupLocks.get(lockKey);
+    let release!: () => void;
+    const current = new Promise<void>((resolveLock) => {
+      release = resolveLock;
+    });
+    workspaceLookupLocks.set(lockKey, current);
+    if (previous) await previous;
+    try {
+      return await operation();
+    } finally {
+      if (workspaceLookupLocks.get(lockKey) === current) workspaceLookupLocks.delete(lockKey);
+      release();
+    }
+  }
 
   /**
    * Placement facts at a workspace directory, or null when there is nothing
@@ -193,8 +225,8 @@ export function createWorkspaceProvisioningService(deps: {
   }
 
   async function findOrCreateProjectForDirectory(cwd: string): Promise<PersistedProjectRecord> {
-    const rootPath = resolve(cwd);
-    const checkout = await workspaceGitService.getCheckout(rootPath);
+    const checkout = await workspaceGitService.getCheckout(resolve(cwd));
+    const rootPath = resolve(checkout.mainRepoRoot ?? checkout.worktreeRoot ?? cwd);
     const timestamp = new Date().toISOString();
     return projectRegistry.getOrCreateActiveByRoot({
       rootPath,
@@ -321,33 +353,56 @@ export function createWorkspaceProvisioningService(deps: {
     return refreshProjectKind(project);
   }
 
-  async function findOrCreateWorkspaceForDirectory(cwd: string): Promise<PersistedWorkspaceRecord> {
+  async function findOrCreateWorkspaceForDirectory(
+    cwd: string,
+    options?: {
+      title?: string | null;
+      projectId?: string;
+      expectsInitialAgent?: boolean;
+      workspaceId?: string;
+      excludeWorktrees?: boolean;
+      reuseArchived?: boolean;
+    },
+  ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
-    const workspaces = await workspaceRegistry.list();
-    const active = workspaces
-      .filter(
-        (workspace) => !workspace.archivedAt && areEquivalentPaths(workspace.cwd, normalizedCwd),
-      )
-      .sort(
-        (left, right) =>
-          Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-          left.workspaceId.localeCompare(right.workspaceId),
-      )[0];
-    if (active) return refreshWorkspaceRecord(active);
-    const archived = workspaces
-      .filter(
-        (workspace) => workspace.archivedAt && areEquivalentPaths(workspace.cwd, normalizedCwd),
-      )
-      .sort(
-        (left, right) =>
-          Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-          left.workspaceId.localeCompare(right.workspaceId),
-      )[0];
-    if (archived) {
-      const project = await projectRegistry.get(archived.projectId);
-      if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
-    }
-    return createWorkspaceForDirectory(normalizedCwd);
+    return withWorkspaceLookupLock(normalizedCwd, async () => {
+      if (options?.projectId) await requireActiveProject(options.projectId);
+      const matchesCwd = createRealpathAwarePathMatcher(normalizedCwd);
+      const isEligible = (workspace: PersistedWorkspaceRecord) =>
+        (!options?.projectId || workspace.projectId === options.projectId) &&
+        (!options?.excludeWorktrees ||
+          (workspace.kind !== "worktree" &&
+            !workspace.isPaseoOwnedWorktree &&
+            !(workspace.worktreeRoot && workspace.mainRepoRoot))) &&
+        matchesCwd(workspace.cwd);
+      const workspaces = await workspaceRegistry.list();
+      const active = workspaces
+        .filter((workspace) => !workspace.archivedAt && isEligible(workspace))
+        .sort(
+          (left, right) =>
+            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+            left.workspaceId.localeCompare(right.workspaceId),
+        )[0];
+      if (active) return refreshWorkspaceRecord(active);
+      const archived =
+        options?.reuseArchived === false
+          ? null
+          : workspaces
+              .filter((workspace) => workspace.archivedAt && isEligible(workspace))
+              .sort(
+                (left, right) =>
+                  Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
+                  left.workspaceId.localeCompare(right.workspaceId),
+              )[0];
+      if (archived) {
+        const project = await projectRegistry.get(archived.projectId);
+        if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
+      }
+      return createWorkspaceForDirectory(normalizedCwd, options?.title, options?.projectId, {
+        expectsInitialAgent: options?.expectsInitialAgent,
+        workspaceId: options?.workspaceId,
+      });
+    });
   }
 
   async function resolveOrCreateWorkspaceIdForCreateAgent(
@@ -371,51 +426,14 @@ export function createWorkspaceProvisioningService(deps: {
         inDirectory(sandbox));
     const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
 
-    const realPath = (target: string) => {
-      try {
-        return realpathSync(target);
-      } catch {
-        return resolve(target);
-      }
-    };
-    const lockKey = realPath(workspaceCwd);
-    const previous = createAgentWorkspaceLocks.get(lockKey);
-    let release!: () => void;
-    const current = new Promise<void>((resolveLock) => {
-      release = resolveLock;
-    });
-    createAgentWorkspaceLocks.set(lockKey, current);
-    if (previous) await previous;
-    try {
-      const project = await findOrCreateProjectForDirectory(workspaceCwd);
-      const workspaces = await workspaceRegistry.list();
-      const active = workspaces
-        .filter(
-          (workspace) =>
-            !workspace.archivedAt &&
-            workspace.projectId === project.projectId &&
-            workspace.kind !== "worktree" &&
-            !workspace.isPaseoOwnedWorktree &&
-            !(workspace.worktreeRoot && workspace.mainRepoRoot) &&
-            areEquivalentPaths(realPath(workspace.cwd), lockKey),
-        )
-        .sort(
-          (left, right) =>
-            Date.parse(left.createdAt) - Date.parse(right.createdAt) ||
-            left.workspaceId.localeCompare(right.workspaceId),
-        )[0];
-      if (active) return active.workspaceId;
-      return (
-        await createWorkspaceForDirectory(workspaceCwd, input.initialTitle, undefined, {
-          expectsInitialAgent: true,
-        })
-      ).workspaceId;
-    } finally {
-      if (createAgentWorkspaceLocks.get(lockKey) === current) {
-        createAgentWorkspaceLocks.delete(lockKey);
-      }
-      release();
-    }
+    return (
+      await findOrCreateWorkspaceForDirectory(workspaceCwd, {
+        title: input.initialTitle,
+        expectsInitialAgent: true,
+        excludeWorktrees: true,
+        reuseArchived: false,
+      })
+    ).workspaceId;
   }
 
   async function resolveRestoredAutoArchiveChangeRequestUrl(

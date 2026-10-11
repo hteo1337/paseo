@@ -943,7 +943,7 @@ test("client heartbeat clears attention for the focused terminal", async () => {
 });
 
 test("create_agent_request keeps requested child cwd when grouped under an existing parent workspace", async () => {
-  const workdir = mkdtempSync(path.join(tmpdir(), "paseo-create-agent-cwd-"));
+  const workdir = mkdtempSync(path.join(process.cwd(), ".paseo-create-agent-cwd-"));
   try {
     const parent = path.join(workdir, "parent");
     const child = path.join(parent, "child");
@@ -1066,9 +1066,9 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
     expect(createdWorkspace).not.toBeNull();
     await expect(projectRegistry.get(createdWorkspace!.projectId)).resolves.toMatchObject({
       projectKey: deriveProjectKey({
-        rootPath: child,
+        rootPath: parent,
         remoteUrl: null,
-        worktreeRoot: null,
+        worktreeRoot: parent,
         mainRepoRoot: null,
         serverId: "test-server",
       }),
