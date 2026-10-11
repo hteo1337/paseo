@@ -89,3 +89,9 @@ Live marker and asar on **both hosts** remain the 54-patch build: `ba0ba10aac3b6
 m4 read-only repair preflight: 41 stored active / 38 real paths / 2 duplicate groups / 3 extras, plus missing directory `~/.paseo/worktrees/th1-672-nova-chat-resume` (`wks_f9bcaa30b7f7f938`). Reviewed dry-run keeps `wks_d9af2d1a072340de` for `th1580-gw-status`, retiring `wks_b5ab0c87297c4404` and `wks_d316663b6bdc71cb`; keeps `wks_3f705dc337a7f74d` for `th1580/prov-status`, retiring `wks_5f7664eb2f9e1478`. No apply before 55 runtime and disposable live-owner refusal. Latest scripts and dry-run JSON were staged in m4 `~/.paseo/ops-scratch/ws-clean/handoffs/`.
 
 Dispatch PR https://github.com/hteo1337/paseo-dispatch/pull/24 is separately owned by m4 agent `26d3a9a5`. At this checkpoint its STATUS says dispatchd rollout not started and its PR is open with a failing CI job. I sent coordination to wait for its settled, pushed, healthy dispatchd release before the m4 Paseo restart; do not restart Dispatch or Fleet from TH1-630. Recheck fresh STATUS before each host switch and after any agent change.
+
+## 2026-10-11 20:29 EEST accelerated rollout
+
+Teo advanced the 55-patch rollout to now. Dispatch PR #24 merged at 20:27 and dispatchd install is in progress; m4 health was unavailable at 20:29.
+Three running m5 peers received a three-minute commit/push/handoff/pause request at 20:28. Existing m5 wrapper PID 3895 is alive; updater child PID 4579 is paused; no install result exists.
+The superseded 23:00 wake job was removed. Resume only that updater after the checkpoint window and dispatch install; verify m5, then m4 and guarded repair. No rebuild/review repeat.
