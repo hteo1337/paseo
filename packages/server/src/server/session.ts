@@ -3678,8 +3678,8 @@ export class Session {
       const activeWorkspaceIds = projectWorkspaces
         .filter((workspace) => !workspace.archivedAt)
         .map((workspace) => workspace.workspaceId);
-      if (request.ifEmpty && activeWorkspaceIds.length > 0) {
-        throw new Error(`Project has active workspaces: ${projectId}`);
+      if (request.ifEmpty && projectWorkspaces.length > 0) {
+        throw new Error(`Project has workspaces: ${projectId}`);
       }
 
       if (activeWorkspaceIds.length > 0) {
@@ -3704,15 +3704,19 @@ export class Session {
           removedWorkspaceIds.push(workspaceId);
         }
 
-        if (
-          request.ifEmpty &&
-          (await this.workspaceRegistry.list()).some(
-            (workspace) => workspace.projectId === resolvedProjectId && !workspace.archivedAt,
-          )
-        ) {
-          throw new Error(`Project gained an active workspace: ${projectId}`);
+        if (request.ifEmpty) {
+          if (!this.workspaceRegistry.removeProjectIfUnreferenced) {
+            throw new Error("Guarded project removal is unavailable");
+          }
+          const removed = await this.workspaceRegistry.removeProjectIfUnreferenced(
+            resolvedProjectId,
+            () => this.projectRegistry.remove(resolvedProjectId),
+            async () => Boolean(await this.projectRegistry.get(resolvedProjectId)),
+          );
+          if (!removed) throw new Error(`Project gained a workspace: ${projectId}`);
+        } else {
+          await this.projectRegistry.remove(resolvedProjectId);
         }
-        await this.projectRegistry.remove(resolvedProjectId);
         await removeProjectCustomIcon({
           paseoHome: this.paseoHome,
           projectId: resolvedProjectId,
@@ -7081,7 +7085,9 @@ export class Session {
       for (const project of await this.projectRegistry.list()) {
         projectsBefore.set(project.projectId, project);
       }
-      const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(cwd);
+      const project = await this.workspaceProvisioning.findOrCreateProjectForDirectory(cwd, {
+        exactRoot: true,
+      });
       this.sessionLogger.info(
         {
           requestedCwd,
@@ -7124,7 +7130,9 @@ export class Session {
         { parentPath: request.parentPath, name: request.name },
         {
           registerProject: (directoryPath) =>
-            this.workspaceProvisioning.findOrCreateProjectForDirectory(directoryPath),
+            this.workspaceProvisioning.findOrCreateProjectForDirectory(directoryPath, {
+              exactRoot: true,
+            }),
         },
       );
       this.emit({
