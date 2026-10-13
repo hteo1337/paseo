@@ -27,7 +27,7 @@ export type AgentLoaderManager = Pick<
   | "hydrateTimelineFromProvider"
   | "resumeAgentFromPersistence"
 > &
-  Partial<Pick<AgentManager, "waitForAgentClose">>;
+  Partial<Pick<AgentManager, "waitForAgentClose" | "beginAgentUse">>;
 
 export interface EnsureAgentLoadedDeps {
   agentManager: AgentLoaderManager;
@@ -61,6 +61,18 @@ export async function ensureUnarchivedAgentLoaded(
 }
 
 export async function ensureAgentLoaded(
+  agentId: string,
+  deps: EnsureAgentLoadedDeps,
+): Promise<ManagedAgent> {
+  const release = deps.agentManager.beginAgentUse?.(agentId);
+  try {
+    return await ensureAgentLoadedInner(agentId, deps);
+  } finally {
+    release?.();
+  }
+}
+
+async function ensureAgentLoadedInner(
   agentId: string,
   deps: EnsureAgentLoadedDeps,
 ): Promise<ManagedAgent> {

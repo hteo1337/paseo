@@ -25,8 +25,17 @@ Reload releases the old runtime before resuming its durable session: an idle pro
 still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
 replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+Child creation can use an unarchived closed parent from durable storage. Resolving
+parentage does not resume the parent's provider or start a turn. Archived parents
+remain unavailable.
+
+The daemon unloads a resident agent after 15 minutes without a turn, pending permission, queued
+prompt, in-flight resume, client timeline stream, or live ACP terminal. It closes the provider runtime and
+keeps the durable agent record for on-demand resume. Set `agents.idleUnloadMinutes` in the daemon
+config, or override it with `PASEO_AGENT_IDLE_UNLOAD_MINUTES`; `0` disables idle unloading. The
+daemon checks once a minute. Opening a chat or asking for prompt suggestions can resume it and reset
+the idle clock. If descendant cleanup fails after the provider closes, the runtime enters an error
+state and rejects prompts. The next access retries cleanup before it can resume the durable session.
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
