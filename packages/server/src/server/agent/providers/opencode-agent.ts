@@ -1503,6 +1503,8 @@ export class OpenCodeAgentClient implements AgentClient {
         false,
         unbindBridge,
         connectServer,
+        connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1558,6 +1560,8 @@ export class OpenCodeAgentClient implements AgentClient {
         registeredAcquisition !== null,
         unbindBridge,
         connectServer,
+        connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1599,7 +1603,9 @@ export class OpenCodeAgentClient implements AgentClient {
       events: acquisition.events,
       environment: acquisition.environment,
       url: acquisition.server.url,
+      pid: acquisition.server.pid,
       release: acquisition.release,
+      getReapedProcessCount: acquisition.getReapedProcessCount,
     };
   }
 
@@ -3365,7 +3371,9 @@ interface OpenCodeServerConnection {
   client: OpencodeClient;
   events: OpenCodeEventSource;
   url: string;
+  pid?: number;
   release: () => Promise<void>;
+  getReapedProcessCount?: () => number;
 }
 
 class OpenCodeAgentSession implements AgentSession {
@@ -3458,6 +3466,8 @@ class OpenCodeAgentSession implements AgentSession {
     private readonly externallyDriven = false,
     releaseBridge?: () => void,
     connectServer?: () => Promise<OpenCodeServerConnection>,
+    serverPid?: number,
+    getReapedProcessCount?: () => number,
   ) {
     this.config = config;
     this.server = {
@@ -3466,6 +3476,8 @@ class OpenCodeAgentSession implements AgentSession {
       url: serverUrl ?? "",
       release: releaseServer,
       environment: this.harnessEnvironment,
+      pid: serverPid,
+      getReapedProcessCount,
     };
     this.connectServer = connectServer ?? null;
     this.sessionId = sessionId;
@@ -5077,6 +5089,16 @@ class OpenCodeAgentSession implements AgentSession {
       this.releaseBridge = null;
       await this.server.release();
     }
+  }
+
+  getOwnedProcessIds(): number[] {
+    // The server may be shared by other agents. Its reference-counted owner
+    // performs tree cleanup when the last acquisition is released.
+    return [];
+  }
+
+  getReapedProcessCount(): number {
+    return this.server.getReapedProcessCount?.() ?? 0;
   }
 
   private async deleteProviderSessionIfEphemeral(): Promise<void> {
