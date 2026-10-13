@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/wire-compat.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-idle-unload-v0.11.2/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  7 passed (7)
+   Start at  00:08:12
+   Duration  1.75s (transform 1.16s, setup 18ms, import 1.65s, tests 22ms, environment 0ms)
+

@@ -1,0 +1,33 @@
+npm notice run paseo@0.10.3 npx
+npm notice run 'vitest' run src/server/agent/providers/acp-agent.test.ts --bail=1 --testTimeout=8000 -t close reaches process escalation
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/feat-idle-agent-unload/packages/server
+
+stdout | src/server/agent/providers/acp-agent.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+
+ ❯ src/server/agent/providers/acp-agent.test.ts (109 tests | 1 failed | 107 skipped) 8076ms
+     × close reaches process escalation when closeSession responds=false 8004ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/providers/acp-agent.test.ts > ACPAgentSession close() tree-kill > close reaches process escalation when closeSession responds=false
+Error: Test timed out in 8000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/server/agent/providers/acp-agent.test.ts:3421:26
+    3419|   });
+    3420|
+    3421|   test.each([true, false])(
+       |                          ^
+    3422|     "close reaches process escalation when closeSession responds=%s",
+    3423|     async (respond) => {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 1 passed | 107 skipped (109)
+   Start at  00:00:11
+   Duration  8.45s (transform 207ms, setup 18ms, import 286ms, tests 8.08s, environment 0ms)
+

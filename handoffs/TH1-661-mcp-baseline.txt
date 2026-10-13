@@ -1,0 +1,61 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/agent/mcp-server.test.ts --bail=1 -t creates a fresh local workspace for canonical top-level creation
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-baseline/packages/server
+
+stdout | src/server/agent/mcp-server.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛡️ auth for agents: https://vestauth.com
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+
+ ❯ src/server/agent/mcp-server.test.ts (123 tests | 1 failed | 122 skipped) 20ms
+     × creates a fresh local workspace for canonical top-level creation 17ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/mcp-server.test.ts > create_agent MCP tool > creates a fresh local workspace for canonical top-level creation
+AssertionError: expected "vi.fn()" to be called with arguments: [ Array(3) ]
+
+Received:
+
+  1st vi.fn() call:
+
+  [
+-   ObjectContaining {
++   {
+      "cwd": "/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-baseline/packages/server",
++     "internal": undefined,
++     "modeId": undefined,
++     "model": "gpt-5.4",
++     "provider": "codex",
++     "thinkingOptionId": undefined,
++     "title": "Top-level agent",
+    },
+    undefined,
+    {
++     "callerAgentId": undefined,
++     "creationSource": "agent",
++     "env": undefined,
++     "owner": undefined,
+      "workspaceId": "workspace-created",
+    },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/server/agent/mcp-server.test.ts:1333:44
+    1331|
+    1332|     expect(ensureWorkspace).toHaveBeenCalledWith(existingCwd, { prompt…
+    1333|     expect(spies.agentManager.createAgent).toHaveBeenCalledWith(
+       |                                            ^
+    1334|       expect.objectContaining({ cwd: existingCwd }),
+    1335|       undefined,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 122 skipped (123)
+   Start at  00:08:11
+   Duration  1.69s (transform 1.12s, setup 17ms, import 1.59s, tests 20ms, environment 0ms)
+

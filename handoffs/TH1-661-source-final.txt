@@ -1,0 +1,11 @@
+npm notice run paseo@0.10.3 npx
+npm notice run 'vitest' run src/server/agent/provider-registry-wrap.test.ts src/server/agent/agent-manager.test.ts src/server/agent/providers/acp-agent.test.ts --bail=1 -t derived sessions|wrapSessionProvider|idle runtime unloads|Reload retries retained|idle sweep deadlines|close reaches process escalation
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/feat-idle-agent-unload/packages/server
+
+
+ Test Files  3 passed (3)
+      Tests  7 passed | 357 skipped (364)
+   Start at  00:06:37
+   Duration  3.53s (transform 755ms, setup 26ms, import 1.13s, tests 2.18s, environment 0ms)
+

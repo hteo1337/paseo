@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/session.test.ts --bail=1 -t reload|refresh|subscription|parent
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-idle-unload-v0.11.2/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  27 passed | 144 skipped (171)
+   Start at  00:16:30
+   Duration  4.33s (transform 3.43s, setup 19ms, import 4.20s, tests 46ms, environment 0ms)
+
