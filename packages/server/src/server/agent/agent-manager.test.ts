@@ -9890,6 +9890,111 @@ test("idle runtime unloads after the threshold and the next access resumes it", 
   }
 });
 
+test("Reload retries retained idle tree cleanup before resuming and clears it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-reload-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  let failReap = true;
+  let reaps = 0;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async () => {
+      reaps++;
+      if (failReap) throw new Error("retained tree alive");
+      return 0;
+    },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(0);
+    expect(reaps).toBe(1);
+    await expect(manager.reloadAgentSession(agent.id)).rejects.toThrow("retained tree alive");
+    expect(reaps).toBe(2);
+    expect(client.resumeOverrides).toHaveLength(0);
+    failReap = false;
+    const replacement = await manager.reloadAgentSession(agent.id);
+    expect(reaps).toBe(3);
+    expect(replacement.session).not.toBe(agent.session);
+    const loaded = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(loaded.session).toBe(replacement.session);
+    expect(reaps).toBe(3);
+    expect(client.resumeOverrides).toHaveLength(1);
+  } finally {
+    failReap = false;
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("idle sweep deadlines preserve a stalled close while other agents and future sweeps finish", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-deadline-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const closeStarted = deferred<void>();
+  const releaseClose = deferred<void>();
+  class StalledSession extends TestAgentSession {
+    closes = 0;
+    override async close(): Promise<void> {
+      this.closes++;
+      closeStarted.resolve();
+      await releaseClose.promise;
+    }
+  }
+  class StalledClient extends TestAgentClient {
+    current: StalledSession | undefined;
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      this.current = new StalledSession(config);
+      return this.current;
+    }
+  }
+  const stalled = new StalledClient("codex");
+  const responsive = new TestAgentClient("claude");
+  const manager = new AgentManager({
+    clients: { codex: stalled, claude: responsive },
+    registry: storage,
+    logger,
+    rescueTimeouts: { idleSessionCloseMs: 20 },
+    processTreeReaper: async () => 0,
+  });
+  try {
+    const first = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const second = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+    const sweep = manager.unloadIdleAgents(1, Date.now() + 60_000);
+    await closeStarted.promise;
+    expect(await sweep).toBe(1);
+    expect(manager.getAgent(second.id)).toBeNull();
+    expect(manager.getAgent(first.id)?.session).toBe(stalled.current);
+    const third = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(1);
+    expect(manager.getAgent(third.id)).toBeNull();
+    expect(stalled.current?.closes).toBe(1);
+    let loaded = false;
+    const access = ensureAgentLoaded(first.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    }).then((agent) => {
+      loaded = true;
+      return agent;
+    });
+    await manager.unloadIdleAgents(1, Date.now() + 60_000);
+    expect(loaded).toBe(false);
+    releaseClose.resolve();
+    const resumed = await access;
+    expect(resumed.session).not.toBe(stalled.current);
+    expect(stalled.resumeOverrides).toHaveLength(1);
+  } finally {
+    releaseClose.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("subscribe hides provider subagents of internal parents from global subscribers", async () => {
   const internalAgentId = "00000000-0000-4000-8000-000000000117";
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-internal-provider-child-"));

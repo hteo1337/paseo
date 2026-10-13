@@ -3418,6 +3418,68 @@ describe("ACPAgentSession close() tree-kill", () => {
     vi.restoreAllMocks();
   });
 
+  test.each([true, false])(
+    "close reaches process escalation when closeSession responds=%s",
+    async (respond) => {
+      const script = `
+      const readline = require("node:readline");
+      readline.createInterface({ input: process.stdin }).on("line", (line) => {
+        const request = JSON.parse(line);
+        let result;
+        if (request.method === "initialize") result = {
+          protocolVersion: 1, authMethods: [], agentCapabilities: { sessionCapabilities: { close: {} } }
+        };
+        if (request.method === "session/new") result = { sessionId: "shutdown-test" };
+        if (request.method === "session/close" && ${respond}) result = {};
+        if (result) process.stdout.write(JSON.stringify({ jsonrpc: "2.0", id: request.id, result }) + "\\n");
+      });
+    `;
+      const session = new ACPAgentSession(
+        { provider: "claude-acp", cwd: process.cwd() },
+        {
+          provider: "claude-acp",
+          logger: createTestLogger(),
+          defaultCommand: [process.execPath, "-e", script],
+          defaultModes: [],
+          capabilities: {
+            supportsStreaming: true,
+            supportsSessionPersistence: true,
+            supportsDynamicModes: true,
+            supportsMcpServers: true,
+            supportsReasoningStream: true,
+            supportsToolInvocations: true,
+          },
+        },
+      );
+      let pid: number | undefined;
+      let deadline: ReturnType<typeof setTimeout> | undefined;
+      try {
+        await session.initializeNewSession();
+        [pid] = session.getOwnedProcessIds();
+        expect(pid).toBeGreaterThan(0);
+        await Promise.race([
+          session.close(),
+          new Promise<never>((_, reject) => {
+            deadline = setTimeout(
+              () => reject(new Error("shutdown stalled before escalation")),
+              6_000,
+            );
+          }),
+        ]);
+        expect(session.getOwnedProcessIds()).toEqual([]);
+        expect(() => process.kill(pid!, 0)).toThrow();
+      } finally {
+        if (deadline) clearTimeout(deadline);
+        if (pid) {
+          try {
+            process.kill(pid, "SIGKILL");
+          } catch {}
+        }
+        await session.close();
+      }
+    },
+  );
+
   test("close() flushes a buffered provider-owned user message before unsubscribing", async () => {
     const session = createSession();
     const events: AgentStreamEvent[] = [];

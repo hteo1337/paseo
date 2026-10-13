@@ -607,9 +607,14 @@ function startIdleAgentUnload(
       const minutes = idleUnloadEnvMinutes ?? configured;
       if (minutes === 0) return;
       idleUnloadScanRunning = true;
-      void agentManager.unloadIdleAgents(minutes * 60_000).finally(() => {
-        idleUnloadScanRunning = false;
-      });
+      void agentManager
+        .unloadIdleAgents(minutes * 60_000)
+        .catch((error) => {
+          logger.warn({ err: error }, "Idle agent unload scan failed");
+        })
+        .finally(() => {
+          idleUnloadScanRunning = false;
+        });
     } catch (error) {
       logger.warn({ err: error }, "Idle agent unload scan could not read configuration");
     }

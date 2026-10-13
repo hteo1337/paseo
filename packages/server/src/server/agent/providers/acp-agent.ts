@@ -2434,13 +2434,21 @@ export class ACPAgentSession implements AgentSession, ACPClient {
     if (this.connection && this.sessionId) {
       try {
         if (this.activeForegroundTurnId) {
-          await this.connection.cancel({ sessionId: this.sessionId });
+          await withTimeout(
+            this.connection.cancel({ sessionId: this.sessionId }),
+            2_000,
+            "ACP cancel timed out during shutdown",
+          );
         }
       } catch {}
 
       try {
         if (this.agentCapabilities?.sessionCapabilities?.close) {
-          await this.connection.unstable_closeSession({ sessionId: this.sessionId });
+          await withTimeout(
+            this.connection.unstable_closeSession({ sessionId: this.sessionId }),
+            2_000,
+            "ACP closeSession timed out during shutdown",
+          );
         }
       } catch (error) {
         this.logger.debug({ err: error }, "ACP closeSession failed during shutdown");
