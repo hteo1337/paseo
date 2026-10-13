@@ -1,1 +1,1 @@
-Linear connector rate-limited3600s at02:19 EEST; updates deferred; live install requires normal fleet-idle/signing gates.
+TH1-661: no active implementation blocker; baseline failures recorded in TH1-661-VERIFICATION.md. Sol re-review pending; no merge/install authorized.
