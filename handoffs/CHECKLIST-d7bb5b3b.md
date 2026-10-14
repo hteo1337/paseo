@@ -19,5 +19,7 @@ Delivery evidence: source c930dff0a, port b663c5c4e and patch 9916276 pushed suc
 ## Requested status refresh — 2026-10-14
 
 - [x] Inspect current handoff, verification artifact and published branch heads.
-- [ ] Refresh STATUS with done, next, verification and blockers; format and commit.
-- [ ] Push refreshed handoff, verify remote head and update Linear delivery comment.
+- [x] Refresh STATUS with done, next, verification and blockers; format and commit.
+- [x] Push refreshed handoff, verify remote head and update Linear delivery comment.
+
+Status refresh evidence: f1aba77fb committed and pushed; git ls-remote confirmed its exact hash; Linear delivery comment b8b5463e updated. Formatting and git diff --check passed; no tests rerun.
