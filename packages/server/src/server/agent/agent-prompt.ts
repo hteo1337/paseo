@@ -20,6 +20,7 @@ export type AgentRunController = Pick<
   | "streamAgent"
 > & {
   reloadAgentSession(agentId: string): Promise<unknown>;
+  beginAgentUse?(agentId: string): () => void;
 };
 
 export interface StartAgentRunOptions {
@@ -94,35 +95,43 @@ export async function startAgentRun(
   logger: Logger,
   options?: StartAgentRunOptions,
 ): Promise<{ disposition: PromptDispatchDisposition }> {
-  const snapshot = agentManager.getAgent(agentId);
-  logger.trace(
-    {
-      agentId,
-      provider: snapshot?.provider,
-      providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
-      turnId: snapshot?.activeForegroundTurnId ?? undefined,
-      promptType: typeof prompt === "string" ? "string" : "structured",
-      hasRunOptions: Boolean(options?.runOptions),
-      replaceRunning: Boolean(options?.replaceRunning),
-    },
-    "agent.session.start_stream.request",
-  );
-  // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
-  // in-flight turn — replaceAgentRun would interrupt the running turn. The
-  // intercept lives at this layer so it covers every prompt entrypoint.
-  if (agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
-    options?.onDispatch?.("out_of_band");
-    return { disposition: "out_of_band" };
-  }
+  const release = agentManager.beginAgentUse?.(agentId);
   try {
-    return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
-  } catch (error) {
-    if (!isStaleProviderSessionError(error)) throw error;
-    logger.info({ agentId, err: error }, "Provider session went stale; reopening from persistence");
-    // The live session belongs to a retired plugin runtime. Reload swaps in a
-    // fresh session on the current runtime while preserving history and labels.
-    await agentManager.reloadAgentSession(agentId);
-    return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
+    const snapshot = agentManager.getAgent(agentId);
+    logger.trace(
+      {
+        agentId,
+        provider: snapshot?.provider,
+        providerSessionId: snapshot?.persistence?.sessionId ?? undefined,
+        turnId: snapshot?.activeForegroundTurnId ?? undefined,
+        promptType: typeof prompt === "string" ? "string" : "structured",
+        hasRunOptions: Boolean(options?.runOptions),
+        replaceRunning: Boolean(options?.replaceRunning),
+      },
+      "agent.session.start_stream.request",
+    );
+    // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
+    // in-flight turn — replaceAgentRun would interrupt the running turn. The
+    // intercept lives at this layer so it covers every prompt entrypoint.
+    if (agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions)) {
+      options?.onDispatch?.("out_of_band");
+      return { disposition: "out_of_band" };
+    }
+    try {
+      return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
+    } catch (error) {
+      if (!isStaleProviderSessionError(error)) throw error;
+      logger.info(
+        { agentId, err: error },
+        "Provider session went stale; reopening from persistence",
+      );
+      // The live session belongs to a retired plugin runtime. Reload swaps in a
+      // fresh session on the current runtime while preserving history and labels.
+      await agentManager.reloadAgentSession(agentId);
+      return await startAgentRunInner(agentManager, agentId, prompt, logger, options);
+    }
+  } finally {
+    release?.();
   }
 }
 
@@ -332,45 +341,50 @@ export async function sendPromptToAgent(
 export async function sendPreparedPromptToAgent(
   params: Omit<SendPromptToAgentParams, "source" | "messageId">,
 ): Promise<{ disposition: PromptDispatchDisposition }> {
-  const unarchive = params.unarchive ?? true;
-
-  const record = await params.agentStorage.get(params.agentId);
-  let archivedAtToRestore: string | null = null;
-  if (record?.archivedAt) {
-    if (!unarchive) {
-      return { disposition: "turn_started" };
-    }
-    if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
-      archivedAtToRestore = record.archivedAt;
-    }
-  }
-
+  const release = params.agentManager.beginAgentUse(params.agentId);
   try {
-    await ensureAgentLoaded(params.agentId, {
-      agentManager: params.agentManager,
-      agentStorage: params.agentStorage,
-      logger: params.logger,
-    });
-  } catch (error) {
-    // A send that could not load the agent leaves it where it was: still archived.
-    // Concurrent sends share this load, so none of them holds a live session.
-    if (archivedAtToRestore) {
-      await params.agentManager.archiveSnapshot(params.agentId, archivedAtToRestore);
+    const unarchive = params.unarchive ?? true;
+  
+    const record = await params.agentStorage.get(params.agentId);
+    let archivedAtToRestore: string | null = null;
+    if (record?.archivedAt) {
+      if (!unarchive) {
+        return { disposition: "turn_started" };
+      }
+      if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
+        archivedAtToRestore = record.archivedAt;
+      }
     }
-    throw error;
+  
+    try {
+      await ensureAgentLoaded(params.agentId, {
+        agentManager: params.agentManager,
+        agentStorage: params.agentStorage,
+        logger: params.logger,
+      });
+    } catch (error) {
+      // A send that could not load the agent leaves it where it was: still archived.
+      // Concurrent sends share this load, so none of them holds a live session.
+      if (archivedAtToRestore) {
+        await params.agentManager.archiveSnapshot(params.agentId, archivedAtToRestore);
+      }
+      throw error;
+    }
+  
+    if (params.sessionMode) {
+      await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
+    }
+  
+    return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
+      replaceRunning: true,
+      onDispatch: params.onDispatch,
+      activeTurnBehavior: params.activeTurnBehavior,
+      clearPendingPermissions: params.clearPendingPermissions,
+      runOptions: params.runOptions,
+    });
+  } finally {
+    release();
   }
-
-  if (params.sessionMode) {
-    await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
-  }
-
-  return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
-    replaceRunning: true,
-    onDispatch: params.onDispatch,
-    activeTurnBehavior: params.activeTurnBehavior,
-    clearPendingPermissions: params.clearPendingPermissions,
-    runOptions: params.runOptions,
-  });
 }
 
 export async function startCreatedAgentInitialPrompt(
