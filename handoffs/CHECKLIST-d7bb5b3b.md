@@ -15,3 +15,9 @@ Evidence: source-positive 5 passed/357 skipped; original production controls eac
 Port/patch evidence: 286 focused passes, typecheck:server once exit 0, final server build exit 0; 58 patches git am -3 exit 0; all 32 exported payload files equal source; schema treatment differs only by the idle setting. Delivery is complete; Sol re-review is next.
 
 Delivery evidence: source c930dff0a, port b663c5c4e and patch 9916276 pushed successfully; source/port/tag remote hashes inspected. Linear comment b8b5463e-e688-4b99-86e5-48802972bb35 records branches, implementation/delivery commits and next Sol re-review. Both PR descriptions updated.
+
+## Requested status refresh — 2026-10-14
+
+- [x] Inspect current handoff, verification artifact and published branch heads.
+- [ ] Refresh STATUS with done, next, verification and blockers; format and commit.
+- [ ] Push refreshed handoff, verify remote head and update Linear delivery comment.

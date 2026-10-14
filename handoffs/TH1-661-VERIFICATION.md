@@ -12,16 +12,17 @@ The existing source production files were replaced temporarily with their unchan
 
 All Vitest commands ran inside `packages/server` with `--bail=1`; no workspace-wide suite ran.
 
-| Checkout | Command selection                                                                                                                                                                 | Outcome                                                          |
-| -------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------- | -------------------- | ----------------------- | --------------------------------------------------------- | ---------------------------------- | --------------------- | -------------------- | ---------------------- |
-| Source   | `npx vitest run src/server/agent/provider-registry-wrap.test.ts src/server/agent/agent-manager.test.ts src/server/agent/providers/acp-agent.test.ts --bail=1 -t 'derived sessions | wrapSessionProvider                                              | idle runtime unloads | Reload retries retained | idle sweep deadlines                                      | close reaches process escalation'` | 7 passed, 357 skipped |
-| Port     | `provider-registry-wrap.test.ts agent-manager.test.ts -t 'derived sessions                                                                                                        | wrapSessionProvider                                              | idle runtime unloads | Reload retries retained | idle sweep deadlines                                      | reload                             | refresh               | idle agents remain'` | 33 passed, 226 skipped |
-| Port     | `providers/acp-agent.test.ts providers/opencode-server-manager.test.ts providers/opencode-agent.recovery.test.ts`                                                                 | 143 passed, 1 skipped                                            |
-| Port     | `agent-prompt.test.ts providers/omp/cli-runtime.test.ts providers/pi/cli-runtime.test.ts providers/jsonl-rpc-process.test.ts`                                                     | 76 passed                                                        |
-| Port     | `src/server/wire-compat.test.ts`                                                                                                                                                  | 7 passed                                                         |
-| Port     | `src/server/session.test.ts -t 'reload                                                                                                                                            | refresh                                                          | subscription         | parent'`                | 27 passed, 144 skipped                                    |
-| Port     | `mcp-server.test.ts src/server/wire-compat.test.ts`                                                                                                                               | stopped at MCP workspace-creation assertion: 1 failed, 10 passed |
-| Port     | `src/server/session.test.ts src/server/session.workspaces.test.ts -t 'reload                                                                                                      | refresh                                                          | subscription         | parent'`                | stopped at workspace child projectKey assertion: 1 failed |
+Source: `npx vitest run src/server/agent/provider-registry-wrap.test.ts src/server/agent/agent-manager.test.ts src/server/agent/providers/acp-agent.test.ts --bail=1 -t 'derived sessions|wrapSessionProvider|idle runtime unloads|Reload retries retained|idle sweep deadlines|close reaches process escalation'` — 7 passed, 357 skipped.
+
+Port commands inside `packages/server` (each uses `npx vitest run` and `--bail=1`):
+
+- `src/server/agent/provider-registry-wrap.test.ts src/server/agent/agent-manager.test.ts -t 'derived sessions|wrapSessionProvider|idle runtime unloads|Reload retries retained|idle sweep deadlines|reload|refresh|idle agents remain'` — 33 passed, 226 skipped.
+- `src/server/agent/providers/acp-agent.test.ts src/server/agent/providers/opencode-server-manager.test.ts src/server/agent/providers/opencode-agent.recovery.test.ts` — 143 passed, 1 skipped.
+- `src/server/agent/agent-prompt.test.ts src/server/agent/providers/omp/cli-runtime.test.ts src/server/agent/providers/pi/cli-runtime.test.ts src/server/agent/providers/jsonl-rpc-process.test.ts` — 76 passed.
+- `src/server/wire-compat.test.ts` — 7 passed.
+- `src/server/session.test.ts -t 'reload|refresh|subscription|parent'` — 27 passed, 144 skipped.
+- `src/server/agent/mcp-server.test.ts src/server/wire-compat.test.ts` — stopped at MCP workspace-creation assertion: 1 failed, 10 passed.
+- `src/server/session.test.ts src/server/session.workspaces.test.ts -t 'reload|refresh|subscription|parent'` — stopped at workspace child projectKey assertion: 1 failed.
 
 The two failed assertions reproduce individually on untouched `8693fba0f`; baseline transcripts are retained. They are not repaired or excluded from their suites. The standalone wire and Session file runs above verify the files the earlier bail prevented from running.
 
