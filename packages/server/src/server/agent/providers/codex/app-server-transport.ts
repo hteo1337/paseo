@@ -175,6 +175,9 @@ function readProviderTurnId(params: unknown): string | undefined {
 export class CodexAppServerClient {
   private readonly stdoutLineReader: { close(): void };
   private activeProviderRequests = 0;
+  get processId(): number | null {
+    return this.child.pid ?? null;
+  }
   private readonly pending = new Map<number, PendingRequest>();
   private readonly requestHandlers = new Map<string, RequestHandler>();
   private notificationHandler: NotificationHandler | null = null;

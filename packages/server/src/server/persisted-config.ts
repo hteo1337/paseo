@@ -379,6 +379,8 @@ export const PersistedConfigSchema = z
         providers: z.preprocess(normalizeAgentProviders, ProviderOverridesSchema).optional(),
         idleRuntimeCleanup: z.boolean().optional(),
         catalogRefreshTimeoutMs: z.number().int().positive().max(2_147_483_647).optional(),
+        /** Minutes before an unused provider runtime returns to persisted state. Zero disables. */
+        idleUnloadMinutes: z.number().int().min(0).max(2_147_483).optional(),
         metadataGeneration: AgentMetadataGenerationSchema.optional(),
         promptSuggestions: AgentPromptSuggestionsSchema.optional(),
         skills: z.object({ selection: AgentSkillSelectionSchema.optional() }).strict().optional(),
