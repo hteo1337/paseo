@@ -36,6 +36,11 @@ import type { ProviderPaseoToolsPolicy } from "@getpaseo/protocol/provider-confi
 import { z } from "zod";
 import type { TerminalManager } from "../../terminal/terminal-manager.js";
 import { isPathInsideRoot, normalizePathForIdentity } from "../../utils/path.js";
+import {
+  reapProcessTree,
+  snapshotProcessTree,
+  type ProcessTreeSnapshot,
+} from "../../utils/process-tree-snapshot.js";
 
 import {
   getAgentStreamEventTurnId,
@@ -336,6 +341,7 @@ export interface ProviderAvailability {
 }
 
 interface AgentManagerRescueTimeouts {
+  idleSessionCloseMs?: number;
   reloadSessionCloseMs?: number;
   interruptSessionMs?: number;
 }
@@ -395,11 +401,55 @@ export interface AgentManagerOptions {
   appendSystemPrompt?: string;
   agentStreamCoalesceWindowMs?: number;
   rescueTimeouts?: AgentManagerRescueTimeouts;
+  processTreeReaper?: typeof reapProcessTree;
   beforeSteerUnavailableFallback?: (input: {
     agentId: string;
     expectedTurnId: string;
   }) => Promise<void>;
   logger: Logger;
+}
+
+interface IdleUnloadOwnerCounts {
+  uses: number;
+  streams: number;
+}
+
+interface IdleUnloadHold {
+  agentId: string | null;
+  kind: keyof IdleUnloadOwnerCounts;
+  ownerId?: string;
+}
+
+interface IdleUnloadOwner {
+  ownerId: string;
+  count: number;
+}
+
+interface IdleUnloadDiagnosticStamp {
+  fingerprint: string;
+  loggedAt: number;
+}
+
+interface IdleUnloadProviderOperands {
+  providerPendingPermissions: number | null;
+  hasLiveTerminals: boolean | null;
+  unavailableOperands: string[];
+}
+
+function resolveRescueTimeouts(
+  timeouts: AgentManagerRescueTimeouts | undefined,
+): Required<AgentManagerRescueTimeouts> {
+  return {
+    idleSessionCloseMs: timeouts?.idleSessionCloseMs ?? 15_000,
+    reloadSessionCloseMs: timeouts?.reloadSessionCloseMs ?? RELOAD_SESSION_CLOSE_TIMEOUT_MS,
+    interruptSessionMs: timeouts?.interruptSessionMs ?? INTERRUPT_SESSION_TIMEOUT_MS,
+  };
+}
+
+function resolveProcessTreeReaper(
+  reaper: AgentManagerOptions["processTreeReaper"],
+): typeof reapProcessTree {
+  return reaper ?? reapProcessTree;
 }
 
 export type ActiveTurnSteerDispatchResult =
@@ -871,6 +921,19 @@ export class AgentManager {
   private readonly backgroundTasks = new Set<Promise<void>>();
   private readonly agentRegistrationTasks = new Set<Promise<void>>();
   private readonly inFlightAgentCloses = new Map<string, Promise<void>>();
+  private readonly idleUnloadCloses = new Set<string>();
+  private readonly residentLastUsedAt = new Map<string, number>();
+  private readonly idleProcessSnapshots = new Map<string, ProcessTreeSnapshot>();
+  private readonly idleReapPending = new Set<string>();
+  private readonly processTreeReaper: typeof reapProcessTree;
+  private readonly activeAgentUses = new Map<string, number>();
+  private readonly clientStreamHolds = new Map<string, number>();
+  private globalClientStreamHolds = 0;
+  private readonly idleUnloadHoldOwners = new Map<
+    string | null,
+    Map<string, IdleUnloadOwnerCounts>
+  >();
+  private readonly idleUnloadDiagnosticStamps = new Map<string, IdleUnloadDiagnosticStamp>();
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
   private readonly runtimeCleanupIdentities = new WeakMap<AgentSession, object>();
   private readonly collectingRuntimes = new Set<string>();
@@ -926,12 +989,8 @@ export class AgentManager {
     this.resolvePaseoToolPolicy = options.resolvePaseoToolPolicy ?? (() => undefined);
     this.appendSystemPrompt = options.appendSystemPrompt ?? "";
     this.logger = options.logger.child({ module: "agent", component: "agent-manager" });
-    this.rescueTimeouts = {
-      reloadSessionCloseMs:
-        options.rescueTimeouts?.reloadSessionCloseMs ?? RELOAD_SESSION_CLOSE_TIMEOUT_MS,
-      interruptSessionMs:
-        options.rescueTimeouts?.interruptSessionMs ?? INTERRUPT_SESSION_TIMEOUT_MS,
-    };
+    this.processTreeReaper = resolveProcessTreeReaper(options.processTreeReaper);
+    this.rescueTimeouts = resolveRescueTimeouts(options.rescueTimeouts);
     this.beforeSteerUnavailableFallback = options.beforeSteerUnavailableFallback;
     this.agentStreamCoalescer = new AgentStreamCoalescer({
       windowMs: options.agentStreamCoalesceWindowMs ?? AGENT_STREAM_COALESCE_DEFAULT_WINDOW_MS,
@@ -1130,6 +1189,7 @@ export class AgentManager {
 
   private touchUpdatedAt(agent: ManagedAgent): Date {
     const nowMs = Date.now();
+    if (agent.lifecycle !== "closed") this.residentLastUsedAt.set(agent.id, nowMs);
     const previousMs = agent.updatedAt.getTime();
     const nextMs = nowMs > previousMs ? nowMs : previousMs + 1;
     const next = new Date(nextMs);
@@ -1405,10 +1465,265 @@ export class AgentManager {
     return agent ? { ...agent } : null;
   }
 
+  /** Hold a resident session while an access is still loading or admitting work. */
+  beginAgentUse(
+    agentId: string,
+    ownerId?: string,
+    { touchActivity = true }: { touchActivity?: boolean } = {},
+  ): () => void {
+    if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
+    this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
+    const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "uses", ownerId });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseOwner();
+      const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
+      if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
+      else this.activeAgentUses.delete(agentId);
+      if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
+    };
+  }
+
+  /** A selective timeline subscription is an active client stream. */
+  holdClientStream(agentId: string, ownerId?: string): () => void {
+    this.clientStreamHolds.set(agentId, (this.clientStreamHolds.get(agentId) ?? 0) + 1);
+    const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "streams", ownerId });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseOwner();
+      const remaining = (this.clientStreamHolds.get(agentId) ?? 1) - 1;
+      if (remaining > 0) this.clientStreamHolds.set(agentId, remaining);
+      else this.clientStreamHolds.delete(agentId);
+    };
+  }
+
+  /** Legacy clients receive every timeline, so any one protects all live runtimes. */
+  holdGlobalClientStream(ownerId?: string): () => void {
+    this.globalClientStreamHolds += 1;
+    const releaseOwner = this.trackIdleUnloadHold({ agentId: null, kind: "streams", ownerId });
+    let released = false;
+    return () => {
+      if (released) return;
+      released = true;
+      releaseOwner();
+      this.globalClientStreamHolds -= 1;
+      const now = Date.now();
+      for (const agentId of this.agents.keys()) this.residentLastUsedAt.set(agentId, now);
+    };
+  }
+
+  private trackIdleUnloadHold({ agentId, kind, ownerId = "unknown" }: IdleUnloadHold): () => void {
+    let owners = this.idleUnloadHoldOwners.get(agentId);
+    if (!owners) {
+      owners = new Map();
+      this.idleUnloadHoldOwners.set(agentId, owners);
+    }
+    let counts = owners.get(ownerId);
+    if (!counts) {
+      counts = { uses: 0, streams: 0 };
+      owners.set(ownerId, counts);
+    }
+    counts[kind] += 1;
+    const ownedCounts = counts;
+    const ownedOwners = owners;
+    return () => {
+      ownedCounts[kind] -= 1;
+      if (ownedCounts.uses === 0 && ownedCounts.streams === 0) ownedOwners.delete(ownerId);
+      if (ownedOwners.size === 0) this.idleUnloadHoldOwners.delete(agentId);
+    };
+  }
+
+  private idleUnloadOwners(
+    agentId: string | null,
+    kind: keyof IdleUnloadOwnerCounts,
+  ): IdleUnloadOwner[] {
+    const result: IdleUnloadOwner[] = [];
+    for (const [ownerId, counts] of this.idleUnloadHoldOwners.get(agentId) ?? []) {
+      if (counts[kind] > 0) result.push({ ownerId, count: counts[kind] });
+    }
+    return result.sort((a, b) => a.ownerId.localeCompare(b.ownerId));
+  }
+
+  private readIdleUnloadProviderOperands(session: AgentSession): IdleUnloadProviderOperands {
+    const result: IdleUnloadProviderOperands = {
+      providerPendingPermissions: null,
+      hasLiveTerminals: null,
+      unavailableOperands: [],
+    };
+    // These accessors read cached runtime state. Diagnostic failures cannot block a sweep.
+    try {
+      result.providerPendingPermissions = session.getPendingPermissions().length;
+    } catch {
+      result.unavailableOperands.push("providerPendingPermissions");
+    }
+    try {
+      result.hasLiveTerminals = session.hasLiveTerminals?.() ?? false;
+    } catch {
+      result.unavailableOperands.push("hasLiveTerminals");
+    }
+    return result;
+  }
+
+  private logIdleUnloadSkips(idleMs: number, now: number): void {
+    const flag = process.env.PASEO_IDLE_UNLOAD_DIAG?.trim().toLowerCase();
+    if (flag === "0" || flag === "false" || flag === "off") return;
+    for (const [agentId, agent] of this.agents) {
+      const residentLastUsedAt = this.residentLastUsedAt.get(agentId) ?? null;
+      const idleDurationMs = now - (residentLastUsedAt ?? now);
+      const runningSubagentIds = this.providerSubagents
+        .list(agentId)
+        .filter((child) => child.status === "running")
+        .map((child) => child.id)
+        .sort();
+      const operands = {
+        agentId,
+        provider: agent.provider,
+        lifecycle: agent.lifecycle,
+        hasPersistence: agent.persistence !== null,
+        pendingPermissions: agent.pendingPermissions.size,
+        ...this.readIdleUnloadProviderOperands(agent.session),
+        clientStreamHolds: this.clientStreamHolds.get(agentId) ?? 0,
+        globalClientStreamHolds: this.globalClientStreamHolds,
+        activeAgentUses: this.activeAgentUses.get(agentId) ?? 0,
+        foregroundMutationTails: this.foregroundMutationTails.has(agentId),
+        autonomousTurnPhases: this.autonomousTurnPhases.has(agentId),
+        hasInFlightRun: this.hasInFlightRun(agentId),
+        runningSubagentIds,
+        runningSubagentCount: runningSubagentIds.length,
+        inFlightPermissionResponses: agent.inFlightPermissionResponses.size,
+        pendingReplacement: agent.pendingReplacement,
+        inFlightAgentClose: this.inFlightAgentCloses.has(agentId),
+        lifecycleMutationTails: this.lifecycleMutationTails.has(agentId),
+        idleReapPending: this.idleReapPending.has(agentId),
+        residentLastUsedAt,
+        idleMs,
+        idleUnloadEnabled: idleMs > 0,
+        idleThresholdMet: idleDurationMs >= idleMs,
+        clientStreamOwners: this.idleUnloadOwners(agentId, "streams"),
+        globalClientStreamOwners: this.idleUnloadOwners(null, "streams"),
+        activeAgentUseOwners: this.idleUnloadOwners(agentId, "uses"),
+      };
+      // Scan time and elapsed duration change every pass; neither is an operand change.
+      const fingerprint = JSON.stringify(operands);
+      const previous = this.idleUnloadDiagnosticStamps.get(agentId);
+      const unchanged = previous?.fingerprint === fingerprint;
+      if (unchanged && now - previous.loggedAt < 10 * 60_000) continue;
+      this.idleUnloadDiagnosticStamps.set(agentId, { fingerprint, loggedAt: now });
+      this.logger.info({ ...operands, scanAt: now, idleDurationMs }, "Idle agent unload skipped");
+    }
+  }
+
+  private canUnloadIdleAgent(agentId: string, agent: LiveManagedAgent): boolean {
+    return (
+      agent.lifecycle === "idle" &&
+      agent.persistence !== null &&
+      !this.hasInFlightRun(agentId) &&
+      !this.autonomousTurnPhases.has(agentId) &&
+      !this.foregroundMutationTails.has(agentId) &&
+      !this.providerSubagents.list(agentId).some((child) => child.status === "running") &&
+      agent.pendingPermissions.size === 0 &&
+      agent.session.getPendingPermissions().length === 0 &&
+      !agent.session.hasLiveTerminals?.() &&
+      agent.inFlightPermissionResponses.size === 0 &&
+      !agent.pendingReplacement &&
+      (this.activeAgentUses.get(agentId) ?? 0) === 0 &&
+      (this.clientStreamHolds.get(agentId) ?? 0) === 0 &&
+      this.globalClientStreamHolds === 0
+    );
+  }
+
+  /** Close only sessions that remained idle through their lifecycle lane. */
+  async unloadIdleAgents(idleMs: number, now = Date.now()): Promise<number> {
+    if (idleMs <= 0) {
+      this.logIdleUnloadSkips(idleMs, now);
+      return 0;
+    }
+    let unloaded = 0;
+    const attempts: Promise<void>[] = [];
+    for (const agentId of this.agents.keys()) {
+      if (this.inFlightAgentCloses.has(agentId)) continue;
+      this.idleUnloadCloses.add(agentId);
+      const close = this.runLifecycleMutation(agentId, async () => {
+        const agent = this.agents.get(agentId);
+        const lastUsedAt = this.residentLastUsedAt.get(agentId) ?? now;
+        const idleDurationMs = now - lastUsedAt;
+        if (!agent || idleDurationMs < idleMs || !this.canUnloadIdleAgent(agentId, agent)) return;
+        const ownedProcesses = this.idleProcessSnapshots.get(agentId) ?? new Map();
+        for (const [pid, started] of await snapshotProcessTree(
+          agent.session.getOwnedProcessIds?.() ?? [],
+        )) {
+          if (!ownedProcesses.has(pid)) ownedProcesses.set(pid, started);
+        }
+        this.idleProcessSnapshots.set(agentId, ownedProcesses);
+        const reapedProcesses = await this.closeAgentRuntime(agentId, undefined, {
+          onBeforeClose: () => {
+            if (!this.canUnloadIdleAgent(agentId, agent))
+              throw new Error("Agent became active during idle unload");
+          },
+        });
+        unloaded += 1;
+        this.logger.info(
+          { agentId, provider: agent.provider, idleDurationMs, reapedProcesses },
+          "Idle agent unloaded",
+        );
+      });
+      this.inFlightAgentCloses.set(agentId, close);
+      // A sweep deadline bounds the observer, not the owned close. Keep the
+      // lifecycle lane and close registration until the actual operation settles.
+      const clearClose = () => {
+        if (this.inFlightAgentCloses.get(agentId) === close)
+          this.inFlightAgentCloses.delete(agentId);
+        this.idleUnloadCloses.delete(agentId);
+      };
+      void close.then(clearClose, clearClose);
+      attempts.push(
+        this.waitWithTimeout({
+          operation: close,
+          timeoutMs: this.rescueTimeouts.idleSessionCloseMs,
+          onLateError: (error) => {
+            this.logger.warn({ err: error, agentId }, "Idle agent unload failed after deadline");
+          },
+        }).then(
+          (result) => {
+            if (result === "timed_out")
+              this.logger.warn(
+                { agentId },
+                "Idle agent unload deadline exceeded; retaining ownership",
+              );
+            return undefined;
+          },
+          (error: unknown) => {
+            if (
+              !(
+                error instanceof Error && error.message === "Agent became active during idle unload"
+              )
+            )
+              this.logger.warn({ err: error, agentId }, "Idle agent unload failed");
+            return undefined;
+          },
+        ),
+      );
+    }
+    await Promise.all(attempts);
+    this.logIdleUnloadSkips(idleMs, now);
+    return unloaded;
+  }
+
   async waitForAgentClose(agentId: string): Promise<void> {
     // Loading during reload must wait for the replacement, not resume another writer.
     await this.lifecycleMutationTails.get(agentId);
     await this.inFlightAgentCloses?.get(agentId)?.catch(() => undefined);
+    if (this.idleReapPending.has(agentId)) {
+      await this.runLifecycleMutation(agentId, async () => {
+        if (this.idleReapPending.has(agentId) && this.agents.has(agentId)) {
+          await this.closeAgentRuntime(agentId);
+        }
+      });
+    }
   }
 
   getTimeline(id: string): AgentTimelineItem[] {
@@ -1961,7 +2276,19 @@ export class AgentManager {
   private async closeReloadedSession(session: AgentSession, agentId: string): Promise<void> {
     let operation = this.reloadedSessionCloses.get(session);
     if (!operation) {
-      operation = session.close();
+      operation = (async () => {
+        const idleSnapshot = this.idleProcessSnapshots.get(agentId);
+        if (idleSnapshot) this.refusedProviderSessions.add(session);
+        await session.close();
+        if (idleSnapshot) {
+          await this.processTreeReaper(idleSnapshot);
+          // Clear only the retained tree belonging to this runtime, before resume.
+          if (this.agents.get(agentId)?.session === session) {
+            this.idleProcessSnapshots.delete(agentId);
+            this.idleReapPending.delete(agentId);
+          }
+        }
+      })();
       this.reloadedSessionCloses.set(session, operation);
       // Keep pending closes across request timeouts; a retry must await the same release.
       void operation.catch(() => this.reloadedSessionCloses.delete(session));
@@ -2082,9 +2409,9 @@ export class AgentManager {
           // releases this barrier, so the waiting prompt keeps the existing runtime.
           this.collectingRuntimes.add(agent.id);
           try {
-            return await this.runLifecycleMutation(agent.id, () =>
+            return (await this.runLifecycleMutation(agent.id, () =>
               this.closeAgentRuntime(agent.id, () => isEligible() && revalidate()),
-            );
+            )) !== false;
           } finally {
             this.collectingRuntimes.delete(agent.id);
           }
@@ -2113,6 +2440,26 @@ export class AgentManager {
   closeAgent(agentId: string): Promise<void> {
     const existing = this.inFlightAgentCloses.get(agentId);
     if (existing) {
+      if (this.idleUnloadCloses.has(agentId)) {
+        // The sweep may have skipped this agent. An explicit close must still happen.
+        const followup = existing
+          .catch(() => undefined)
+          .then(() =>
+            this.runLifecycleMutation(agentId, async () => {
+              if (this.agents.has(agentId)) await this.closeAgentRuntime(agentId);
+            }),
+          );
+        this.inFlightAgentCloses.set(agentId, followup);
+        void followup.then(
+          () =>
+            this.inFlightAgentCloses.get(agentId) === followup &&
+            this.inFlightAgentCloses.delete(agentId),
+          () =>
+            this.inFlightAgentCloses.get(agentId) === followup &&
+            this.inFlightAgentCloses.delete(agentId),
+        );
+        return followup;
+      }
       return existing;
     }
 
@@ -2130,7 +2477,7 @@ export class AgentManager {
     return close;
   }
 
-  private async closeAgentRuntime(agentId: string, canClose?: () => boolean, options?: { onBeforeClose?: () => void }): Promise<boolean> {
+  private async closeAgentRuntime(agentId: string, canClose?: () => boolean, options?: { onBeforeClose?: () => void }): Promise<number | false> {
     const agent = this.requireAgent(agentId);
     this.logger.trace(
       {
@@ -2151,9 +2498,29 @@ export class AgentManager {
     // Runs synchronously, with no await between it and session.close(), so a
     // requireIdle recheck here cannot race a turn that starts during the drain.
     options?.onBeforeClose?.();
-    // Retain ownership until shutdown succeeds. A failed close may still own a
-    // native writer, so publishing a resumable closed snapshot would orphan it.
-    await agent.session.close();
+    const idleSnapshot = this.idleProcessSnapshots.get(agentId);
+    if (idleSnapshot) {
+      // Provider-owned cleanup may fail inside close(). Block access before it
+      // starts and retry the close on the lifecycle lane before any resume.
+      this.idleReapPending.add(agentId);
+      this.refusedProviderSessions.add(agent.session);
+    }
+    let reapedProcesses: number;
+    try {
+      // Retain ownership until shutdown succeeds. A failed close may still own
+      // a native writer, so publishing a resumable snapshot would orphan it.
+      await agent.session.close();
+      reapedProcesses =
+        (idleSnapshot ? await this.processTreeReaper(idleSnapshot) : 0) +
+        (agent.session.getReapedProcessCount?.() ?? 0);
+    } catch (error) {
+      agent.lastError = `Provider process cleanup incomplete: ${error instanceof Error ? error.message : String(error)}`;
+      agent.lifecycle = "error";
+      this.emitState(agent);
+      throw error;
+    }
+    this.idleProcessSnapshots.delete(agentId);
+    this.idleReapPending.delete(agentId);
     this.cancelRunningProviderSubagents(agentId);
     const closedAgent = this.prepareAgentForClosure(agent, "agent closed");
 
@@ -2177,7 +2544,7 @@ export class AgentManager {
     if (persistError !== undefined) {
       throw persistError;
     }
-    return true;
+    return reapedProcesses;
   }
 
   private cancelRunningProviderSubagents(parentAgentId: string): void {
@@ -2224,9 +2591,11 @@ export class AgentManager {
         { archivedAt, updatedAt: archivedAt },
       );
       await this.closeAgentRuntime(agentId, undefined, {
-        onBeforeClose: options?.requireIdle ? () => {
-          if (this.hasInFlightRun(agentId)) throw new AgentBusyDuringArchiveError(agentId);
-        } : undefined,
+        onBeforeClose: options?.requireIdle
+          ? () => {
+              if (this.hasInFlightRun(agentId)) throw new AgentBusyDuringArchiveError(agentId);
+            }
+          : undefined,
       });
       await this.deleteAgentState(agentId);
       this.retireInternalAgent({ record, lastMessage });
@@ -4458,6 +4827,7 @@ export class AgentManager {
       this.assertAcceptingAgentRegistrations();
       this.assertArchiveAdmission(resolvedAgentId, managed.workspaceId, managed.cwd);
       this.agents.set(resolvedAgentId, managed);
+      this.residentLastUsedAt.set(resolvedAgentId, Date.now());
       registered = true;
       // Initialize previousStatus to track transitions
       this.previousStatuses.set(resolvedAgentId, managed.lifecycle);
@@ -4707,6 +5077,8 @@ export class AgentManager {
     this.closeAutonomousTurnPhase(agent.id);
     this.refusedAutonomousTurns.delete(agent.id);
     this.agents.delete(agent.id);
+    this.residentLastUsedAt.delete(agent.id);
+    this.idleUnloadDiagnosticStamps.delete(agent.id);
     this.previousStatuses.delete(agent.id);
     if (agent.unsubscribeSession) {
       agent.unsubscribeSession();
