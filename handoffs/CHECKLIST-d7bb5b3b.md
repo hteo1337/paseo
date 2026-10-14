@@ -37,8 +37,10 @@ Repeat refresh evidence: 826434dfd committed/pushed and confirmed via git ls-rem
 - [x] OpenCode close caps session.abort at two seconds and still awaits release/escalation; one existing-suite regression proves the stalled RPC reaches retained release.
 - [x] Fix and test carried to v0.11.2; affected OpenCode file(s) run and typecheck:server run once with recorded results.
 - [x] v0.11/0061 regenerated from source; prior payloads preserved and resulting payload matches corrected port.
-- [ ] All three branches pushed; STATUS and Linear record commits, evidence and same-reviewer confirmation next; no merge/install.
+- [x] All three branches pushed; STATUS and Linear record commits, evidence and same-reviewer confirmation next; no merge/install.
 
 OpenCode evidence: new real-HTTP stalled-abort test failed unchanged (1 failed/5 skipped, release never reached), source recovery file 6/6 passed, port recovery file 6/6 passed; actual root typecheck:server once exit 0, scoped lint both exit 0. Release remains pending until the injected process terminator settles.
 
 Patch evidence: regenerated export d3e4a1673; 0061 SHA256 2eb0ef379ed6070e30350729b8137495bfffac85334ea801c300487ffa4e198f; git am -3 on pinned 0060 prefix passed and resulting tree equals exported source; all 33 payload files match the corrected port, prior 57 payloads unchanged.
+
+OpenCode delivery: source dd3878c1e, port fb342d893 and patches 37cc553 pushed and exact remote refs inspected, plus immutable corrected export tag. Combined port/tag push was rejected without reason; separate pushes succeeded. Linear comment 917b6264-ceec-4a23-ae5f-5c7b6452042f records all heads and same Sol confirmation next; PR descriptions updated.
