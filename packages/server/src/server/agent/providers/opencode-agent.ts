@@ -544,10 +544,13 @@ async function abortOpenCodeSession(params: {
   const { client, sessionId, directory, logger } = params;
 
   try {
-    const response = await client.session.abort({
-      sessionID: sessionId,
-      directory,
-    });
+    // Abort acknowledgement must not prevent the owned server's release and
+    // escalation. close() still awaits that release before it can settle.
+    const response = await withTimeout(
+      client.session.abort({ sessionID: sessionId, directory }),
+      2_000,
+      "OpenCode session.abort timed out during close",
+    );
     if (response.error && !isOpenCodeNotFoundError(response.error)) {
       logger.warn(
         {

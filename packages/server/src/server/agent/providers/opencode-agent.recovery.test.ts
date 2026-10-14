@@ -12,6 +12,7 @@ import {
   type OpenCodeEventConsumerTiming,
 } from "./opencode/event-consumer.js";
 import { OpenCodeServerManager } from "./opencode/server-manager.js";
+import type { ProcessTerminator } from "../../../utils/tree-kill.js";
 
 test("dispatches ascending OpenCode message identifiers through the public provider path", async () => {
   const upstream = await createRecoveryUpstream();
@@ -268,6 +269,57 @@ test("adds the session's MCP servers to the new OpenCode server after the old on
   await current.close();
 });
 
+test("close caps a stalled abort and waits for owned server termination to settle", async () => {
+  const upstream = await createRecoveryUpstream();
+  upstream.holdAborts();
+  let resolveTerminationStarted!: () => void;
+  const terminationStarted = new Promise<void>((resolve) => {
+    resolveTerminationStarted = resolve;
+  });
+  let resolveTermination!: () => void;
+  const allowTermination = new Promise<void>((resolve) => {
+    resolveTermination = resolve;
+  });
+  let terminations = 0;
+  const fixture = await createPublicRecoverySession(upstream, new RecoveryTiming(), async () => {
+    terminations += 1;
+    resolveTerminationStarted();
+    await allowTermination;
+    return "terminated";
+  });
+  let closeSettled = false;
+  let deadline: ReturnType<typeof setTimeout> | undefined;
+  const closing = fixture.session.close().then(() => {
+    closeSettled = true;
+    return undefined;
+  });
+  try {
+    await eventually(() => expect(upstream.abortCount()).toBe(1));
+    await Promise.race([
+      terminationStarted,
+      new Promise<never>((_, reject) => {
+        deadline = setTimeout(
+          () => reject(new Error("OpenCode close stalled before server release")),
+          5_000,
+        );
+      }),
+    ]);
+    expect(terminations).toBe(1);
+    expect(closeSettled).toBe(false);
+    expect(upstream.abortCount()).toBe(1);
+    resolveTermination();
+    await closing;
+    expect(closeSettled).toBe(true);
+  } finally {
+    if (deadline) clearTimeout(deadline);
+    upstream.settleAborts();
+    resolveTermination();
+    await closing;
+    await fixture.manager.shutdown();
+    await upstream.close();
+  }
+});
+
 class RecoveryTiming implements OpenCodeEventConsumerTiming {
   private resolveWait: (() => void) | null = null;
   arm(): () => void {
@@ -291,6 +343,7 @@ class RecoveryTiming implements OpenCodeEventConsumerTiming {
 async function createPublicRecoverySession(
   upstream: Awaited<ReturnType<typeof createRecoveryUpstream>>,
   timing: OpenCodeEventConsumerTiming,
+  terminateProcess?: ProcessTerminator,
 ) {
   let serverProcess: RecoveryServerProcess | null = null;
   const manager = new OpenCodeServerManager({
@@ -302,9 +355,10 @@ async function createPublicRecoverySession(
       serverProcess = new RecoveryServerProcess();
       return serverProcess as unknown as ChildProcess;
     },
-    terminateProcess: async () => {
-      serverProcess?.exit();
-      return "terminated";
+    terminateProcess: async (child, options) => {
+      const result = terminateProcess ? await terminateProcess(child, options) : "terminated";
+      if (result !== "kill-timeout") serverProcess?.exit();
+      return result;
     },
     createEventSource: (options) => new OpenCodeEventConsumer({ ...options, timing }),
   });
@@ -343,6 +397,8 @@ async function createRecoveryUpstream() {
   let messages: unknown[] = [];
   let messageReadCount = 0;
   let status: "busy" | "idle" = "idle";
+  let holdAborts = false;
+  const abortResponses: ServerResponse[] = [];
   const server = createServer(async (request, response) => {
     const pathname = new URL(request.url ?? "/", "http://127.0.0.1").pathname;
     if (request.url?.startsWith("/global/event")) {
@@ -350,6 +406,11 @@ async function createRecoveryUpstream() {
       response.flushHeaders();
       streams.push(response);
       return;
+    }
+    if (request.method === "POST" && pathname.endsWith("/abort")) {
+      abortResponses.push(response);
+      if (holdAborts) return;
+      return json(response, true);
     }
     if (request.method === "POST" && pathname === "/session") {
       return json(response, { id: "session-1", directory: "/workspace" });
@@ -388,6 +449,16 @@ async function createRecoveryUpstream() {
     dispatched: async (count = 1) => {
       await eventually(() => expect(dispatchIds).toHaveLength(count));
       return [...dispatchIds];
+    },
+    abortCount: () => abortResponses.length,
+    holdAborts() {
+      holdAborts = true;
+    },
+    settleAborts() {
+      holdAborts = false;
+      for (const response of abortResponses) {
+        if (!response.writableEnded) json(response, true);
+      }
     },
     messageReads: () => messageReadCount,
     mcpAdds: () => [...mcpAddNames],
