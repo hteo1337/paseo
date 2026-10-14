@@ -554,10 +554,13 @@ async function abortOpenCodeSession(params: {
   const { client, sessionId, directory, logger } = params;
 
   try {
-    const response = await client.session.abort({
-      sessionID: sessionId,
-      directory,
-    });
+    // Abort acknowledgement must not prevent the owned server's release and
+    // escalation. close() still awaits that release before it can settle.
+    const response = await withTimeout(
+      client.session.abort({ sessionID: sessionId, directory }),
+      2_000,
+      "OpenCode session.abort timed out during close",
+    );
     if (response.error && !isOpenCodeNotFoundError(response.error)) {
       logger.warn(
         {
@@ -1510,6 +1513,8 @@ export class OpenCodeAgentClient implements AgentClient {
         unbindBridge,
         connectServer,
         openCodeOpenOptionsPatch({ given: config, opened: openCodeConfig }),
+        connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1566,6 +1571,8 @@ export class OpenCodeAgentClient implements AgentClient {
         unbindBridge,
         connectServer,
         openCodeOpenOptionsPatch({ given: config, opened: openCodeConfig }),
+        connection.pid,
+        connection.getReapedProcessCount,
       );
     } catch (error) {
       await connection.release();
@@ -1607,7 +1614,9 @@ export class OpenCodeAgentClient implements AgentClient {
       events: acquisition.events,
       environment: acquisition.environment,
       url: acquisition.server.url,
+      pid: acquisition.server.pid,
       release: acquisition.release,
+      getReapedProcessCount: acquisition.getReapedProcessCount,
     };
   }
 
@@ -3374,7 +3383,9 @@ interface OpenCodeServerConnection {
   client: OpencodeClient;
   events: OpenCodeEventSource;
   url: string;
+  pid?: number;
   release: () => Promise<void>;
+  getReapedProcessCount?: () => number;
 }
 
 class OpenCodeAgentSession implements AgentSession {
@@ -3470,6 +3481,8 @@ class OpenCodeAgentSession implements AgentSession {
     releaseBridge?: () => void,
     connectServer?: () => Promise<OpenCodeServerConnection>,
     openOptionsPatch: Record<string, unknown> = {},
+    serverPid?: number,
+    getReapedProcessCount?: () => number,
   ) {
     this.config = config;
     this.openOptionsPatch = openOptionsPatch;
@@ -3479,6 +3492,8 @@ class OpenCodeAgentSession implements AgentSession {
       url: serverUrl ?? "",
       release: releaseServer,
       environment: this.harnessEnvironment,
+      pid: serverPid,
+      getReapedProcessCount,
     };
     this.connectServer = connectServer ?? null;
     this.sessionId = sessionId;
@@ -5135,6 +5150,16 @@ class OpenCodeAgentSession implements AgentSession {
       this.releaseBridge = null;
       await this.server.release();
     }
+  }
+
+  getOwnedProcessIds(): number[] {
+    // The server may be shared by other agents. Its reference-counted owner
+    // performs tree cleanup when the last acquisition is released.
+    return [];
+  }
+
+  getReapedProcessCount(): number {
+    return this.server.getReapedProcessCount?.() ?? 0;
   }
 
   private async deleteProviderSessionIfEphemeral(): Promise<void> {
