@@ -656,6 +656,11 @@
           "exclusiveMinimum": 0,
           "maximum": 2147483647
         },
+        "idleUnloadMinutes": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 2147483
+        },
         "metadataGeneration": {
           "type": "object",
           "properties": {

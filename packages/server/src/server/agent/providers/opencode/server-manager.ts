@@ -9,6 +9,11 @@ import type { Logger } from "pino";
 import { findExecutable } from "../../../../executable-resolution/executable-resolution.js";
 import { spawnProcess, type SpawnProcessOptions } from "../../../../utils/spawn.js";
 import { terminateWithTreeKill, type ProcessTerminator } from "../../../../utils/tree-kill.js";
+import {
+  reapProcessTree,
+  snapshotProcessTree,
+  type ProcessTreeSnapshot,
+} from "../../../../utils/process-tree-snapshot.js";
 import type { ManagedProcessRegistry } from "../../../managed-processes/managed-processes.js";
 import {
   createProviderEnv,
@@ -31,9 +36,10 @@ const OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS = 1_000;
 
 export interface OpenCodeServerAcquisition {
   environment: Record<string, string>;
-  server: { port: number; url: string };
+  server: { port: number; url: string; pid?: number };
   events: OpenCodeEventSource;
   release: () => Promise<void>;
+  getReapedProcessCount?: () => number;
 }
 
 export interface OpenCodeServerManagerLike {
@@ -51,6 +57,8 @@ export interface OpenCodeServerGeneration {
   url: string;
   refCount: number;
   retired: boolean;
+  processSnapshot?: ProcessTreeSnapshot;
+  reapedProcessCount?: number;
   ready: Promise<void>;
   events: OpenCodeEventConsumer;
   managedProcessId?: string;
@@ -71,6 +79,8 @@ export interface OpenCodeServerManagerOptions {
   runtimeSettings?: ProviderRuntimeSettings;
   managedProcesses?: ManagedProcessRegistry;
   terminateProcess?: ProcessTerminator;
+  snapshotProcessTree?: typeof snapshotProcessTree;
+  reapProcessTree?: typeof reapProcessTree;
   portAllocator?: OpenCodePortAllocator;
   resolveCommandPrefix?: OpenCodeCommandPrefixResolver;
   resolveHomeDir?: () => string;
@@ -92,6 +102,8 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
   private readonly runtimeSettingsKey: string;
   private readonly managedProcesses?: ManagedProcessRegistry;
   private readonly terminateProcess: ProcessTerminator;
+  private readonly snapshotProcessTree: typeof snapshotProcessTree;
+  private readonly reapProcessTree: typeof reapProcessTree;
   private readonly portAllocator: OpenCodePortAllocator;
   private readonly resolveCommandPrefix: OpenCodeCommandPrefixResolver;
   private readonly resolveHomeDir: () => string;
@@ -101,6 +113,8 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
 
   constructor(options: OpenCodeServerManagerOptions) {
     this.logger = options.logger;
+    this.snapshotProcessTree = options.snapshotProcessTree ?? snapshotProcessTree;
+    this.reapProcessTree = options.reapProcessTree ?? reapProcessTree;
     this.baseEnv = options.baseEnv;
     this.runtimeSettings = options.runtimeSettings;
     this.runtimeSettingsKey = JSON.stringify(this.runtimeSettings ?? {});
@@ -211,14 +225,18 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
     server.refCount += 1;
     let releasePromise: Promise<void> | null = null;
     return {
-      server: { port: server.port, url: server.url },
+      server: { port: server.port, url: server.url, pid: server.process.pid },
       events: server.events,
       environment: server.environment,
+      getReapedProcessCount: () => server.reapedProcessCount ?? 0,
       release: async () => {
         if (releasePromise) {
           return releasePromise;
         }
-        releasePromise = this.releaseServer(server);
+        releasePromise = this.releaseServer(server).catch((error: unknown) => {
+          releasePromise = null;
+          throw error;
+        });
         return releasePromise;
       },
     };
@@ -240,7 +258,12 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
 
     this.retiredServers.delete(server);
     this.logger.info(generationLogContext(server), "OpenCode server generation released");
-    await this.killServer(server);
+    try {
+      await this.killServer(server);
+    } catch (error) {
+      this.retiredServers.add(server);
+      throw error;
+    }
   }
 
   private async getNewServer(): Promise<OpenCodeServerGeneration> {
@@ -495,9 +518,21 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
     for (const server of servers) {
       this.logger.info(generationLogContext(server), "OpenCode server generation stopping");
     }
-    await Promise.all(servers.map((server) => this.killServer(server)));
-    this.currentServer = null;
-    this.retiredServers.clear();
+    const failures: unknown[] = [];
+    for (const server of servers) {
+      try {
+        await this.killServer(server);
+        if (this.currentServer === server) this.currentServer = null;
+        this.retiredServers.delete(server);
+      } catch (error) {
+        // Keep failed generations reachable so shutdown can retry their trees.
+        if (this.currentServer !== server) this.retiredServers.add(server);
+        failures.push(error);
+      }
+    }
+    if (failures.length > 0) {
+      throw new AggregateError(failures, "OpenCode server shutdown incomplete");
+    }
   }
 
   private async cleanupRetiredServers(): Promise<void> {
@@ -505,36 +540,44 @@ export class OpenCodeServerManager implements OpenCodeServerManagerLike {
     for (const server of Array.from(this.retiredServers)) {
       if (server.refCount === 0) {
         this.retiredServers.delete(server);
-        cleanup.push(this.killServer(server));
+        cleanup.push(
+          this.killServer(server).catch((error: unknown) => {
+            this.retiredServers.add(server);
+            throw error;
+          }),
+        );
       }
     }
     await Promise.all(cleanup);
   }
 
   private async killServer(server: OpenCodeServerGeneration): Promise<void> {
+    const ownedProcesses = server.processSnapshot ?? new Map();
+    const rootAlive = server.process.exitCode === null && server.process.signalCode === null;
+    for (const [pid, started] of await this.snapshotProcessTree(
+      rootAlive && server.process.pid ? [server.process.pid] : [],
+    )) {
+      if (!ownedProcesses.has(pid)) ownedProcesses.set(pid, started);
+    }
+    server.processSnapshot = ownedProcesses;
     await server.events.close();
-    if (
-      (server.process.exitCode !== null && server.process.exitCode !== undefined) ||
-      (server.process.signalCode !== null && server.process.signalCode !== undefined)
-    ) {
-      return;
+    if (server.process.exitCode === null && server.process.signalCode === null) {
+      const result = await this.terminateProcess(server.process, {
+        gracefulTimeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
+        forceTimeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
+        onForceSignal: () => {
+          this.logger.warn(
+            { timeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS },
+            "OpenCode server did not exit after SIGTERM; sending SIGKILL",
+          );
+        },
+      });
+      if (result === "kill-timeout") {
+        throw new Error("OpenCode server did not report exit after SIGKILL");
+      }
     }
-    const result = await this.terminateProcess(server.process, {
-      gracefulTimeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS,
-      forceTimeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS,
-      onForceSignal: () => {
-        this.logger.warn(
-          { timeoutMs: OPENCODE_SERVER_GRACEFUL_SHUTDOWN_TIMEOUT_MS },
-          "OpenCode server did not exit after SIGTERM; sending SIGKILL",
-        );
-      },
-    });
-    if (result === "kill-timeout") {
-      this.logger.warn(
-        { timeoutMs: OPENCODE_SERVER_FORCE_SHUTDOWN_TIMEOUT_MS },
-        "OpenCode server did not report exit after SIGKILL",
-      );
-    }
+    server.reapedProcessCount = await this.reapProcessTree(ownedProcesses);
+    server.processSnapshot = undefined;
     if (server.managedProcessId) {
       await this.removeManagedProcessId(server.managedProcessId);
       server.managedProcessId = undefined;
