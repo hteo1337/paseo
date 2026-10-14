@@ -27,5 +27,7 @@ Status refresh evidence: f1aba77fb committed and pushed; git ls-remote confirmed
 ## Repeated requested status refresh
 
 - [x] Current source head e43462bc7 and port head b663c5c4e match their published refs; working tree is clean and operator notes are empty.
-- [ ] Refresh done / next / verify / blockers and commit the formatted handoff.
-- [ ] Push and verify the new source head; update Linear delivery record.
+- [x] Refresh done / next / verify / blockers and commit the formatted handoff.
+- [x] Push and verify the new source head; update Linear delivery record.
+
+Repeat refresh evidence: 826434dfd committed/pushed and confirmed via git ls-remote; new Linear comment 24d6e72b-5959-4f84-af9d-893f3d9096f6 records delivery. Formatter and diff check passed.
