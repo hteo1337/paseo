@@ -398,6 +398,8 @@ function createSessionForTest(options: SessionForTestOptions = {}): Session {
       listAgents: vi.fn(() => []),
       listProviderSubagentActivity: vi.fn(() => []),
       subscribe: vi.fn(() => () => {}),
+      holdClientStream: vi.fn(() => () => {}),
+      holdGlobalClientStream: vi.fn(() => () => {}),
       ...options.agentManager,
     }),
     agentStorage: asAgentStorage({
