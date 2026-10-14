@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/agent/providers/opencode-agent.recovery.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-idle-unload-v0.11.2/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  19:05:43
+   Duration  5.74s (transform 165ms, setup 18ms, import 229ms, tests 5.43s, environment 0ms)
+

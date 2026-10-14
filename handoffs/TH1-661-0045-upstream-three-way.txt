@@ -1,0 +1,53 @@
+Command: git merge-tree --write-tree --messages --merge-base=fork/release/v0.10.3-patches v0.11.2 48b07f6
+Exit: 1
+6cfa5fe9e253542cd22b22b3b10a09eb9058d8b3
+100644 53ebf675e930e65e48103f0727a8424fa5f22d11 1	packages/server/src/server/agent/agent-manager.ts
+100644 9e809a457f570bb790b3d03f2569311c766edf59 2	packages/server/src/server/agent/agent-manager.ts
+100644 be55971df2f97a80eda842c9079bdf6f052a51fa 3	packages/server/src/server/agent/agent-manager.ts
+100644 1f7865c3e8c0292de662204b147d7ba1d15f71dd 1	packages/server/src/server/agent/agent-prompt.ts
+100644 0bcd46636af25836a27bfa88ef06a3c51c4ca808 2	packages/server/src/server/agent/agent-prompt.ts
+100644 b4166aa9b0e579ce46c20c58eaa2c9df3b22bbf1 3	packages/server/src/server/agent/agent-prompt.ts
+100644 dc8001e3ec566bbc90480bf515e65fa7c1945730 1	packages/server/src/server/agent/providers/omp/runtime.ts
+100644 691e907139c39f32ba05ed86952bd48c511ae607 2	packages/server/src/server/agent/providers/omp/runtime.ts
+100644 5cd8ea27db371774287fccf874a05b52c40b4a88 3	packages/server/src/server/agent/providers/omp/runtime.ts
+100644 80c93411ae6b54d329e6588c1ca246cffc05ff97 1	packages/server/src/server/agent/providers/opencode-agent.ts
+100644 7e49bc50d3184d83b6c797c3ea1ec90be398c149 2	packages/server/src/server/agent/providers/opencode-agent.ts
+100644 0053f931a7e3fcb52cf6668265baecf376d5f719 3	packages/server/src/server/agent/providers/opencode-agent.ts
+100644 f1cd43030e1641c496d8b5852295ee57cfb12257 1	packages/server/src/server/agent/providers/opencode/server-manager.ts
+100644 9ff5dc6c961a1db2745b9c01bbfed3703e610fad 2	packages/server/src/server/agent/providers/opencode/server-manager.ts
+100644 c49840aa407a9fbd94a29c3138a814ce2be0fdd3 3	packages/server/src/server/agent/providers/opencode/server-manager.ts
+100644 3582a902bdab5ee989bd3cd6ed5afe1a3570644b 1	packages/server/src/server/agent/providers/pi/runtime.ts
+100644 1064952e6dd3a9665cd475c224569470ed367e52 2	packages/server/src/server/agent/providers/pi/runtime.ts
+100644 5d8e9c2f395a1b68f5e4bc4e52184468c9810378 3	packages/server/src/server/agent/providers/pi/runtime.ts
+
+Auto-merging docs/agent-lifecycle.md
+Auto-merging packages/server/src/server/agent/agent-manager.test.ts
+Auto-merging packages/server/src/server/agent/agent-manager.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/agent-manager.ts
+Auto-merging packages/server/src/server/agent/agent-prompt.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/agent-prompt.ts
+Auto-merging packages/server/src/server/agent/agent-sdk-types.ts
+Auto-merging packages/server/src/server/agent/mcp-server.test.ts
+Auto-merging packages/server/src/server/agent/providers/acp-agent.test.ts
+Auto-merging packages/server/src/server/agent/providers/acp-agent.ts
+Auto-merging packages/server/src/server/agent/providers/claude/agent.ts
+Auto-merging packages/server/src/server/agent/providers/codex-app-server-agent.ts
+Auto-merging packages/server/src/server/agent/providers/jsonl-rpc-process.ts
+Auto-merging packages/server/src/server/agent/providers/omp/agent.ts
+Auto-merging packages/server/src/server/agent/providers/omp/cli-runtime.ts
+Auto-merging packages/server/src/server/agent/providers/omp/runtime.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/providers/omp/runtime.ts
+Auto-merging packages/server/src/server/agent/providers/opencode-agent.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/providers/opencode-agent.ts
+Auto-merging packages/server/src/server/agent/providers/opencode-server-manager.test.ts
+Auto-merging packages/server/src/server/agent/providers/opencode/server-manager.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/providers/opencode/server-manager.ts
+Auto-merging packages/server/src/server/agent/providers/pi/agent.ts
+Auto-merging packages/server/src/server/agent/providers/pi/cli-runtime.ts
+Auto-merging packages/server/src/server/agent/providers/pi/runtime.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/providers/pi/runtime.ts
+Auto-merging packages/server/src/server/bootstrap.ts
+Auto-merging packages/server/src/server/persisted-config.ts
+Auto-merging packages/server/src/server/session.test.ts
+Auto-merging packages/server/src/server/session.ts
+Auto-merging packages/server/src/server/session.workspaces.test.ts

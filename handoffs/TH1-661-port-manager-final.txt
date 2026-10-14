@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/agent/provider-registry-wrap.test.ts src/server/agent/agent-manager.test.ts --bail=1 -t derived sessions|wrapSessionProvider|idle runtime unloads|Reload retries retained|idle sweep deadlines|reload|refresh|idle agents remain
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-idle-unload-v0.11.2/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  33 passed | 226 skipped (259)
+   Start at  00:06:17
+   Duration  1.74s (transform 846ms, setup 24ms, import 1.20s, tests 384ms, environment 0ms)
+

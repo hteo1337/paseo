@@ -1,0 +1,24 @@
+Command: npm run typecheck
+Exit: 0
+npm notice run paseo@0.10.3 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/expo-two-way-audio@0.10.3 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.10.3 typecheck
+npm notice run @getpaseo/plugin@0.10.3 typecheck
+npm notice run tsgo --noEmit && tsgo -p tsconfig.examples.json --noEmit
+npm notice run @getpaseo/protocol@0.10.3 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.10.3 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts from codegen/ws-outbound.compile.ts (WSOutboundMessageSchema)
+npm notice run @getpaseo/protocol@0.10.3 typecheck
+npm notice run @getpaseo/client@0.10.3 typecheck
+npm notice run @getpaseo/server@0.10.3 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.10.3 typecheck
+npm notice run @getpaseo/relay@0.10.3 typecheck
+npm notice run @getpaseo/website@0.10.3 typecheck
+npm notice run @getpaseo/desktop@0.10.3 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.10.3 typecheck

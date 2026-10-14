@@ -1,0 +1,33 @@
+npm notice run paseo@0.10.3 npx
+npm notice run 'vitest' run src/server/agent/agent-manager.test.ts --bail=1 --testTimeout=1000 -t idle sweep deadlines
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/feat-idle-agent-unload/packages/server
+
+stdout | src/server/agent/agent-manager.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  suppress all logs with { quiet: true }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+
+ ❯ src/server/agent/agent-manager.test.ts (253 tests | 1 failed | 252 skipped) 1016ms
+   × idle sweep deadlines preserve a stalled close while other agents and future sweeps finish 1012ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/agent-manager.test.ts > idle sweep deadlines preserve a stalled close while other agents and future sweeps finish
+Error: Test timed out in 1000ms.
+If this is a long-running test, pass a timeout value as the last argument or configure it globally with "testTimeout".
+ ❯ src/server/agent/agent-manager.test.ts:9935:1
+    9933| });
+    9934|
+    9935| test("idle sweep deadlines preserve a stalled close while other agents…
+       | ^
+    9936|   const workdir = mkdtempSync(join(tmpdir(), "agent-idle-deadline-"));
+    9937|   const storage = new AgentStorage(join(workdir, "agents"), logger);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 252 skipped (253)
+   Start at  00:00:21
+   Duration  1.55s (transform 335ms, setup 18ms, import 454ms, tests 1.02s, environment 0ms)
+

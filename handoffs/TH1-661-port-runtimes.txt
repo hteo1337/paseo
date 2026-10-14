@@ -1,0 +1,11 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/agent/agent-prompt.test.ts src/server/agent/providers/omp/cli-runtime.test.ts src/server/agent/providers/pi/cli-runtime.test.ts src/server/agent/providers/jsonl-rpc-process.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-idle-unload-v0.11.2/packages/server
+
+
+ Test Files  4 passed (4)
+      Tests  76 passed (76)
+   Start at  00:04:50
+   Duration  2.00s (transform 294ms, setup 42ms, import 478ms, tests 1.20s, environment 0ms)
+

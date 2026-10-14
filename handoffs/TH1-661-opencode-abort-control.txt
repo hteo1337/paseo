@@ -1,0 +1,32 @@
+npm notice run paseo@0.10.3 npx
+npm notice run 'vitest' run src/server/agent/providers/opencode-agent.recovery.test.ts --bail=1 -t close caps a stalled abort
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/feat-idle-agent-unload/packages/server
+
+stdout | src/server/agent/providers/opencode-agent.recovery.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛡️ auth for agents: https://vestauth.com
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🛡️ auth for agents: https://vestauth.com
+
+ ❯ src/server/agent/providers/opencode-agent.recovery.test.ts (6 tests | 1 failed | 5 skipped) 5081ms
+   × close caps a stalled abort and waits for owned server termination to settle 5079ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/providers/opencode-agent.recovery.test.ts > close caps a stalled abort and waits for owned server termination to settle
+Error: OpenCode close stalled before server release
+ ❯ Timeout.<anonymous> src/server/agent/providers/opencode-agent.recovery.test.ts:294:44
+    292|       terminationStarted,
+    293|       new Promise<never>((_, reject) => {
+    294|         deadline = setTimeout(() => reject(new Error("OpenCode close s…
+       |                                            ^
+    295|       }),
+    296|     ]);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 5 skipped (6)
+   Start at  19:03:47
+   Duration  5.39s (transform 150ms, setup 20ms, import 219ms, tests 5.08s, environment 0ms)
+

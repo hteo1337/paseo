@@ -1,0 +1,181 @@
+Target: fork/release/v0.11.2-patches
+Target commit: 96656bc9aa0964f970a36c2b980ae51d7cdb4779
+Directory: /var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/th1-661-check-jtjdj33i
+Command: git apply --check --verbose /tmp/th1-661-0045.patch
+Exit: 1
+Checking patch docs/agent-lifecycle.md...
+Checking patch packages/server/src/server/agent/agent-loading.ts...
+Checking patch packages/server/src/server/agent/agent-manager.test.ts...
+Hunk #2 succeeded at 9765 (offset 7 lines).
+Checking patch packages/server/src/server/agent/agent-manager.ts...
+Hunk #2 succeeded at 378 (offset -2 lines).
+Hunk #3 succeeded at 386 (offset -2 lines).
+Hunk #4 succeeded at 843 (offset -2 lines).
+Hunk #5 succeeded at 898 (offset -2 lines).
+Hunk #6 succeeded at 1047 (offset -2 lines).
+Hunk #7 succeeded at 1309 (offset 3 lines).
+Hunk #8 succeeded at 2035 (offset 3 lines).
+Hunk #9 succeeded at 2075 (offset 3 lines).
+Hunk #10 succeeded at 2095 (offset 3 lines).
+Hunk #11 succeeded at 2140 (offset 3 lines).
+Hunk #12 succeeded at 4342 (offset 3 lines).
+Hunk #13 succeeded at 4583 (offset 10 lines).
+Checking patch packages/server/src/server/agent/agent-prompt.ts...
+error: while searching for:
+export async function sendPromptToAgent(
+  params: SendPromptToAgentParams,
+): Promise<{ disposition: PromptDispatchDisposition }> {
+  const unarchive = params.unarchive ?? true;
+
+  const record = await params.agentStorage.get(params.agentId);
+  if (record?.archivedAt) {
+    if (!unarchive) {
+      return { disposition: "turn_started" };
+    }
+    await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId);
+  }
+
+  await ensureAgentLoaded(params.agentId, {
+    agentManager: params.agentManager,
+    agentStorage: params.agentStorage,
+    logger: params.logger,
+  });
+
+  if (params.sessionMode) {
+    await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
+  }
+
+  const runOptions = params.messageId
+    ? { ...params.runOptions, clientMessageId: params.messageId }
+    : params.runOptions;
+
+  return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
+    replaceRunning: true,
+    activeTurnBehavior: params.activeTurnBehavior,
+    clearPendingPermissions: params.clearPendingPermissions,
+    runOptions,
+  });
+}
+
+export async function startCreatedAgentInitialPrompt(
+
+error: patch failed: packages/server/src/server/agent/agent-prompt.ts:315
+error: packages/server/src/server/agent/agent-prompt.ts: patch does not apply
+Checking patch packages/server/src/server/agent/agent-sdk-types.ts...
+Hunk #1 succeeded at 695 (offset 2 lines).
+Checking patch packages/server/src/server/agent/mcp-server.test.ts...
+Checking patch packages/server/src/server/agent/providers/acp-agent.test.ts...
+Hunk #1 succeeded at 175 (offset 4 lines).
+Hunk #2 succeeded at 3547 (offset 78 lines).
+Hunk #3 succeeded at 3594 (offset 78 lines).
+Checking patch packages/server/src/server/agent/providers/acp-agent.ts...
+Hunk #1 succeeded at 2500 (offset 82 lines).
+Hunk #2 succeeded at 2534 (offset 87 lines).
+Hunk #3 succeeded at 2815 (offset 91 lines).
+Hunk #4 succeeded at 2827 (offset 91 lines).
+Checking patch packages/server/src/server/agent/providers/claude/agent.ts...
+Hunk #1 succeeded at 2772 (offset 60 lines).
+Hunk #2 succeeded at 2804 (offset 60 lines).
+Checking patch packages/server/src/server/agent/providers/codex-app-server-agent.ts...
+Hunk #1 succeeded at 5036 (offset 118 lines).
+Checking patch packages/server/src/server/agent/providers/codex/app-server-transport.ts...
+Checking patch packages/server/src/server/agent/providers/jsonl-rpc-process.ts...
+Checking patch packages/server/src/server/agent/providers/omp/agent.ts...
+Hunk #1 succeeded at 731 (offset -175 lines).
+Hunk #2 succeeded at 1152 (offset -36 lines).
+error: while searching for:
+    this.cancelNoTurnPromptCompletion();
+    try {
+      await this.runtimeSession.close();
+    } finally {
+      this.clearOmpSessionState();
+    }
+  }
+
+  private clearOmpSessionState(): void {
+    this.subagentIndex.clear(this.runtimeSession);
+    this.clearOmpTurnState();
+
+error: patch failed: packages/server/src/server/agent/providers/omp/agent.ts:1195
+error: packages/server/src/server/agent/providers/omp/agent.ts: patch does not apply
+Checking patch packages/server/src/server/agent/providers/omp/cli-runtime.ts...
+Hunk #1 succeeded at 112 (offset 7 lines).
+Checking patch packages/server/src/server/agent/providers/omp/runtime.ts...
+error: while searching for:
+}
+
+export interface OmpRuntimeSession {
+  onEvent(callback: (event: OmpRuntimeEvent) => void): () => void;
+  prompt(
+    message: string,
+
+error: patch failed: packages/server/src/server/agent/providers/omp/runtime.ts:43
+error: packages/server/src/server/agent/providers/omp/runtime.ts: patch does not apply
+Checking patch packages/server/src/server/agent/providers/opencode-agent.ts...
+Hunk #1 succeeded at 1503 (offset 3 lines).
+Hunk #2 succeeded at 1560 (offset 4 lines).
+error: while searching for:
+      client: this.createOpenCodeClient({ baseUrl: acquisition.server.url, directory }),
+      events: acquisition.events,
+      url: acquisition.server.url,
+      release: acquisition.release,
+    };
+  }
+
+
+error: patch failed: packages/server/src/server/agent/providers/opencode-agent.ts:1594
+error: packages/server/src/server/agent/providers/opencode-agent.ts: patch does not apply
+Checking patch packages/server/src/server/agent/providers/opencode-server-manager.test.ts...
+Hunk #1 succeeded at 165 (offset 1 line).
+Hunk #2 succeeded at 396 (offset 1 line).
+Hunk #3 succeeded at 448 (offset 1 line).
+Hunk #4 succeeded at 469 (offset 1 line).
+Hunk #5 succeeded at 517 (offset 1 line).
+Checking patch packages/server/src/server/agent/providers/opencode/server-manager.ts...
+error: while searching for:
+import { findExecutable } from "../../../../executable-resolution/executable-resolution.js";
+import { spawnProcess, type SpawnProcessOptions } from "../../../../utils/spawn.js";
+import { terminateWithTreeKill, type ProcessTerminator } from "../../../../utils/tree-kill.js";
+import type { ManagedProcessRegistry } from "../../../managed-processes/managed-processes.js";
+import {
+  createProviderEnvSpec,
+
+error: patch failed: packages/server/src/server/agent/providers/opencode/server-manager.ts:9
+error: packages/server/src/server/agent/providers/opencode/server-manager.ts: patch does not apply
+Checking patch packages/server/src/server/agent/providers/pi/agent.ts...
+Hunk #1 succeeded at 1196 (offset 46 lines).
+Hunk #2 succeeded at 1581 (offset 62 lines).
+Hunk #3 succeeded at 1590 (offset 63 lines).
+Hunk #4 succeeded at 1598 (offset 63 lines).
+Checking patch packages/server/src/server/agent/providers/pi/cli-runtime.ts...
+Hunk #1 succeeded at 83 (offset 2 lines).
+Checking patch packages/server/src/server/agent/providers/pi/runtime.ts...
+error: while searching for:
+}
+
+export interface PiRuntimeSession {
+  onEvent(callback: (event: PiRuntimeEvent) => void): () => void;
+  prompt(
+    message: string,
+
+error: patch failed: packages/server/src/server/agent/providers/pi/runtime.ts:40
+error: packages/server/src/server/agent/providers/pi/runtime.ts: patch does not apply
+Checking patch packages/server/src/server/bootstrap.ts...
+Hunk #1 succeeded at 590 (offset 10 lines).
+Hunk #2 succeeded at 1008 (offset 17 lines).
+Hunk #3 succeeded at 1878 (offset 16 lines).
+Hunk #4 succeeded at 1894 (offset 16 lines).
+Checking patch packages/server/src/server/persisted-config.ts...
+Hunk #1 succeeded at 343 (offset 2 lines).
+Checking patch packages/server/src/server/session.test.ts...
+Checking patch packages/server/src/server/session.ts...
+Hunk #1 succeeded at 766 (offset 11 lines).
+Hunk #2 succeeded at 1256 (offset 19 lines).
+Hunk #3 succeeded at 1282 (offset 19 lines).
+Hunk #4 succeeded at 1292 (offset 19 lines).
+Hunk #5 succeeded at 1538 (offset 19 lines).
+Hunk #6 succeeded at 8559 (offset 22 lines).
+Checking patch packages/server/src/server/session.workspaces.test.ts...
+Checking patch packages/server/src/server/wire-compat.test.ts...
+Checking patch packages/server/src/utils/process-tree-snapshot.ts...
+Checking patch packages/website/public/schemas/paseo.config.v1.json...

@@ -1,0 +1,122 @@
+npm notice run paseo@0.10.3 npx
+npm notice run 'vitest' run src/server/agent/agent-manager.test.ts --bail=1 --testTimeout=1000 -t Reload retries retained
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/feat-idle-agent-unload/packages/server
+
+stdout | src/server/agent/agent-manager.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+ ❯ src/server/agent/agent-manager.test.ts (253 tests | 1 failed | 252 skipped) 23ms
+   × Reload retries retained idle tree cleanup before resuming and clears it 21ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/agent-manager.test.ts > Reload retries retained idle tree cleanup before resuming and clears it
+AssertionError: promise resolved "{ …(33) }" instead of rejecting
+
+- Expected
++ Received
+
+- Error {
+-   "message": "rejected promise",
++ {
++   "activeForegroundTurnId": null,
++   "activeTurnId": null,
++   "activeTurnStartedAt": null,
++   "attention": {
++     "attentionReason": "error",
++     "attentionTimestamp": 2026-10-13T21:00:20.887Z,
++     "requiresAttention": true,
++   },
++   "availableModes": [],
++   "bufferedPermissionResolutions": Map {},
++   "capabilities": {
++     "supportsDynamicModes": false,
++     "supportsMcpServers": false,
++     "supportsReasoningStream": false,
++     "supportsSessionListing": true,
++     "supportsSessionPersistence": false,
++     "supportsStreaming": false,
++     "supportsToolInvocations": false,
++   },
++   "config": {
++     "cwd": "/var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/agent-idle-reload-QigG8k",
++     "model": "gpt-5.4",
++     "provider": "codex",
++   },
++   "createdAt": 2026-10-13T21:00:20.884Z,
++   "currentModeId": null,
++   "cwd": "/var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/agent-idle-reload-QigG8k",
++   "finalizedForegroundTurnIds": Set {},
++   "foregroundTurnWaiters": Set {},
++   "historyPrimed": true,
++   "id": "69f8384c-a1a6-4f30-9705-fdfcbcb20894",
++   "inFlightPermissionResponses": Set {},
++   "internal": false,
++   "labels": {},
++   "lastError": "Provider process cleanup incomplete: retained tree alive",
++   "lastUsage": undefined,
++   "lastUserMessageAt": null,
++   "lifecycle": "idle",
++   "owner": undefined,
++   "pendingPermissions": Map {},
++   "pendingReplacement": false,
++   "persistence": {
++     "metadata": {
++       "cwd": "/var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/agent-idle-reload-QigG8k",
++     },
++     "provider": "codex",
++     "sessionId": "926bb486-53b3-45f5-bc13-772093cfb252",
++   },
++   "provider": "codex",
++   "runtimeInfo": {
++     "modeId": null,
++     "model": "gpt-5.4",
++     "provider": "codex",
++     "sessionId": "926bb486-53b3-45f5-bc13-772093cfb252",
++   },
++   "session": TestAgentSession {
++     "capabilities": {
++       "supportsDynamicModes": false,
++       "supportsMcpServers": false,
++       "supportsReasoningStream": false,
++       "supportsSessionListing": true,
++       "supportsSessionPersistence": false,
++       "supportsStreaming": false,
++       "supportsToolInvocations": false,
++     },
++     "config": {
++       "cwd": "/var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/agent-idle-reload-QigG8k",
++       "daemonAppendSystemPrompt": undefined,
++       "provider": "codex",
++     },
++     "id": "926bb486-53b3-45f5-bc13-772093cfb252",
++     "interrupted": false,
++     "provider": "codex",
++     "runtimeModel": null,
++     "subscribers": Set {},
++     "turnIdCounter": 0,
++   },
++   "sessionIncarnation": "c8ec4fc5-d2c4-4bf3-815c-de8cb4e69054",
++   "unsubscribeSession": [Function anonymous],
++   "updatedAt": 2026-10-13T21:00:20.886Z,
++   "workspaceId": undefined,
+  }
+
+ ❯ src/server/agent/agent-manager.test.ts:9913:54
+    9911|     expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toB…
+    9912|     expect(reaps).toBe(1);
+    9913|     await expect(manager.reloadAgentSession(agent.id)).rejects.toThrow…
+       |                                                      ^
+    9914|     expect(reaps).toBe(2);
+    9915|     expect(client.resumeOverrides).toHaveLength(0);
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 252 skipped (253)
+   Start at  00:00:20
+   Duration  579ms (transform 341ms, setup 19ms, import 466ms, tests 23ms, environment 0ms)
+

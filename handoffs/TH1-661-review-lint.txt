@@ -1,0 +1,14 @@
+Command: npm run lint
+Exit: 1
+npm notice run paseo@0.10.3 lint
+npm notice run oxlint
+  x eslint-plugin-react-perf(jsx-no-new-object-as-prop): JSX attribute values should not contain objects created in the same scope.
+    ,-[packages/app/src/plugins/buttons/view.tsx:84:16]
+  x eslint(complexity): constructor `constructor` has a complexity of 21. Maximum allowed is 20.
+     ,-[packages/server/src/server/agent/agent-manager.ts:889:14]
+  x eslint(complexity): private method `buildManagedAgentForRegister` has a complexity of 21. Maximum allowed is 20.
+      ,-[packages/server/src/server/agent/agent-manager.ts:4488:39]
+  x eslint-plugin-react-perf(jsx-no-new-object-as-prop): JSX attribute values should not contain objects created in the same scope.
+     ,-[packages/app/src/plugins/workspace-panels/panel.tsx:111:16]
+Found 0 warnings and 4 errors.
+Finished in 815ms on 4419 files with 177 rules using 16 threads.

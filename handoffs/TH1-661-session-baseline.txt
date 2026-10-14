@@ -1,0 +1,42 @@
+npm notice run paseo@0.11.2 npx
+npm notice run 'vitest' run src/server/session.workspaces.test.ts --bail=1 -t create_agent_request keeps requested child cwd when grouped under an existing parent workspace
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-661-baseline/packages/server
+
+stdout | src/server/session.workspaces.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  write to custom object with { processEnv: myObject }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  suppress all logs with { quiet: true }
+
+ ❯ src/server/session.workspaces.test.ts (112 tests | 1 failed | 111 skipped) 33ms
+   × create_agent_request keeps requested child cwd when grouped under an existing parent workspace 31ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/session.workspaces.test.ts > create_agent_request keeps requested child cwd when grouped under an existing parent workspace
+AssertionError: expected { …(10) } to match object { Object (projectKey) }
+(9 matching properties omitted from actual)
+
+- Expected
++ Received
+
+  {
+-   "projectKey": "host:test-server:/private/var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/paseo-create-agent-cwd-N158JB/parent/child",
++   "projectKey": "host:test-server:/Users/hteo/Paseo/Scratch",
+  }
+
+ ❯ src/server/session.workspaces.test.ts:1065:66
+    1063|     const createdWorkspace = await workspaceRegistry.get(createdAgent!…
+    1064|     expect(createdWorkspace).not.toBeNull();
+    1065|     await expect(projectRegistry.get(createdWorkspace!.projectId)).res…
+       |                                                                  ^
+    1066|       projectKey: deriveProjectKey({
+    1067|         rootPath: child,
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 111 skipped (112)
+   Start at  00:15:21
+   Duration  5.25s (transform 3.87s, setup 56ms, import 5.00s, tests 33ms, environment 0ms)
+
