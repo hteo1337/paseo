@@ -206,7 +206,11 @@ import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
-import { type MetadataGenerationConfig, type PersistedConfig } from "./persisted-config.js";
+import {
+  loadPersistedConfigAsync,
+  type MetadataGenerationConfig,
+  type PersistedConfig,
+} from "./persisted-config.js";
 import { createServiceProxySubsystem, type ServiceProxySubsystem } from "./service-proxy.js";
 import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
@@ -628,6 +632,47 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
   return initialConfig;
 }
 
+function startIdleAgentUnload(
+  config: PaseoDaemonConfig,
+  agentManager: AgentManager,
+  logger: Logger,
+): NodeJS.Timeout {
+  const idleUnloadEnvValue =
+    config.configReload?.env?.PASEO_AGENT_IDLE_UNLOAD_MINUTES ??
+    process.env.PASEO_AGENT_IDLE_UNLOAD_MINUTES;
+  const parsedIdleUnloadEnv = idleUnloadEnvValue === undefined ? null : Number(idleUnloadEnvValue);
+  const idleUnloadEnvMinutes =
+    parsedIdleUnloadEnv !== null &&
+    Number.isInteger(parsedIdleUnloadEnv) &&
+    parsedIdleUnloadEnv >= 0 &&
+    parsedIdleUnloadEnv <= 2_147_483
+      ? parsedIdleUnloadEnv
+      : null;
+  if (idleUnloadEnvValue !== undefined && idleUnloadEnvMinutes === null) {
+    logger.warn("Ignoring invalid PASEO_AGENT_IDLE_UNLOAD_MINUTES value");
+  }
+  let idleUnloadScanRunning = false;
+  const idleUnloadTimer = setInterval(async () => {
+    if (idleUnloadScanRunning) return;
+    idleUnloadScanRunning = true;
+    try {
+      const configured =
+        (await loadPersistedConfigAsync(config.paseoHome)).agents?.idleUnloadMinutes ?? 15;
+      const minutes = idleUnloadEnvMinutes ?? configured;
+      if (minutes === 0) return;
+      await agentManager.unloadIdleAgents(minutes * 60_000).catch((error) => {
+        logger.warn({ err: error }, "Idle agent unload scan failed");
+      });
+    } catch (error) {
+      logger.warn({ err: error }, "Idle agent unload scan could not read configuration");
+    } finally {
+      idleUnloadScanRunning = false;
+    }
+  }, 60_000);
+  idleUnloadTimer.unref();
+  return idleUnloadTimer;
+}
+
 export async function createPaseoDaemon(
   config: PaseoDaemonConfig,
   rootLogger: Logger,
@@ -1039,6 +1084,7 @@ export async function createPaseoDaemon(
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
   });
+  const idleUnloadTimer = startIdleAgentUnload(config, agentManager, logger);
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
@@ -2014,6 +2060,7 @@ export async function createPaseoDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       await stopOwnerUnix?.();
+      clearInterval(idleUnloadTimer);
       localCredential = null;
       await deleteLocalCredential(config.paseoHome);
       unsubscribePluginProviders();
@@ -2033,6 +2080,7 @@ export async function createPaseoDaemon(
     const keepTerminals = options?.keepTerminals === true;
     let terminalShutdownError: unknown = null;
     await stopOwnerUnix?.();
+    clearInterval(idleUnloadTimer);
 
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
