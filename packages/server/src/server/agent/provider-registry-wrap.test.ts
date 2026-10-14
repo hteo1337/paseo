@@ -30,6 +30,9 @@ const OPTIONAL_AGENT_SESSION_METHOD_NAMES = [
   "revertFiles",
   "revertBoth",
   "tryHandleOutOfBand",
+  "getOwnedProcessIds",
+  "getReapedProcessCount",
+  "hasLiveTerminals",
 ] as const satisfies readonly OptionalAgentSessionMethodName[];
 
 type MissingOptionalAgentSessionMethod = Exclude<
@@ -133,6 +136,19 @@ class FakeSession implements AgentSession {
 
   async interrupt() {
     this.recordedCalls.push("interrupt");
+  }
+
+  getOwnedProcessIds() {
+    this.recordedCalls.push("getOwnedProcessIds");
+    return [123];
+  }
+  getReapedProcessCount() {
+    this.recordedCalls.push("getReapedProcessCount");
+    return 2;
+  }
+  hasLiveTerminals() {
+    this.recordedCalls.push("hasLiveTerminals");
+    return true;
   }
 
   async close() {
@@ -246,4 +262,17 @@ describe("wrapSessionProvider", () => {
     session.steerActiveTurn = undefined;
     expect(wrapSessionProvider("custom-claude", session).steerActiveTurn).toBeUndefined();
   });
+});
+
+test("derived sessions forward idle process ownership and live terminal guards", () => {
+  const session = new FakeSession();
+  const wrapped = wrapSessionProvider("custom-claude", session);
+  expect(wrapped.getOwnedProcessIds?.()).toEqual([123]);
+  expect(wrapped.getReapedProcessCount?.()).toBe(2);
+  expect(wrapped.hasLiveTerminals?.()).toBe(true);
+  expect(session.recordedCalls).toEqual([
+    "getOwnedProcessIds",
+    "getReapedProcessCount",
+    "hasLiveTerminals",
+  ]);
 });
