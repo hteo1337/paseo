@@ -21,3 +21,5 @@ Commands run in the task worktree root unless a cwd is specified:
 Playwright browser e2e and CI were not run. No PR was opened or modified. No shared/default/PR branch was pushed. The lead owns review, re-gating and PR integration.
 
 Code commit: `8db2efef64df75cf79a1c596a714b3e2b095c63c` (`fix(app): restore pinned section header density`). Pre-commit hooks reran root typecheck (exit 0), targeted lint (0 warnings/0 errors), and targeted formatting check (all matched files correct).
+
+Delivery: `git push -u origin HEAD:refs/heads/dispatch/TH1-1013` exit 0 (`[new branch] HEAD -> dispatch/TH1-1013`); `git ls-remote origin refs/heads/dispatch/TH1-1013` returned `58cddcecb68ed40a3f319973432b287a77a2da6c`, matching local HEAD. Linear TH1-1013 moved to In Review and delivery comment recorded. Final documentation checkpoint follows on this same branch; code is unchanged.
