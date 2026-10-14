@@ -44,6 +44,7 @@ export interface OmpStartSessionInput {
 
 export interface OmpRuntimeSession {
   readonly environment: Record<string, string>;
+  readonly processId?: number | null;
   onEvent(callback: (event: OmpRuntimeEvent) => void): () => void;
   prompt(
     message: string,
