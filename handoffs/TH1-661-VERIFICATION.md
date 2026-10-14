@@ -1,4 +1,24 @@
-# TH1-661 verification — 2026-10-14
+# TH1-661 — remaining OpenCode close finding
+
+Confirm review found one remaining unbounded shutdown abort; ACP, Reload cleanup, independent sweep and five semantic combinations were confirmed fixed. This follow-up changes only OpenCode shutdown and its existing recovery-suite fixture/test.
+
+Source implementation: `15ac6cc84`; port implementation: `3d581cf5e`. `abortOpenCodeSession` now waits at most 2,000ms using the same timeout helper as interrupt. Timeout/rejection follows existing warning handling and lets close reach its awaited reference-counted server release, TERM/KILL and reaping. Only the RPC wait is capped; close stays pending until release settles.
+
+One new regression uses the public OpenCode client, real SDK HTTP and real local HTTP responses: the abort response remains held, termination must start, close must remain pending while termination is held, then settle after termination is released. Cleanup replies to the late abort and closes the fixture. It failed on unchanged source with `OpenCode close stalled before server release` (1 failed, 5 skipped), before the cap was added. No extra test-writer lane or mutation runs.
+
+Commands for this follow-up:
+
+- Source `packages/server`: `npx vitest run src/server/agent/providers/opencode-agent.recovery.test.ts --bail=1 -t 'close caps a stalled abort'` — expected red control, 1 failed / 5 skipped.
+- Source `packages/server`: `npx vitest run src/server/agent/providers/opencode-agent.recovery.test.ts --bail=1` — 6 passed.
+- Port `packages/server`: the same affected recovery file — 6 passed, including its existing real-process/listening-readiness behavior.
+- Port root: `npm run typecheck:server` — run once, exit 0 across relay/protocol/client/builtin plugins/server/CLI. An earlier package-directory invocation reported missing script and ran no typecheck; the root run is the sole executed typecheck. No builds were needed.
+- Both roots: `npm run lint -- packages/server/src/server/agent/providers/opencode-agent.ts packages/server/src/server/agent/providers/opencode-agent.recovery.test.ts` — 0 warnings / 0 errors. `npm run format:files -- <changed files>` and `git diff --check` passed. The test's then callback was given its explicit undefined return for lint; behavior is unchanged.
+
+0061 is regenerated from source commit `d3e4a16732fcc954352afb17115027479d29bf58`, based on the same pinned 0060 prefix `ff59fc5c01f6b0d57cd9c11bcc5842bd21c0d2f5`. New immutable tag: `th1-661-patch-source-v0.11.2-opencode-close`; the previous published tag remains intact. Payload SHA256: `2eb0ef379ed6070e30350729b8137495bfffac85334ea801c300487ffa4e198f`. All 33 payload file blobs match the corrected port; all 57 prior v0.11 payloads remain byte-identical. `git am -3` of the regenerated 0061 onto its prefix passed, and the resulting entire tree equals the generated source tree (`1553629b1ba26743ac2fa38fdc5c765579e9a71b`). The newly changed recovery file is the 33rd payload file. Root 0045 is unchanged in this follow-up, as requested for the v0.11/0061 target.
+
+Next: the same Sol reviewer briefly confirms this OpenCode item. TH1-661 is In Review; no clean-review verdict is claimed. No full suite, app build, dependency install, installer, daemon restart or merge. Commits disable hooks to honor the one-typecheck limit; formatting and scoped lint ran explicitly. Earlier counts below are historical and were not rerun.
+
+# Earlier TH1-661 delivery verification — 2026-10-14
 
 Source implementation: `dddfa37cdcb88964f3b009a25dd2716287572813` (`feat/idle-agent-unload`, PR #2).
 Port implementation: `b3de9caf4231ab0dc8c2df6f13e45fe18f3fa98e` (`th1-661-idle-unload-v0.11.2`, based on fork release `8693fba0f53c92d10611ee676ddf8ff6a355cfef`). Remote `origin` here is hteo1337/paseo; the old handoff called this remote `fork`.

@@ -1,0 +1,4 @@
+npm notice run paseo@0.10.3 lint
+npm notice run oxlint packages/server/src/server/agent/providers/opencode-agent.ts packages/server/src/server/agent/providers/opencode-agent.recovery.test.ts
+Found 0 warnings and 0 errors.
+Finished in 16ms on 2 files with 177 rules using 16 threads.
