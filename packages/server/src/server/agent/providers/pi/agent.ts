@@ -1204,6 +1204,7 @@ export class PiRpcAgentSession implements AgentSession {
   private readonly logger: Logger;
   private readonly usagePoller: PiUsagePoller;
   private closed = false;
+  private closeSucceeded = false;
   private readonly closeController = new AbortController();
   private readonly pendingExtensionHydrations = new Set<Promise<void>>();
   private pendingOutput: Promise<void> | null = null;
@@ -1619,7 +1620,7 @@ export class PiRpcAgentSession implements AgentSession {
   }
 
   async close(): Promise<void> {
-    if (this.closed) {
+    if (this.closeSucceeded) {
       return;
     }
     this.closed = true;
@@ -1628,11 +1629,16 @@ export class PiRpcAgentSession implements AgentSession {
     this.usagePoller.close();
     try {
       await this.runtimeSession.close();
+      this.closeSucceeded = true;
     } finally {
       await Promise.all([this.pendingOutput, ...this.pendingExtensionHydrations]);
       this.rejectAllExtensionResults(new Error("Pi session closed"));
       this.cleanup?.();
     }
+  }
+
+  getOwnedProcessIds(): number[] {
+    return this.runtimeSession.processId ? [this.runtimeSession.processId] : [];
   }
 
   async listCommands(): Promise<AgentSlashCommand[]> {
