@@ -29,8 +29,22 @@ Child creation can use an unarchived closed parent from durable storage. Resolvi
 parentage does not resume the parent's provider or start a turn. Archived parents
 remain unavailable.
 
-Idle agents remain resident indefinitely. Runtime closure happens only through an explicit lifecycle
-action such as archive, replacement, reload, workspace teardown, or daemon shutdown.
+The daemon unloads a resident agent after 15 minutes without a turn, pending permission, queued
+prompt, in-flight resume, client timeline stream, or live ACP terminal. It closes the provider runtime and
+keeps the durable agent record for on-demand resume. Set `agents.idleUnloadMinutes` in the daemon
+config, or override it with `PASEO_AGENT_IDLE_UNLOAD_MINUTES`; `0` disables idle unloading. The
+daemon checks once a minute. Timeline subscriptions and loading an already-resident agent do not
+reset the idle clock; an active subscription still prevents unloading. Actual turns, prompts and
+agent updates refresh activity. Loading a closed agent resumes its runtime with a fresh deadline.
+If descendant cleanup fails after the provider closes, the runtime enters an error
+state and rejects prompts. The next access retries cleanup before it can resume the durable session.
+
+Idle-unload diagnostics default on. Each pass reports resident agents that did not unload as
+`Idle agent unload skipped`, including cached guard operands and known stream/use owners.
+Unchanged operands are logged at most once per agent every ten minutes; a changed operand logs
+on the next pass. Set `PASEO_IDLE_UNLOAD_DIAG=0` to disable them. The diagnostic reads cached state
+without loading an agent or resetting its idle clock. `unknown` owners and unavailable operands
+are explicit; the log does not infer ownership from a provider process or imply that a skip is a fault.
 
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
