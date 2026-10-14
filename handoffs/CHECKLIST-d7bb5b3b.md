@@ -23,3 +23,9 @@ Delivery evidence: source c930dff0a, port b663c5c4e and patch 9916276 pushed suc
 - [x] Push refreshed handoff, verify remote head and update Linear delivery comment.
 
 Status refresh evidence: f1aba77fb committed and pushed; git ls-remote confirmed its exact hash; Linear delivery comment b8b5463e updated. Formatting and git diff --check passed; no tests rerun.
+
+## Repeated requested status refresh
+
+- [x] Current source head e43462bc7 and port head b663c5c4e match their published refs; working tree is clean and operator notes are empty.
+- [ ] Refresh done / next / verify / blockers and commit the formatted handoff.
+- [ ] Push and verify the new source head; update Linear delivery record.
