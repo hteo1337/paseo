@@ -165,6 +165,18 @@ describe("OpenCodeServerManager generations", () => {
     await manager.shutdown();
 
     expect(runtime.terminatedPorts).toEqual([4402, 4401]);
+
+    const failed = createTestManager([4411, 4412]);
+    await failed.manager.acquireCurrent();
+    await failed.manager.acquireNew();
+    failed.runtime.killTimeoutPorts.add(4412);
+
+    await expect(failed.manager.shutdown()).rejects.toThrow("OpenCode server shutdown incomplete");
+    expect(failed.runtime.terminatedPorts).toEqual([4412, 4411]);
+
+    failed.runtime.killTimeoutPorts.clear();
+    await failed.manager.shutdown();
+    expect(failed.runtime.terminatedPorts).toEqual([4412, 4411, 4412]);
   });
 
   test("shutdown still signals a process after an earlier kill signal if it has not exited", async () => {
@@ -384,6 +396,8 @@ describe.runIf(process.platform === "win32")(
         portAllocator: runtime.allocatePort,
         spawnServerProcess: runtime.spawnServerProcess,
         terminateProcess: runtime.terminateProcess,
+        snapshotProcessTree: async () => new Map(),
+        reapProcessTree: async () => 0,
       });
 
       try {
@@ -434,6 +448,8 @@ function createTestManager(
       ...(opencodeHomeDir ? { resolveHomeDir: () => opencodeHomeDir } : {}),
       spawnServerProcess: runtime.spawnServerProcess,
       terminateProcess: runtime.terminateProcess,
+      snapshotProcessTree: async () => new Map(),
+      reapProcessTree: async () => 0,
     }),
     runtime,
   };
@@ -453,6 +469,7 @@ function createCapturingLogger(): { logger: Logger; records: Array<Record<string
 class FakeOpenCodeServerRuntime {
   readonly managedProcesses = new FakeManagedProcesses();
   readonly terminatedPorts: number[] = [];
+  readonly killTimeoutPorts = new Set<number>();
   readonly spawnCalls: Array<{
     command: string;
     args: string[];
@@ -500,6 +517,7 @@ class FakeOpenCodeServerRuntime {
   readonly terminateProcess: ProcessTerminator = async (target: TreeKillTarget) => {
     const process = this.processForChild(target as ChildProcess);
     this.terminatedPorts.push(process.port);
+    if (this.killTimeoutPorts.has(process.port)) return "kill-timeout";
     process.exitBySignal("SIGTERM");
     return "terminated";
   };
