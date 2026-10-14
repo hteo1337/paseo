@@ -292,6 +292,7 @@ function buildAgentManagerSpies() {
         return (async function* noop() {})();
       },
     ),
+    beginAgentUse: vi.fn().mockReturnValue(() => {}),
     respondToPermission: vi.fn(),
     cancelAgentRun: vi.fn(),
     getPendingPermissions: vi.fn(),

@@ -26,6 +26,7 @@ export type AgentRunController = Pick<
   | "streamAgent"
 > & {
   reloadAgentSession(agentId: string): Promise<unknown>;
+  beginAgentUse?(agentId: string): () => void;
 };
 
 export class AgentTurnBusyError extends Error {}
@@ -116,6 +117,8 @@ export async function startAgentRun(
   logger: Logger,
   options?: StartAgentRunOptions,
 ): Promise<PromptDispatchResult> {
+  const release = agentManager.beginAgentUse?.(agentId);
+  try {
   const snapshot = agentManager.getAgent(agentId);
   logger.trace(
     {
@@ -162,6 +165,7 @@ export async function startAgentRun(
     promptStart.end();
     throw error;
   }
+  } finally { release?.(); }
 }
 
 async function startAgentRunInner(
@@ -267,6 +271,7 @@ export interface SendPromptToAgentParams {
   admit?: StartAgentRunOptions["admit"];
   /** Awaited after the agent is loaded and its mode is set, before the prompt is handed to a run. */
   beforeDispatch?: () => Promise<void>;
+  useOwnerId?: string;
   onDispatch?: StartAgentRunOptions["onDispatch"];
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -402,6 +407,7 @@ export async function sendPromptToAgent(
     (joined) =>
       sendPreparedPromptToAgent({
         ...send,
+        useOwnerId: params.useOwnerId ?? (source && "agentId" in source ? `agent:${source.agentId}` : undefined),
         prompt: joined.prompt,
         sessionMode: joined.sessionMode,
         unarchive: joined.unarchive,
@@ -416,6 +422,8 @@ export async function sendPromptToAgent(
 export async function sendPreparedPromptToAgent(
   params: Omit<SendPromptToAgentParams, "source" | "messageId">,
 ): Promise<PromptDispatchResult> {
+  const release = params.agentManager.beginAgentUse(params.agentId, params.useOwnerId);
+  try {
   const unarchive = params.unarchive ?? true;
 
   const record = await params.agentStorage.get(params.agentId);
@@ -431,6 +439,7 @@ export async function sendPreparedPromptToAgent(
 
   try {
     await ensureAgentLoaded(params.agentId, {
+      useOwnerId: params.useOwnerId,
       agentManager: params.agentManager,
       agentStorage: params.agentStorage,
       logger: params.logger,
@@ -464,6 +473,7 @@ export async function sendPreparedPromptToAgent(
     clearPendingPermissions: params.clearPendingPermissions,
     runOptions: params.runOptions,
   });
+  } finally { release(); }
 }
 
 export async function startCreatedAgentInitialPrompt(

@@ -867,6 +867,7 @@ export class Session {
     string,
     { owner: OwnedSubscription; agentIds: Set<string> }
   >();
+  private readonly legacyTimelineHolds = new Map<object, () => void>();
   private readonly clientSources = new Map<
     object,
     {
@@ -1197,6 +1198,7 @@ export class Session {
       operations: {
         ensureLoaded: async (agentId) => {
           await ensureUnarchivedAgentLoaded(agentId, {
+            useOwnerId: this.clientId,
             agentManager,
             agentStorage,
             logger: this.sessionLogger,
@@ -1410,6 +1412,7 @@ export class Session {
           emit: (msg) => this.emit(msg),
           loadAgent: (agentId) =>
             ensureAgentLoaded(agentId, {
+              useOwnerId: this.clientId,
               agentManager: this.agentManager,
               agentStorage: this.agentStorage,
               logger: this.sessionLogger,
@@ -1466,6 +1469,7 @@ export class Session {
         activity: this.clientSources.get(source)?.activity ?? null,
         pushToken: this.clientSources.get(source)?.pushToken ?? null,
       });
+      this.syncLegacyTimelineHold(source);
       this.refreshObservationProducers();
       // COMPAT(ownedSubscriptions): added in v0.8.0, remove capability-driven legacy host registration after 2027-03-09.
       if (
@@ -1493,6 +1497,8 @@ export class Session {
   }
 
   clearAgentTimelineSubscription(source: object): void {
+    this.legacyTimelineHolds.get(source)?.();
+    this.legacyTimelineHolds.delete(source);
     void this.delivery
       .detach(source)
       .catch((err) => this.sessionLogger.error({ err }, "Failed to release source subscriptions"));
@@ -1560,13 +1566,33 @@ export class Session {
   }
 
   private subscribeAgentTimelines(agentIds: string[]): OwnedSubscription {
+    let releaseHolds: Array<() => void> = [];
     const owner = this.delivery.begin("timelines", undefined, (id) => {
       this.timelineSubscriptions.delete(id);
+      for (const release of releaseHolds) release();
       this.refreshObservationProducers();
     });
+    releaseHolds = [...new Set(agentIds)].map((agentId) =>
+      this.agentManager.holdClientStream(agentId, this.clientId),
+    );
     this.timelineSubscriptions.set(owner.id, { owner, agentIds: new Set(agentIds) });
     this.refreshObservationProducers();
     return owner;
+  }
+
+  private syncLegacyTimelineHold(source: object): void {
+    const capabilities = this.clientSources.get(source)?.capabilities;
+    const receivesAllTimelines =
+      capabilities !== undefined &&
+      !this.delivery.isModern(source) &&
+      !capabilities.has(CLIENT_CAPS.selectiveAgentTimeline);
+    const release = this.legacyTimelineHolds.get(source);
+    if (receivesAllTimelines && !release) {
+      this.legacyTimelineHolds.set(source, this.agentManager.holdGlobalClientStream(this.clientId));
+    } else if (!receivesAllTimelines && release) {
+      release();
+      this.legacyTimelineHolds.delete(source);
+    }
   }
 
   // COMPAT(timelineItemCapabilities): plugin items added in v0.8.0, notifications in v0.7.2.
@@ -1790,6 +1816,7 @@ export class Session {
         pushToken: null,
       };
       this.clientSources.set(source, metadata);
+      this.syncLegacyTimelineHold(source);
     }
     return metadata;
   }
@@ -4732,6 +4759,7 @@ export class Session {
     try {
       await sendPromptToAgent({
         agentMessages: this.agentMessages,
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         agentId,
@@ -5452,6 +5480,7 @@ export class Session {
         // Unarchiving publishes the record before provider resume finishes, so
         // the agent pane can otherwise race this request and resume it twice.
         snapshot = await ensureAgentLoaded(agentId, {
+          useOwnerId: this.clientId,
           agentManager: this.agentManager,
           agentStorage: this.agentStorage,
           broadcastTimeline: true,
@@ -5697,6 +5726,7 @@ export class Session {
     // timeline from, which is exactly the chat a client opens after a restart.
     try {
       await ensureAgentLoaded(msg.agentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -5817,6 +5847,7 @@ export class Session {
       const agent =
         existing || (stored && !stored.archivedAt)
           ? await ensureAgentLoaded(agentId, {
+              useOwnerId: this.clientId,
               agentManager: this.agentManager,
               agentStorage: this.agentStorage,
               logger: this.sessionLogger,
@@ -8818,6 +8849,7 @@ export class Session {
 
     try {
       const snapshot = await ensureAgentLoaded(msg.agentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -8951,6 +8983,7 @@ export class Session {
   ): Promise<void> {
     try {
       await ensureAgentLoaded(msg.agentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -9004,6 +9037,7 @@ export class Session {
   ): Promise<void> {
     try {
       await ensureAgentLoaded(msg.agentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -9052,6 +9086,7 @@ export class Session {
   ): Promise<void> {
     try {
       await ensureUnarchivedAgentLoaded(msg.parentAgentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -9161,6 +9196,7 @@ export class Session {
     const direction: AgentTimelineFetchDirection = msg.direction ?? (msg.cursor ? "after" : "tail");
     try {
       await ensureUnarchivedAgentLoaded(msg.parentAgentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -9259,6 +9295,7 @@ export class Session {
   ): Promise<void> {
     try {
       const snapshot = await ensureAgentLoaded(msg.agentId, {
+        useOwnerId: this.clientId,
         agentManager: this.agentManager,
         agentStorage: this.agentStorage,
         logger: this.sessionLogger,
@@ -9312,6 +9349,7 @@ export class Session {
 
   private async prepareAgentMessage(agentId: string, text: string): Promise<void> {
     await ensureAgentLoaded(agentId, {
+      useOwnerId: this.clientId,
       agentManager: this.agentManager,
       agentStorage: this.agentStorage,
       logger: this.sessionLogger,
@@ -9384,6 +9422,7 @@ export class Session {
         }
         const result = await sendPromptToAgent({
           agentMessages: this.agentMessages,
+          useOwnerId: this.clientId,
           agentManager: this.agentManager,
           agentStorage: this.agentStorage,
           agentId,
@@ -9805,6 +9844,8 @@ export class Session {
    * Clean up session resources
    */
   public async cleanup(): Promise<void> {
+    for (const release of this.legacyTimelineHolds.values()) release();
+    this.legacyTimelineHolds.clear();
     this.sessionLogger.trace({}, "agent.session.lifecycle.cleanup");
     this.isCleanedUp = true;
     this.unsubscribeSetupObservation();

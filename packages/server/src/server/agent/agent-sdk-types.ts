@@ -757,6 +757,11 @@ export interface AgentSession {
   canStopRuntime?(): Promise<boolean>;
   /** Release live runtime resources without archiving or deleting the durable native session. */
   close(): Promise<void>;
+  /** Root PIDs owned by this runtime; used to count processes reaped on idle unload. */
+  getOwnedProcessIds?(): number[];
+  getReapedProcessCount?(): number;
+  /** Background terminals still owned by this provider session. */
+  hasLiveTerminals?(): boolean;
   listCommands?(): Promise<AgentSlashCommand[]>;
   /** A returned model is the effective selection committed by this mutation.
    * Returning void means the requested selection was accepted. No status read is required. */

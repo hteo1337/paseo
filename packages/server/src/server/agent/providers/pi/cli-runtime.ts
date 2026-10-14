@@ -96,6 +96,9 @@ interface PiCliRuntimeSessionOptions {
 }
 
 class PiCliRuntimeSession implements PiRuntimeSession {
+  get processId(): number | null {
+    return this.process.processId;
+  }
   private readonly subscribers = new Set<(event: PiRuntimeEvent) => void>();
 
   constructor(private readonly options: PiCliRuntimeSessionOptions) {
