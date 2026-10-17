@@ -43,6 +43,7 @@ import { evaluateBundle } from "./bundle-evaluator.js";
 
 const REQUEST_TIMEOUT_MS = 30_000;
 const TOOL_CALL_TIMEOUT_MS = 10 * 60_000;
+const MAX_PENDING_PLUGIN_REQUESTS = 64;
 const MAX_LOG_ENTRIES = 500;
 const MAX_LOG_BYTES = 256 * 1024;
 const MAX_LOG_LINE_BYTES = 16 * 1024;
@@ -797,8 +798,13 @@ export class PluginRuntime {
     const child = loaded.child;
     const pluginId = loaded.id;
     if (!child) throw new Error(`Plugin ${pluginId} has no server entry`);
+    // Reject before serializing or enqueueing IPC; never queue more work for a slow plugin.
+    // Policy hooks use the same bound and continue to fail closed on refusal.
+    if (loaded.pending.size >= MAX_PENDING_PLUGIN_REQUESTS)
+      return Promise.reject(new Error(`Plugin RPC capacity exceeded: ${pluginId}`));
     const requestId = message.requestId;
     signal?.throwIfAborted();
+    const startedAt = performance.now();
     return new Promise((resolve, reject) => {
       const cancel = () => {
         clearTimeout(timeout);
@@ -839,6 +845,21 @@ export class PluginRuntime {
         loaded.pending.delete(requestId);
         reject(error);
       });
+    }).finally(() => {
+      const durationMs = performance.now() - startedAt;
+      if (durationMs >= 500) {
+        this.logger.warn(
+          {
+            pluginId,
+            requestType: message.type,
+            ...(message.type === "invoke" ? { method: message.method } : {}),
+            ...(message.type === "hook" ? { hook: message.name } : {}),
+            durationMs: Math.round(durationMs),
+            pendingRequests: loaded.pending.size,
+          },
+          "plugin_slow_request",
+        );
+      }
     });
   }
 
