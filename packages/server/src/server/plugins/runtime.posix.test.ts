@@ -249,6 +249,72 @@ afterEach(async () => {
 });
 
 describe("PluginRuntime", () => {
+  it("bounds pending RPCs, recovers slots and attributes slow requests without payloads", async () => {
+    const directory = await createPlugin("bounded", `export default function() {}`);
+    const child = createReloadChild("bounded", [], ["wait"]);
+    const requests: Array<{ requestId: string }> = [];
+    const originalSend = child.send.bind(child);
+    child.send = (message, callback) => {
+      if (message.type === "invoke") {
+        const request = message as { type: string; requestId: string };
+        requests.push(request);
+        if (requests.length > 64)
+          queueMicrotask(() =>
+            child.emitMessage({
+              type: "result",
+              requestId: request.requestId,
+              output: "overflow-was-sent",
+            }),
+          );
+      }
+      return originalSend(message, callback);
+    };
+    const lines: string[] = [];
+    const logger = pino(
+      { level: "warn" },
+      {
+        write(line: string) {
+          lines.push(line);
+        },
+      },
+    );
+    const runtime = createTestRuntime({ spawnChild: () => child }, logger);
+    await runtime.startPlugin("bounded", directory);
+    vi.spyOn(performance, "now").mockReturnValue(0);
+    const pending = Array.from({ length: 64 }, () =>
+      runtime.invoke("bounded", "wait", { privateInput: "never-log-payload" }),
+    );
+    try {
+      await expect(runtime.invoke("bounded", "wait", {})).rejects.toThrow(
+        "Plugin RPC capacity exceeded: bounded",
+      );
+      expect(requests).toHaveLength(64);
+      vi.mocked(performance.now).mockReturnValue(750);
+      for (const request of requests.splice(0))
+        child.emitMessage({ type: "result", requestId: request.requestId, output: "done" });
+      expect(await Promise.all(pending)).toEqual(Array(64).fill("done"));
+      const resumed = runtime.invoke("bounded", "wait", {});
+      child.emitMessage({ type: "result", requestId: requests[0].requestId, output: "resumed" });
+      expect(await resumed).toBe("resumed");
+      const slow = lines
+        .map((line) => JSON.parse(line))
+        .filter((line) => line.msg === "plugin_slow_request");
+      expect(slow).toHaveLength(64);
+      expect(slow[0]).toMatchObject({
+        pluginId: "bounded",
+        method: "wait",
+        requestType: "invoke",
+        durationMs: 750,
+      });
+      expect(lines.join("")).not.toContain("never-log-payload");
+    } finally {
+      const stopped = Promise.allSettled(pending);
+      await runtime.stopAll();
+      await stopped;
+      vi.restoreAllMocks();
+    }
+  });
+
   it("turn_start remains fail-closed while a registered policy reloads", async () => {
     const source = `export default function(server) { server.before("agent.turn_start", ({ request }) => request); return () => {}; }`;
     const directory = await createPlugin("policy", source);
