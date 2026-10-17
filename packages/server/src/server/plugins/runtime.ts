@@ -81,6 +81,7 @@ interface LoadedPlugin {
   child: PluginChild | null;
   outputCapture: PluginOutputCapture | null;
   pending: Map<string, PendingInvocation>;
+  pendingRequestSends: number;
   providerConnections: Map<string, RemoteProviderConnection>;
   providerConnectionTombstones: Set<string>;
   sessionSocket: PluginSessionSocket | null;
@@ -735,7 +736,10 @@ export class PluginRuntime {
     if (!child) throw new Error(`Plugin ${pluginId} has no server entry`);
     // Reject before serializing or enqueueing IPC; never queue more work for a slow plugin.
     // Policy hooks use the same bound and continue to fail closed on refusal.
-    if (loaded.pending.size >= MAX_PENDING_PLUGIN_REQUESTS)
+    if (
+      loaded.pending.size >= MAX_PENDING_PLUGIN_REQUESTS ||
+      loaded.pendingRequestSends >= MAX_PENDING_PLUGIN_REQUESTS
+    )
       return Promise.reject(new Error(`Plugin RPC capacity exceeded: ${pluginId}`));
     const requestId = message.requestId;
     const startedAt = performance.now();
@@ -748,11 +752,18 @@ export class PluginRuntime {
         reject(new Error(`Plugin RPC timed out: ${pluginId}.${message.type}`));
       }, REQUEST_TIMEOUT_MS);
       loaded.pending.set(requestId, { resolve, reject, timeout });
-      void send(child, message).catch((error) => {
-        clearTimeout(timeout);
-        loaded.pending.delete(requestId);
-        reject(error);
-      });
+      // Timed-out requests may still have serialized bytes queued in Node's IPC channel.
+      // Keep their send capacity occupied until the actual send callback settles.
+      loaded.pendingRequestSends += 1;
+      void send(child, message)
+        .finally(() => {
+          loaded.pendingRequestSends -= 1;
+        })
+        .catch((error) => {
+          clearTimeout(timeout);
+          loaded.pending.delete(requestId);
+          reject(error);
+        });
     }).finally(() => {
       const durationMs = performance.now() - startedAt;
       if (durationMs >= 500) {
@@ -805,6 +816,7 @@ export class PluginRuntime {
         child: null,
         outputCapture: null,
         pending: new Map(),
+        pendingRequestSends: 0,
         providerConnections: new Map(),
         providerConnectionTombstones: new Set(),
         sessionSocket: null,
@@ -953,6 +965,7 @@ export class PluginRuntime {
       child,
       outputCapture,
       pending,
+      pendingRequestSends: 0,
       providerConnections: new Map(),
       providerConnectionTombstones: new Set(),
       sessionSocket: session.socket,
