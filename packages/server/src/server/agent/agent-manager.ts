@@ -861,6 +861,11 @@ export class AgentManager {
     RetiredInternalAgent & { expiresAt: number }
   >();
   private readonly clients = new Map<AgentProvider, AgentClient>();
+  // One snapshot for all sessions: panel polls must not fan out CLI/status probes.
+  private providerAvailabilitySnapshot: {
+    expiresAt: number;
+    pending: Promise<ProviderAvailability[]>;
+  } | null = null;
   private readonly providerEnabled = new Map<AgentProvider, boolean>();
   private readonly providerDefinitions = new Map<AgentProvider, ProviderEnabledFlag>();
   private readonly agents = new Map<string, LiveManagedAgent>();
@@ -960,6 +965,7 @@ export class AgentManager {
   }
 
   registerClient(provider: AgentProvider, client: AgentClient): void {
+    this.providerAvailabilitySnapshot = null;
     this.clients.set(provider, client);
   }
 
@@ -968,6 +974,7 @@ export class AgentManager {
     clients: ProviderClientMap;
     retiredProviders?: readonly AgentProvider[];
   }): void {
+    this.providerAvailabilitySnapshot = null;
     this.providerEnabled.clear();
     this.providerDefinitions.clear();
     for (const [provider, definition] of Object.entries(input.providerDefinitions)) {
@@ -1245,9 +1252,33 @@ export class AgentManager {
   }
 
   async listProviderAvailability(): Promise<ProviderAvailability[]> {
-    return Promise.all(
-      Array.from(this.clients.keys()).map((provider) => this.getProviderAvailability(provider)),
-    );
+    let snapshot = this.providerAvailabilitySnapshot;
+    if (!snapshot || snapshot.expiresAt <= Date.now()) {
+      const current = {
+        expiresAt: Infinity,
+        pending: Promise.all(
+          Array.from(this.clients.keys()).map((provider) => this.getProviderAvailability(provider)),
+        ),
+      };
+      snapshot = current;
+      this.providerAvailabilitySnapshot = current;
+      void current.pending.then(
+        () => {
+          current.expiresAt = Date.now() + 5_000;
+          return undefined;
+        },
+        () => {
+          if (this.providerAvailabilitySnapshot === current)
+            this.providerAvailabilitySnapshot = null;
+        },
+      );
+    }
+    // Callers may change their response objects; never expose the cached rows.
+    return (await snapshot.pending).map(({ provider, available, error }) => ({
+      provider,
+      available,
+      error,
+    }));
   }
 
   async getProviderAvailability(provider: AgentProvider): Promise<ProviderAvailability> {
