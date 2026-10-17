@@ -253,12 +253,14 @@ describe("PluginRuntime", () => {
     const directory = await createPlugin("bounded", `export default function() {}`);
     const child = createReloadChild("bounded", [], ["wait"]);
     const requests: Array<{ requestId: string }> = [];
+    const sendCallbacks: Array<() => void> = [];
+    let checkingBackpressure = false;
     const originalSend = child.send.bind(child);
     child.send = (message, callback) => {
       if (message.type === "invoke") {
         const request = message as { type: string; requestId: string };
         requests.push(request);
-        if (requests.length > 64)
+        if (requests.length > 64 || checkingBackpressure)
           queueMicrotask(() =>
             child.emitMessage({
               type: "result",
@@ -267,7 +269,12 @@ describe("PluginRuntime", () => {
             }),
           );
       }
-      return originalSend(message, callback);
+      return originalSend(message, (error) => {
+        if (!callback) return;
+        const settle = callback.bind(undefined, error);
+        if (message.type === "invoke") sendCallbacks.push(settle);
+        else settle();
+      });
     };
     const lines: string[] = [];
     const logger = pino(
@@ -293,6 +300,14 @@ describe("PluginRuntime", () => {
       for (const request of requests.splice(0))
         child.emitMessage({ type: "result", requestId: request.requestId, output: "done" });
       expect(await Promise.all(pending)).toEqual(Array(64).fill("done"));
+      // Responses/timeouts must not release IPC capacity while send callbacks are stalled.
+      checkingBackpressure = true;
+      await expect(runtime.invoke("bounded", "wait", {})).rejects.toThrow(
+        "Plugin RPC capacity exceeded: bounded",
+      );
+      checkingBackpressure = false;
+      for (const callback of sendCallbacks.splice(0)) callback();
+      await Promise.resolve();
       const resumed = runtime.invoke("bounded", "wait", {});
       child.emitMessage({ type: "result", requestId: requests[0].requestId, output: "resumed" });
       expect(await resumed).toBe("resumed");
@@ -309,6 +324,7 @@ describe("PluginRuntime", () => {
       expect(lines.join("")).not.toContain("never-log-payload");
     } finally {
       const stopped = Promise.allSettled(pending);
+      for (const callback of sendCallbacks.splice(0)) callback();
       await runtime.stopAll();
       await stopped;
       vi.restoreAllMocks();
