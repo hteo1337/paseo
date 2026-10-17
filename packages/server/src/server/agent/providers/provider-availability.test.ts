@@ -1,7 +1,9 @@
 import { copyFileSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
+import type { AgentClient } from "../agent-sdk-types.js";
+import { createStub } from "../../test-utils/class-mocks.js";
 
 import { createTestLogger } from "../../../test-utils/test-logger.js";
 import type { AgentProvider } from "../agent-sdk-types.js";
@@ -53,6 +55,52 @@ afterEach(() => {
 });
 
 describe("default provider availability", () => {
+  test("shares availability probes across listings until expiry or registry change", async () => {
+    vi.useFakeTimers({ toFake: ["Date"] });
+    let release!: (available: boolean) => void;
+    const probe = vi.fn(
+      () =>
+        new Promise<boolean>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const client = createStub<AgentClient>({ isAvailable: probe });
+    const manager = new AgentManager({ clients: { codex: client }, logger: createTestLogger() });
+    try {
+      const first = manager.listProviderAvailability();
+      const second = manager.listProviderAvailability();
+      expect(probe).toHaveBeenCalledTimes(1);
+      release(true);
+      const rows = await first;
+      expect(await second).toEqual([{ provider: "codex", available: true, error: null }]);
+      rows[0].available = false;
+      expect(await manager.listProviderAvailability()).toEqual([
+        { provider: "codex", available: true, error: null },
+      ]);
+      expect(probe).toHaveBeenCalledTimes(1);
+      vi.advanceTimersByTime(5001);
+      const refreshed = manager.listProviderAvailability();
+      expect(probe).toHaveBeenCalledTimes(2);
+      // Replacement while a probe is in flight must not be overwritten by its completion.
+      const replacement = vi.fn(async () => false);
+      manager.registerClient("codex", createStub<AgentClient>({ isAvailable: replacement }));
+      release(true);
+      await refreshed;
+      expect(await manager.listProviderAvailability()).toEqual([
+        { provider: "codex", available: false, error: null },
+      ]);
+      expect(replacement).toHaveBeenCalledTimes(1);
+      manager.updateProviderRegistry({ providerDefinitions: {}, clients: { codex: client } });
+      const updated = manager.listProviderAvailability();
+      expect(probe).toHaveBeenCalledTimes(3);
+      release(false);
+      await updated;
+    } finally {
+      release(false);
+      vi.useRealTimers();
+    }
+  });
+
   test("Codex reports unavailable when the default command cannot be resolved", async () => {
     const binDir = makeTempDir("provider-availability-codex-");
     isolateCodexDefaultDiscoveryTo(binDir);
