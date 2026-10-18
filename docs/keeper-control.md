@@ -62,6 +62,11 @@ start and applied afterwards: it stays pending.
 
 `onActiveTurn` is required: `steer` steers the running turn and is refused with `steer_unavailable` if
 the provider cannot (there is no replace fallback); `reject` refuses with `turn_active`.
+A new turn is acknowledged by its first provider event. A steered send is acknowledged by the
+provider's accepted steer result and keeps the current turn; it does not wait for a new-turn event.
+Refused steering does not complete a receipt. For ordinary CLI sends, `agent send --behavior interrupt`
+remains the explicit replacement path when an agent-originated message would otherwise steer.
+
 `allowPendingPermissions` defaults to false, so a send while anything is pending is `permission_pending`.
 
 Results: `accepted`, `duplicate`, `rejected` (with `reason`), `outcome_unknown`. Reasons: `disabled`,
