@@ -391,6 +391,8 @@ export class KeeperControl {
           const options = { clientMessageId: `keeper:${req.idempotencyKey}` };
           if (context.state.hasActiveTurn) {
             if (req.onActiveTurn === "reject") throw new AdmissionRefused("turn_active");
+            // Steering keeps the current turn: acknowledge the provider's accepted
+            // steer result, without waiting for a new-turn event that may never arrive.
             await agentManager.steerHeld(context, req.text, options);
             return "steered";
           }
