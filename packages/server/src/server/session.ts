@@ -4572,7 +4572,7 @@ export class Session {
         target: worktree,
         firstAgentContext,
         background: msg.background,
-        callerWorkspaceId: this.getCallerWorkspaceId(msg.callerAgentId),
+        callerWorkspaceId: await this.getCallerWorkspaceId(msg.callerAgentId),
       });
       createdWorktreeForCleanup = createdWorktree;
       const resolvedIntent = await this.resolveSessionCreateAgentIntent({
@@ -6978,10 +6978,12 @@ export class Session {
     }
   }
 
-  private getCallerWorkspaceId(callerAgentId?: string): string | undefined {
+  private async getCallerWorkspaceId(callerAgentId?: string): Promise<string | undefined> {
     if (!callerAgentId) return undefined;
-    const caller = this.agentManager.getAgent(callerAgentId);
-    if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);
+    const storedCaller = await this.agentStorage.get(callerAgentId);
+    const caller = this.agentManager.getAgent(callerAgentId) ?? storedCaller;
+    if (!caller || storedCaller?.archivedAt)
+      throw new Error(`Caller agent ${callerAgentId} not found`);
     return caller.workspaceId;
   }
 
@@ -7032,7 +7034,7 @@ export class Session {
         expectsInitialAgent: Boolean(request.firstAgentContext),
         workspaceId,
         background: request.background,
-        callerWorkspaceId: this.getCallerWorkspaceId(request.callerAgentId),
+        callerWorkspaceId: await this.getCallerWorkspaceId(request.callerAgentId),
       },
     );
     await this.syncWorkspaceGitObserverForWorkspace(workspace);
@@ -7096,7 +7098,7 @@ export class Session {
         firstAgentContext: request.firstAgentContext,
         title: request.title,
         background: request.background,
-        callerWorkspaceId: this.getCallerWorkspaceId(request.callerAgentId),
+        callerWorkspaceId: await this.getCallerWorkspaceId(request.callerAgentId),
       },
       source.baseBranch
         ? { resolveDefaultBranch: async () => source.baseBranch as string }
