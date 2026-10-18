@@ -125,13 +125,23 @@ export function SidebarModelProvider({
       workspaces: [...workspaceEntriesByKey.values()],
       projectFilters: resolvedProjectFilters,
     });
-    const filtered = filterWorkspacesByLabels({ workspaces: byProject.filter((workspace) => showBackground || !workspace.background), ...labelFilter });
+    const filtered = filterWorkspacesByLabels({
+      workspaces: byProject.filter((workspace) => showBackground || !workspace.background),
+      ...labelFilter,
+    });
     return new Map(
       filtered
         .filter((workspace) => !hideInactive || liveKeys.has(workspace.workspaceKey))
         .map((workspace) => [workspace.workspaceKey, workspace]),
     );
-  }, [showBackground, hideInactive, liveKeys, labelFilter, resolvedProjectFilters, workspaceEntriesByKey]);
+  }, [
+    showBackground,
+    hideInactive,
+    liveKeys,
+    labelFilter,
+    resolvedProjectFilters,
+    workspaceEntriesByKey,
+  ]);
   const visibleWorkspaceKeys = useMemo(
     () => new Set(filteredWorkspaceEntriesByKey.keys()),
     [filteredWorkspaceEntriesByKey],
