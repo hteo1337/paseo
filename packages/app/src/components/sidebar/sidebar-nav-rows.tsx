@@ -113,13 +113,6 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
         {firstRowTrailing}
       </SidebarSectionHeader>
       {collapsed ? null : (
-        <SidebarNavResizeHandle
-          height={measuredHeight ?? height}
-          onPreviewHeight={setDraggedHeight}
-          onCommitHeight={commitHeight}
-        />
-      )}
-      {collapsed ? null : (
         <ScrollView
           style={rowsStyle}
           onLayout={handleRowsLayout}
@@ -143,6 +136,13 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
             return <Row key={item.key} onBeforeNavigate={onBeforeNavigate} />;
           })}
         </ScrollView>
+      )}
+      {collapsed ? null : (
+        <SidebarNavResizeHandle
+          height={measuredHeight ?? height}
+          onPreviewHeight={setDraggedHeight}
+          onCommitHeight={commitHeight}
+        />
       )}
     </View>
   );

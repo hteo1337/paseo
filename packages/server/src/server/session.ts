@@ -7564,8 +7564,9 @@ export class Session {
     if (!callerAgentId) return null;
     let caller: (CreateAgentCaller & { background?: boolean }) | null =
       this.agentManager.getAgent(callerAgentId);
+    const stored = await this.agentStorage.get(callerAgentId);
+    if (stored?.archivedAt) throw new Error(`Caller agent ${callerAgentId} not found`);
     if (!caller) {
-      const stored = await this.agentStorage.get(callerAgentId);
       if (stored && !stored.archivedAt) caller = stored;
     }
     if (!caller) throw new Error(`Caller agent ${callerAgentId} not found`);

@@ -114,6 +114,38 @@ export class WorkspaceProvisioningError extends Error {
   }
 }
 
+async function pathExists(target: string): Promise<boolean> {
+  try {
+    await access(target);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+async function resolveCreateAgentWorkspaceCwd(inputCwd: string): Promise<string> {
+  const cwd = resolve(inputCwd);
+  const sandbox = resolve(homedir(), "Paseo", "Sandbox");
+  const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
+  const disposableRoot = [
+    "/tmp",
+    "/private/tmp",
+    "/var/folders",
+    "/private/var/folders",
+    sandbox,
+  ].find(inDirectory);
+  if (!disposableRoot) return cwd;
+  let repoRoot = cwd;
+  // A dotfiles repository above Sandbox does not turn disposable folders into checkouts.
+  while (repoRoot !== disposableRoot && !(await pathExists(join(repoRoot, ".git")))) {
+    const parent = dirname(repoRoot);
+    if (parent === repoRoot) break;
+    repoRoot = parent;
+  }
+  const throwaway = !(await pathExists(join(repoRoot, ".git")));
+  return throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
+}
+
 export function createWorkspaceProvisioningService(deps: {
   unarchiveWorkspaceAgents: (request: WorkspaceArchiveRestoreRequest) => Promise<void>;
   serverId?: string;
@@ -332,15 +364,6 @@ export function createWorkspaceProvisioningService(deps: {
   function isAtOrBelow(target: string, root: string): boolean {
     const rel = relative(root, target);
     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
-  }
-
-  async function pathExists(target: string): Promise<boolean> {
-    try {
-      await access(target);
-      return true;
-    } catch {
-      return false;
-    }
   }
 
   async function requireActiveProject(projectId: string): Promise<PersistedProjectRecord> {
@@ -582,20 +605,7 @@ export function createWorkspaceProvisioningService(deps: {
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
 
     const background = await resolveBackground(input);
-    const cwd = resolve(input.cwd);
-    const sandbox = resolve(homedir(), "Paseo", "Sandbox");
-    const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
-    let repoRoot = cwd;
-    while (!(await pathExists(join(repoRoot, ".git")))) {
-      const parent = dirname(repoRoot);
-      if (parent === repoRoot) break;
-      repoRoot = parent;
-    }
-    const throwaway =
-      !(await pathExists(join(repoRoot, ".git"))) &&
-      (["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].some(inDirectory) ||
-        inDirectory(sandbox));
-    const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
+    const workspaceCwd = await resolveCreateAgentWorkspaceCwd(input.cwd);
 
     const lockKey = await canonicalPath(workspaceCwd);
     const previous = createAgentWorkspaceLocks.get(lockKey);
@@ -720,7 +730,13 @@ export function createWorkspaceProvisioningService(deps: {
         });
       }
     }
-    if (next) await workspaceRegistry.upsert(next);
+    if (!next) return workspace;
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(next);
+    if (claimed.workspace.workspaceId !== next.workspaceId) {
+      throw new Error(
+        "Another active workspace already owns this path; select its explicit workspaceId",
+      );
+    }
     // A canceled archive supplies a modern stamp before the record itself is archived.
     if (archivedAt) {
       await deps.unarchiveWorkspaceAgents({
@@ -729,7 +745,7 @@ export function createWorkspaceProvisioningService(deps: {
         allowLegacyFallback: Boolean(workspace.archivedAt),
       });
     }
-    return next ?? workspace;
+    return claimed.workspace;
   }
 
   async function refreshWorkspaceRecord(
