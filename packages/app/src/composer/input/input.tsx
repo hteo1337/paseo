@@ -2026,8 +2026,14 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const ghostPresentation = resolveGhostPresentation({
-      ghostSuggestion,
-      value,
+      ghostSuggestion: isFullscreen || readOnly ? null : ghostSuggestion,
+      value: readOnly
+        ? value
+        : resolveComposerSurfaceText(
+            valueRef.current,
+            textReplacement,
+            appliedTextReplacementKeyRef.current,
+          ),
       placeholder: placeholder ?? t("composer.placeholders.fallback"),
       isCompact,
       rowWidth: ghostRowWidth,
@@ -2112,7 +2118,18 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             fullscreen={isFullscreen}
             compact={isCompact}
             onRenderedLinesChange={setRenderedLines}
-            focusHintVisible={!isFullscreen && isWeb && !isInputFocused && !value}
+            ghostSuggestion={ghostPresentation.suggestion}
+            ghostHintVisible={ghostPresentation.hintVisible}
+            onGhostRowWidth={setGhostRowWidth}
+            focusHintVisible={
+              !isFullscreen &&
+              shouldShowFocusHint({
+                isWeb,
+                isInputFocused,
+                hasValue: Boolean(value),
+                hasGhost: ghostPresentation.suggestion !== null,
+              })
+            }
             focusInputKeys={focusInputKeys}
             focusHintLabel={t("composer.input.focusHint", {
               shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
@@ -2126,7 +2143,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         assignTextInput,
         textInputStyle,
         readOnlyTextStyle,
-        placeholder,
         ghostPresentation.placeholder,
         ghostPresentation.suggestion,
         ghostPresentation.hintVisible,
