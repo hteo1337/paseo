@@ -2383,6 +2383,8 @@ test("orders a concurrent replacement after a pending accepted steer", async () 
     })();
     await consumeInitial;
     await vi.waitFor(() => expect(session.startCount).toBe(2));
+    // Provider entry precedes acceptance while the foreground policy gate is async.
+    await manager.waitForAgentRunStart(agent.id);
 
     expect(session.interruptCount).toBe(1);
     expect(
@@ -12693,7 +12695,7 @@ test("provider close failure retains the runtime for cleanup instead of allowing
 
     await expect(
       ensureAgentLoaded(created.id, { agentManager: manager, agentStorage: storage, logger }),
-    ).resolves.toMatchObject({ id: created.id, lifecycle: "idle" });
+    ).resolves.toMatchObject({ id: created.id, lifecycle: "error" });
   } finally {
     await manager.closeAgent("00000000-0000-4000-8000-000000000217").catch(() => undefined);
     await storage.flush().catch(() => undefined);
