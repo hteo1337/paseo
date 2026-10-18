@@ -310,14 +310,31 @@ test("background workspace creation preserves hooks, inheritance and durable vis
   const parent = await provisioning.createWorkspaceForDirectory(dir, null, undefined, {
     background: true,
   });
-  const child = await provisioning.createWorkspaceForDirectory(dir, null, undefined, {
-    callerWorkspaceId: parent.workspaceId,
+  const child = await provisioning.createWorkspaceForDirectory(
+    path.join(tmpDir, "inherited"),
+    null,
+    undefined,
+    {
+      callerWorkspaceId: parent.workspaceId,
+    },
+  );
+  const visible = await provisioning.createWorkspaceForDirectory(
+    path.join(tmpDir, "visible"),
+    null,
+    undefined,
+    {
+      callerWorkspaceId: parent.workspaceId,
+      background: false,
+    },
+  );
+  const human = await provisioning.createWorkspaceForDirectory(path.join(tmpDir, "human"));
+  const repeated = await provisioning.createWorkspaceForDirectory(dir, null, undefined, {
+    background: true,
   });
-  const visible = await provisioning.createWorkspaceForDirectory(dir, null, undefined, {
-    callerWorkspaceId: parent.workspaceId,
-    background: false,
-  });
-  const human = await provisioning.createWorkspaceForDirectory(dir);
+  expect(repeated.workspaceId).toBe(parent.workspaceId);
+  await expect(
+    provisioning.createWorkspaceForDirectory(dir, null, undefined, { background: false }),
+  ).rejects.toThrow("Workspace visibility differs");
   expect(parent.background).toBe(true);
   expect(child.background).toBe(true);
   expect(visible.background).toBe(false);
@@ -478,15 +495,23 @@ test("default directory open skips archived background workspaces while explicit
   expect(opened.workspaceId).not.toBe(background.workspaceId);
   const archived = await workspaceRegistry.get(background.workspaceId);
   expect(archived).toMatchObject({ background: true, archivedAt: ARCHIVED_AT });
+  await expect(provisioning.ensureWorkspaceRecordUnarchived(archived!)).rejects.toThrow(
+    "Workspace visibility differs",
+  );
+  expect((await workspaceRegistry.get(background.workspaceId))?.archivedAt).toBe(ARCHIVED_AT);
+  await workspaceRegistry.archive(opened.workspaceId, ARCHIVED_AT);
   const recovered = await provisioning.ensureWorkspaceRecordUnarchived(archived!);
   expect(recovered).toMatchObject({
     workspaceId: background.workspaceId,
     background: true,
     archivedAt: null,
   });
-  expect((await provisioning.findOrCreateWorkspaceForDirectory(cwd)).workspaceId).toBe(
-    opened.workspaceId,
+  await expect(provisioning.findOrCreateWorkspaceForDirectory(cwd)).rejects.toThrow(
+    "Workspace visibility differs",
   );
+  expect(
+    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+  ).toHaveLength(1);
 });
 
 test("reopening archived exact-root records restores the fresh Git project", async () => {
@@ -561,6 +586,8 @@ test("uses one workspace snapshot when reopening an archived workspace", async (
     existsOnDisk: () => workspaceRegistry.existsOnDisk(),
     list: async () => (reads++ === 0 ? archived : []),
     get: (workspaceId) => workspaceRegistry.get(workspaceId),
+    getOrCreateActiveByCwd: (workspace, context) =>
+      workspaceRegistry.getOrCreateActiveByCwd(workspace, context),
     upsert: (workspace) => workspaceRegistry.upsert(workspace),
     archive: (workspaceId, archivedAt) => workspaceRegistry.archive(workspaceId, archivedAt),
     remove: (workspaceId) => workspaceRegistry.remove(workspaceId),

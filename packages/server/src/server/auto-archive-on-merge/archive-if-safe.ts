@@ -84,6 +84,7 @@ export async function archiveIfSafe(input: {
     return "skipped";
   }
 
+  const deletedRoot = ownership.worktreePath ?? cwd;
   try {
     const autoArchivedChangeRequestUrl = await options.getAutoArchivedChangeRequestUrl(workspaceId);
     if (input.isCancelled?.()) return "skipped";
@@ -91,7 +92,6 @@ export async function archiveIfSafe(input: {
       return "skipped";
     }
 
-    const deletedRoot = ownership.worktreePath ?? cwd;
     const busyAgentIds = listBusyAgentIds(options.agentManager, workspaceId, deletedRoot);
     if (busyAgentIds.length > 0) {
       log.info(
@@ -153,6 +153,11 @@ export async function archiveIfSafe(input: {
     );
     return "archived";
   } catch (error) {
+    // A turn can begin while guarded teardown awaits provider events. Keep the
+    // workspace active and retry when that turn finishes.
+    if (listBusyAgentIds(options.agentManager, workspaceId, deletedRoot).length) {
+      return "deferred";
+    }
     log.warn({ err: error, cwd }, "Auto-archive after merge failed");
     return "skipped";
   }
