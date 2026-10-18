@@ -365,19 +365,29 @@ export async function sendPromptToAgent(
       await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
     }
 
-    const source = await resolvePromptSource(params.source, params.agentManager, params.agentStorage);
+    const source = await resolvePromptSource(
+      params.source,
+      params.agentManager,
+      params.agentStorage,
+    );
     const delivery = prepareAgentMessage(params.prompt, source, params.messageId);
     const runOptions = delivery.messageId
       ? { ...params.runOptions, clientMessageId: delivery.messageId }
       : params.runOptions;
 
-    return await startAgentRun(params.agentManager, params.agentId, delivery.prompt, params.logger, {
-      onDispatch: params.onDispatch,
-      replaceRunning: true,
-      activeTurnBehavior: params.activeTurnBehavior,
-      clearPendingPermissions: params.clearPendingPermissions,
-      runOptions,
-    });
+    return await startAgentRun(
+      params.agentManager,
+      params.agentId,
+      delivery.prompt,
+      params.logger,
+      {
+        onDispatch: params.onDispatch,
+        replaceRunning: true,
+        activeTurnBehavior: params.activeTurnBehavior,
+        clearPendingPermissions: params.clearPendingPermissions,
+        runOptions,
+      },
+    );
   } finally {
     release();
   }
