@@ -109,6 +109,29 @@ export class WorkspaceProvisioningError extends Error {
   }
 }
 
+function resolveCreateAgentWorkspaceCwd(inputCwd: string): string {
+  const cwd = resolve(inputCwd);
+  const sandbox = resolve(homedir(), "Paseo", "Sandbox");
+  const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
+  const disposableRoot = [
+    "/tmp",
+    "/private/tmp",
+    "/var/folders",
+    "/private/var/folders",
+    sandbox,
+  ].find(inDirectory);
+  if (!disposableRoot) return cwd;
+  let repoRoot = cwd;
+  // A dotfiles repository above Sandbox does not turn disposable folders into checkouts.
+  while (repoRoot !== disposableRoot && !existsSync(join(repoRoot, ".git"))) {
+    const parent = dirname(repoRoot);
+    if (parent === repoRoot) break;
+    repoRoot = parent;
+  }
+  const throwaway = !existsSync(join(repoRoot, ".git"));
+  return throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
+}
+
 export function createWorkspaceProvisioningService(deps: {
   serverId?: string;
   workspaceRegistry: WorkspaceRegistry;
@@ -498,20 +521,7 @@ export function createWorkspaceProvisioningService(deps: {
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
 
     const background = await resolveBackground(input);
-    const cwd = resolve(input.cwd);
-    const sandbox = resolve(homedir(), "Paseo", "Sandbox");
-    const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
-    let repoRoot = cwd;
-    while (!existsSync(join(repoRoot, ".git"))) {
-      const parent = dirname(repoRoot);
-      if (parent === repoRoot) break;
-      repoRoot = parent;
-    }
-    const throwaway =
-      !existsSync(join(repoRoot, ".git")) &&
-      (["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].some(inDirectory) ||
-        inDirectory(sandbox));
-    const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
+    const workspaceCwd = resolveCreateAgentWorkspaceCwd(input.cwd);
 
     const realPath = (target: string) => {
       try {
@@ -629,8 +639,13 @@ export function createWorkspaceProvisioningService(deps: {
       }
     }
     if (!next) return workspace;
-    await workspaceRegistry.upsert(next);
-    return next;
+    const claimed = await workspaceRegistry.getOrCreateActiveByCwd(next);
+    if (claimed.workspace.workspaceId !== next.workspaceId) {
+      throw new Error(
+        "Another active workspace already owns this path; select its explicit workspaceId",
+      );
+    }
+    return claimed.workspace;
   }
 
   async function refreshWorkspaceRecord(
