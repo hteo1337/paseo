@@ -402,7 +402,7 @@ function createRealOutcomeHarness(input: {
       }),
     } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {
-      list: async (): Promise<StoredAgentRecord[]> => [],
+      listByWorkspace: async (): Promise<StoredAgentRecord[]> => [],
     } as unknown as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {
       listDirectories: () => [],
@@ -972,7 +972,9 @@ describe("archiveIfSafe", () => {
         github: createGitHubServiceStub(),
         agentManager: manager,
         agentStorage: storage,
-        terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+        terminalManager: {
+          getTerminals: async () => [],
+        } as unknown as AutoArchiveArchiveOptions["terminalManager"],
         findWorkspaceIdForCwd: async () => workspaceId,
         listActiveWorkspaces: async () =>
           archivedWorkspaceIds.has(workspaceId)
@@ -1019,9 +1021,9 @@ describe("archiveIfSafe", () => {
       { workspaceId },
     );
 
-    const applySnapshot = storage.applySnapshot.bind(storage);
+    const getLastAssistantMessage = manager.getLastAssistantMessage.bind(manager);
     let armed = true;
-    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+    vi.spyOn(manager, "getLastAssistantMessage").mockImplementation(async (...args) => {
       if (armed) {
         armed = false;
         client.sessions[0]?.push({
@@ -1030,7 +1032,7 @@ describe("archiveIfSafe", () => {
           turnId: "autonomous",
         } as AgentStreamEvent);
       }
-      return applySnapshot(...args);
+      return getLastAssistantMessage(...args);
     });
 
     const options = {
@@ -1044,7 +1046,10 @@ describe("archiveIfSafe", () => {
       github: createGitHubServiceStub(),
       agentManager: manager,
       agentStorage: storage,
-      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      terminalManager: {
+        listDirectories: () => [],
+        getTerminals: async () => [],
+      } as unknown as AutoArchiveArchiveOptions["terminalManager"],
       findWorkspaceIdForCwd: async () => workspaceId,
       listActiveWorkspaces: async () =>
         archivedWorkspaceIds.has(workspaceId)
@@ -1103,7 +1108,10 @@ describe("archiveIfSafe", () => {
       github: createGitHubServiceStub(),
       agentManager: manager,
       agentStorage: storage,
-      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      terminalManager: {
+        listDirectories: () => [],
+        getTerminals: async () => [],
+      } as unknown as AutoArchiveArchiveOptions["terminalManager"],
       findWorkspaceIdForCwd: async () => workspaceId,
       listActiveWorkspaces: async () =>
         archivedWorkspaceIds.has(workspaceId)
