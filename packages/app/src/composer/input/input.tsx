@@ -2036,8 +2036,14 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const ghostPresentation = resolveGhostPresentation({
-      ghostSuggestion,
-      value,
+      ghostSuggestion: isFullscreen || readOnly ? null : ghostSuggestion,
+      value: readOnly
+        ? value
+        : resolveComposerSurfaceText(
+            valueRef.current,
+            textReplacement,
+            appliedTextReplacementKeyRef.current,
+          ),
       placeholder: placeholder ?? t("composer.placeholders.fallback"),
       isCompact,
       rowWidth: ghostRowWidth,
