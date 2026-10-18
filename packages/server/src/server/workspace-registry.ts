@@ -613,6 +613,11 @@ export class FileBackedWorkspaceRegistry
             left.workspaceId.localeCompare(right.workspaceId),
         )[0];
       if (existing) {
+        if (existing.background !== parsed.background) {
+          throw new Error(
+            "Workspace visibility differs at this path; select its explicit workspaceId",
+          );
+        }
         if (context?.rehomeProjectId && existing.projectId !== context.rehomeProjectId) {
           const updated = {
             ...existing,
