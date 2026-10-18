@@ -404,7 +404,7 @@ function createRealOutcomeHarness(input: {
       }),
     } as unknown as AutoArchiveArchiveOptions["agentManager"],
     agentStorage: {
-      list: async (): Promise<StoredAgentRecord[]> => [],
+      listByWorkspace: async (): Promise<StoredAgentRecord[]> => [],
     } as unknown as AutoArchiveArchiveOptions["agentStorage"],
     terminalManager: {
       listDirectories: () => [],
@@ -997,7 +997,9 @@ describe("archiveIfSafe", () => {
         github: createGitHubServiceStub(),
         agentManager: manager,
         agentStorage: storage,
-        terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+        terminalManager: {
+          getTerminals: async () => [],
+        } as unknown as AutoArchiveArchiveOptions["terminalManager"],
         findWorkspaceIdForCwd: async () => workspaceId,
         listActiveWorkspaces: async () =>
           archivedWorkspaceIds.has(workspaceId)
@@ -1049,7 +1051,7 @@ describe("archiveIfSafe", () => {
     const runtime = manager as unknown as { drainSessionEvents(id: string): Promise<void> };
     const drain = runtime.drainSessionEvents.bind(runtime);
     let armed = true;
-    vi.spyOn(runtime, "drainSessionEvents").mockImplementation(async (id) => {
+    const drainSpy = vi.spyOn(runtime, "drainSessionEvents").mockImplementation(async (id) => {
       if (armed) {
         armed = false;
         client.sessions[0]?.push({
@@ -1072,7 +1074,10 @@ describe("archiveIfSafe", () => {
       github: createGitHubServiceStub(),
       agentManager: manager,
       agentStorage: storage,
-      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      terminalManager: {
+        listDirectories: () => [],
+        getTerminals: async () => [],
+      } as unknown as AutoArchiveArchiveOptions["terminalManager"],
       findWorkspaceIdForCwd: async () => workspaceId,
       listActiveWorkspaces: async () =>
         archivedWorkspaceIds.has(workspaceId)
@@ -1093,7 +1098,11 @@ describe("archiveIfSafe", () => {
     });
 
     // The push only fires if teardown actually attempted to close this agent.
+    expect(drainSpy).toHaveBeenCalled();
     expect(armed).toBe(false);
+    console.log(
+      `[archive-race] drainSessionEvents calls=${drainSpy.mock.calls.length}, armed=${armed}, outcome=${outcome}`,
+    );
     expect(outcome).toBe("deferred");
     expect(client.sessions[0]?.closed).toBe(false);
     expect(archivedWorkspaceIds.has(workspaceId)).toBe(false);
@@ -1131,7 +1140,10 @@ describe("archiveIfSafe", () => {
       github: createGitHubServiceStub(),
       agentManager: manager,
       agentStorage: storage,
-      terminalManager: {} as unknown as AutoArchiveArchiveOptions["terminalManager"],
+      terminalManager: {
+        listDirectories: () => [],
+        getTerminals: async () => [],
+      } as unknown as AutoArchiveArchiveOptions["terminalManager"],
       findWorkspaceIdForCwd: async () => workspaceId,
       listActiveWorkspaces: async () =>
         archivedWorkspaceIds.has(workspaceId)
