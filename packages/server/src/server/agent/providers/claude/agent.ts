@@ -34,6 +34,7 @@ import {
   getClaudeContextWindowMaxTokens,
   getClaudeModelsWithSettings,
   resolveObservedClaudeModelId,
+  normalizeClaudeRuntimeModelId,
   resolveConfiguredClaudeModel,
 } from "./models.js";
 import {
