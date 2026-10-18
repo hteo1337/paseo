@@ -151,6 +151,9 @@ interface SessionTestAccess {
     setTitle(agentId: string, title: string): Promise<unknown>;
   };
   workspaceRegistry: {
+    getOrCreateActiveByCwd(
+      record: PersistedWorkspaceRecord,
+    ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }>;
     listActive(...args: unknown[]): Promise<unknown[]>;
     listAll(...args: unknown[]): Promise<unknown[]>;
     archive(workspaceId: string, archivedAt: string): Promise<void>;
@@ -646,9 +649,18 @@ function createSessionForWorkspaceTests(
         }),
       );
     },
+    async getOrCreateActiveByCwd(record, context) {
+      await this.upsert(record, context);
+      return { workspace: record, created: true };
+    },
     upsert: async () => {},
     archive: async () => {},
     remove: async () => {},
+  };
+  // Older partial registry ports still delegate persistence through their mutable upsert stub.
+  workspaceRegistry.getOrCreateActiveByCwd ??= async function (record, context) {
+    await this.upsert(record, context);
+    return { workspace: record, created: true };
   };
   const workspaceGitService = options.workspaceGitService ?? createNoopWorkspaceGitService();
   const providerSnapshotManager = createProviderSnapshotManagerStub().manager;
@@ -958,6 +970,12 @@ test("create_agent_request keeps requested child cwd when grouped under an exist
     const parent = path.join(workdir, "parent");
     const child = path.join(parent, "child");
     mkdirSync(child, { recursive: true });
+    execFileSync("git", ["init", "--quiet", parent]);
+    expect(
+      execFileSync("git", ["-C", child, "rev-parse", "--show-toplevel"], {
+        encoding: "utf8",
+      }).trim(),
+    ).toBe(realpathSync(parent));
 
     const logger = {
       child: () => logger,
@@ -4279,6 +4297,10 @@ test("create paseo worktree response preserves an explicit non-Git project", asy
     record: ReturnType<typeof createPersistedWorkspaceRecord>,
   ) => {
     workspaces.set(record.workspaceId, record);
+  };
+  session.workspaceRegistry.getOrCreateActiveByCwd = async (record) => {
+    workspaces.set(record.workspaceId, record);
+    return { workspace: record, created: true };
   };
   session.projectRegistry.get = async (projectId: string) => projects.get(projectId) ?? null;
   session.projectRegistry.list = async () => Array.from(projects.values());
