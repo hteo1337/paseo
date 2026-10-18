@@ -526,12 +526,15 @@ export function createWorkspaceProvisioningService(deps: {
     cwd: string,
     title?: string | null,
     candidateWorkspaceId?: string,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
+    const background = await resolveBackground(context);
     // Path-based discovery selects public work; explicit-ID recovery bypasses this selector.
     const workspaces = (await workspaceRegistry.list())
       .filter(
-        (workspace) => !workspace.background && areEquivalentPaths(workspace.cwd, normalizedCwd),
+        (workspace) =>
+          workspace.background === background && areEquivalentPaths(workspace.cwd, normalizedCwd),
       )
       .sort(
         (left, right) =>
@@ -559,6 +562,8 @@ export function createWorkspaceProvisioningService(deps: {
       undefined,
       {
         workspaceId: candidateWorkspaceId,
+        background,
+        callerWorkspaceId: context?.callerWorkspaceId,
       },
       true,
     );
