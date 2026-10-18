@@ -840,7 +840,7 @@ describe("ScheduleService", () => {
     expect(await workspaceRegistry.list()).toEqual([]);
   });
 
-  test("archiveOnFinish=false local runs create one active workspace per run", async () => {
+  test("archiveOnFinish=false local runs reuse the active workspace at the same cwd", async () => {
     const {
       workspaceRegistry,
       createDirectoryWorkspace: createScheduleDirectoryWorkspace,
@@ -866,7 +866,7 @@ describe("ScheduleService", () => {
     });
 
     const created = await service.create({
-      prompt: "repeat in separate workspaces",
+      prompt: "repeat in the same local workspace",
       cadence: { type: "every", everyMs: 60_000 },
       target: {
         type: "new-agent",
@@ -891,17 +891,12 @@ describe("ScheduleService", () => {
     const secondAgent = await agentStorage.get(inspected.runs[1]!.agentId!);
     expect(firstAgent?.workspaceId).toMatch(/^wks_/);
     expect(secondAgent?.workspaceId).toMatch(/^wks_/);
-    expect(firstAgent?.workspaceId).not.toBe(secondAgent?.workspaceId);
+    expect(firstAgent?.workspaceId).toBe(secondAgent?.workspaceId);
     expect(firstAgent?.archivedAt ?? null).toBeNull();
     expect(secondAgent?.archivedAt ?? null).toBeNull();
     expect(await workspaceRegistry.list()).toEqual([
       expect.objectContaining({
         workspaceId: firstAgent?.workspaceId,
-        cwd: tempDir,
-        archivedAt: null,
-      }),
-      expect.objectContaining({
-        workspaceId: secondAgent?.workspaceId,
         cwd: tempDir,
         archivedAt: null,
       }),
