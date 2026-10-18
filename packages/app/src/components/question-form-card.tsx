@@ -363,6 +363,7 @@ function QuestionOtherInput({
 // the permission they answer, so a stale question's guesses never show here;
 // each draft also names its question, so one question's guess never shows under another.
 function QuestionAnswerSuggestions({
+  enabled,
   serverId,
   agentId,
   permissionId,
@@ -370,6 +371,7 @@ function QuestionAnswerSuggestions({
   qIndex,
   onPick,
 }: {
+  enabled: boolean;
   serverId: string;
   agentId: string;
   permissionId: string;
@@ -386,7 +388,7 @@ function QuestionAnswerSuggestions({
     [drafts, qIndex, questions],
   );
   const handleSelect = useCallback((text: string) => onPick(qIndex, text), [onPick, qIndex]);
-  if (suggestions.length === 0) {
+  if (!enabled || suggestions.length === 0) {
     return null;
   }
   return <PromptSuggestionChips suggestions={suggestions} onSelect={handleSelect} />;
@@ -646,16 +648,17 @@ export function QuestionFormCard({
               ))}
             </View>
           ) : null}
-          {showTextInput ? (
-            <QuestionAnswerSuggestions
-              serverId={serverId}
-              agentId={permission.agentId}
-              permissionId={permission.request.id}
-              questions={questions}
-              qIndex={resolvedActiveQuestionIndex}
-              onPick={pickDraftAnswer}
-            />
-          ) : null}
+
+          <QuestionAnswerSuggestions
+            enabled={showTextInput}
+            serverId={serverId}
+            agentId={permission.agentId}
+            permissionId={permission.request.id}
+            questions={questions}
+            qIndex={resolvedActiveQuestionIndex}
+            onPick={pickDraftAnswer}
+          />
+
           {showTextInput ? (
             <QuestionOtherInput
               qIndex={resolvedActiveQuestionIndex}
