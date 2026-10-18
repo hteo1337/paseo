@@ -15,7 +15,8 @@ import {
   touchDragNavigationDivider,
 } from "../support/helpers/sidebar-nav-group";
 
-const SHORT_WINDOW = { width: 1200, height: 360 };
+// Compact beta.3 rows fit at 360px; this viewport actually requires scrolling.
+const SHORT_WINDOW = { width: 1200, height: 240 };
 
 test.describe("Sidebar navigation group", () => {
   test("owner folds the navigation group away and finds it folded next time", async ({ page }) => {
