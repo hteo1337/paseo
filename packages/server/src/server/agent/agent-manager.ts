@@ -3237,6 +3237,25 @@ export class AgentManager {
     });
   }
 
+  private async checkForegroundTurnPolicy(
+    agent: ActiveManagedAgent,
+    options?: AgentRunOptions,
+  ): Promise<void> {
+    if (this.pluginLifecycle) {
+      try {
+        await this.pluginLifecycle.before(
+          "agent.turn_start",
+          await this.buildTurnStartRequest(
+            agent,
+            options?.source ?? (agent.internal ? "internal" : "prompt"),
+          ),
+        );
+      } catch (error) {
+        throw new TurnStartRefusal(policyErrorMessage(error));
+      }
+    }
+  }
+
   private async startPendingForegroundTurn(params: {
     agent: ActiveManagedAgent;
     agentId: string;
@@ -3251,19 +3270,7 @@ export class AgentManager {
         await this.waitForAutonomousTurnSettlement(agent);
         this.assertSessionStillActive(agent);
       }
-      if (this.pluginLifecycle) {
-        try {
-          await this.pluginLifecycle.before(
-            "agent.turn_start",
-            await this.buildTurnStartRequest(
-              agent,
-              options?.source ?? (agent.internal ? "internal" : "prompt"),
-            ),
-          );
-        } catch (error) {
-          throw new TurnStartRefusal(policyErrorMessage(error));
-        }
-      }
+      await this.checkForegroundTurnPolicy(agent, options);
       this.assertSessionStillActive(agent);
       pendingRun.resolveAdmission({ approved: true });
       if (agent.provider === "claude") this.approvedClaudeSessions.add(agent.session);

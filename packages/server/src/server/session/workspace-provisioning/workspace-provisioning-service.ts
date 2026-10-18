@@ -66,6 +66,8 @@ export interface WorkspaceProvisioningService {
   findOrCreateWorkspaceForDirectory(
     cwd: string,
     title?: string | null,
+    candidateWorkspaceId?: string,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord>;
   resolveOrCreateWorkspaceIdForCreateAgent(input: ResolveOrCreateWorkspaceIdInput): Promise<string>;
   createWorkspaceForDirectory(
@@ -460,12 +462,15 @@ export function createWorkspaceProvisioningService(deps: {
     cwd: string,
     title?: string | null,
     candidateWorkspaceId?: string,
+    context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
+    const background = await resolveBackground(context);
     // Path-based discovery selects public work; explicit-ID recovery bypasses this selector.
     const workspaces = (await workspaceRegistry.list())
       .filter(
-        (workspace) => !workspace.background && areEquivalentPaths(workspace.cwd, normalizedCwd),
+        (workspace) =>
+          workspace.background === background && areEquivalentPaths(workspace.cwd, normalizedCwd),
       )
       .sort(
         (left, right) =>
@@ -481,6 +486,8 @@ export function createWorkspaceProvisioningService(deps: {
     }
     return createWorkspaceForDirectory(normalizedCwd, title, undefined, {
       workspaceId: candidateWorkspaceId,
+      background,
+      callerWorkspaceId: context?.callerWorkspaceId,
     });
   }
 
@@ -528,7 +535,7 @@ export function createWorkspaceProvisioningService(deps: {
         .filter(
           (workspace) =>
             !workspace.archivedAt &&
-             workspace.background === background &&
+            workspace.background === background &&
             workspace.projectId === project.projectId &&
             workspace.kind !== "worktree" &&
             !workspace.isPaseoOwnedWorktree &&

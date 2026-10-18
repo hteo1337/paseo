@@ -1,7 +1,7 @@
 import { existsSync, mkdtempSync, readdirSync, readFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import { afterEach, describe, expect, test } from "vitest";
+import { afterEach, describe, expect, test, vi } from "vitest";
 import { createDaemonTestContext, type DaemonTestContext } from "../test-utils/index.js";
 import { ControllableAgentClient } from "../test-utils/controllable-agent-client.js";
 import { KeeperSendReceipts, sendFingerprint } from "./send-receipts.js";
@@ -382,12 +382,42 @@ describe("keeper atomic send", () => {
     const busy = await observe(h);
     const refused = await h.ctx.client.keeperSendMessage(sendParams(h, busy, "k8b"));
     expect(refused).toMatchObject({ result: "rejected", reason: "turn_active" });
-    const steered = await h.ctx.client.keeperSendMessage({
-      ...sendParams(h, busy, "k8c"),
-      onActiveTurn: "steer",
+    const release = h.provider.holdSteer();
+    let acknowledged = false;
+    const request = { ...sendParams(h, busy, "k8c"), onActiveTurn: "steer" as const };
+    const sending = h.ctx.client.keeperSendMessage(request).then((reply) => {
+      acknowledged = true;
+      return reply;
     });
-    expect(steered).toMatchObject({ result: "accepted", delivery: "steered" });
+    await until(() => h.provider.heldSteers === 1, "held provider steering acknowledgement");
+    expect(acknowledged).toBe(false);
+    release();
+    expect(await sending).toMatchObject({ result: "accepted", delivery: "steered" });
     expect(h.provider.callsOf("steer")).toHaveLength(1);
+    expect(h.provider.callsOf("startTurn")).toHaveLength(1);
+    expect(h.provider.callsOf("interrupt")).toEqual([]);
+    const receipts = new KeeperSendReceipts(
+      path.join(h.ctx.daemon.paseoHome, "keeper-send-receipts"),
+    );
+    expect(
+      await receipts.lookup(h.agentId, "k8c", sendFingerprint(request.text, "steer")),
+    ).toMatchObject({ kind: "duplicate", delivery: "steered" });
+
+    // Same live turn and same steering path, but this target refuses delivery.
+    const refusing = vi
+      .spyOn(h.provider.session, "steerActiveTurn")
+      .mockResolvedValueOnce({ status: "unavailable" });
+    const rejected = { ...sendParams(h, await observe(h), "k8d"), onActiveTurn: "steer" as const };
+    expect(await h.ctx.client.keeperSendMessage(rejected)).toMatchObject({
+      result: "rejected",
+      reason: "steer_unavailable",
+      delivery: null,
+    });
+    expect(refusing).toHaveBeenCalledOnce();
+    expect(
+      await receipts.lookup(h.agentId, "k8d", sendFingerprint(rejected.text, "steer")),
+    ).toEqual({ kind: "none" });
+    expect(h.provider.callsOf("startTurn")).toHaveLength(1);
     expect(h.provider.callsOf("interrupt")).toEqual([]);
   });
 
