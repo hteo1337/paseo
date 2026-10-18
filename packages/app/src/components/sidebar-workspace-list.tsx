@@ -1,5 +1,4 @@
 import { buildProjectGroupTree } from "./sidebar/project-group-tree";
-import { SidebarSectionHeader } from "./sidebar/sidebar-section-header";
 import { useProjectGroupViewStore } from "@/stores/project-group-view-store";
 import { LoadingSpinner } from "@/components/ui/loading-spinner";
 import {
