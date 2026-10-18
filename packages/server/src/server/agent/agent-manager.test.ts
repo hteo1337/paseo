@@ -14116,7 +14116,6 @@ test.each([false, true])(
   },
 );
 
-
 test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
   const session = new TestAgentSession(config);
