@@ -159,10 +159,7 @@ const styles = StyleSheet.create((theme) => ({
     backgroundColor: theme.colors.accent,
   },
   touchHitArea: {
-    position: "absolute",
-    left: 0,
-    right: 0,
-    bottom: -12,
+    // Touch target stays in layout so the following workspace filter cannot intercept it.
     height: 24,
     zIndex: 10,
     alignItems: "center",
