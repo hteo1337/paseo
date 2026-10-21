@@ -1,3 +1,8 @@
+import {
+  applyCodexMcpSelection,
+  readCodexMcpEnabledOverrides,
+  assertCodexSelectionHome,
+} from "./codex/mcp-selection.js";
 import { validateProviderOptions } from "../provider-options.js";
 import {
   getAgentStreamEventTurnId,
@@ -3563,6 +3568,8 @@ export class CodexAppServerAgentSession implements AgentSession {
     this.harnessEnvironment = deps.environment ?? buildCodexAppServerEnv();
     this.asyncQuestions = new CodexAsyncQuestions(resumeHandle?.metadata?.asyncQuestions);
     this.codexHome = deps.codexHome ?? resolveCodexHomeDir(process.env);
+    assertCodexSelectionHome(config.expectedCodexHome, this.codexHome);
+    this.buildCodexInnerConfig();
     this.config.thinkingOptionId = normalizeCodexThinkingOptionId(this.config.thinkingOptionId);
     this.serviceTier = readCodexServiceTier(this.config.featureValues);
     if (this.config.featureValues?.plan_mode) {
@@ -3623,6 +3630,7 @@ export class CodexAppServerAgentSession implements AgentSession {
       this.connectionState = "history-ready";
       return;
     }
+    assertCodexSelectionHome(this.config.expectedCodexHome, this.codexHome);
     const child = await this.spawnAppServer();
     const client = new CodexAppServerClient(child, this.logger, () => this.traceContext());
     if (this.closed) {
@@ -3968,6 +3976,7 @@ export class CodexAppServerAgentSession implements AgentSession {
   }
 
   private async readArchivedHistory(): Promise<void> {
+    assertCodexSelectionHome(this.config.expectedCodexHome, this.codexHome);
     const child = await this.spawnAppServer();
     const client = new CodexAppServerClient(child, this.logger, () => this.traceContext());
     try {
@@ -4937,6 +4946,8 @@ export class CodexAppServerAgentSession implements AgentSession {
         toolPolicy: this.config.toolPolicy,
         systemPrompt: this.config.systemPrompt,
         mcpServers: this.config.mcpServers,
+        mcpServerEnabled: this.config.mcpServerEnabled,
+        expectedCodexHome: this.config.expectedCodexHome,
         asyncQuestions: this.asyncQuestions.serialize(),
       },
     };
@@ -5358,13 +5369,15 @@ export class CodexAppServerAgentSession implements AgentSession {
       Object.assign(innerConfig, this.deps.customCodexConfig);
     }
     if (this.config.mcpServers) {
-      const mcpServers: Record<string, CodexMcpServerConfig> = {};
+      const mcpServers = new Map(Object.entries(toObjectRecord(innerConfig.mcp_servers) ?? {}));
       for (const [name, serverConfig] of Object.entries(this.config.mcpServers)) {
-        mcpServers[name] = toCodexMcpConfig(serverConfig);
+        const existing = toObjectRecord(mcpServers.get(name)) ?? {};
+        mcpServers.set(name, { ...existing, ...toCodexMcpConfig(serverConfig) });
       }
-      innerConfig.mcp_servers = mcpServers;
+      innerConfig.mcp_servers = Object.fromEntries(mcpServers);
     }
     const configured = applyCodexToolPolicy(innerConfig, this.config.toolPolicy);
+    applyCodexMcpSelection(configured, this.config);
     return Object.keys(configured).length > 0 ? configured : null;
   }
 
@@ -7174,6 +7187,15 @@ export class CodexAppServerAgentClient implements AgentClient {
     private readonly deps: CodexAppServerAgentDeps = {},
   ) {}
 
+  private applyProviderMcpEnabledOverrides(config: AgentSessionConfig): void {
+    if (config.mcpServerEnabled === undefined) return;
+    const command = this.runtimeSettings?.command;
+    let args: string[] = [];
+    if (command?.mode === "replace") args = command.argv.slice(1);
+    if (command?.mode === "append") args = command.args ?? [];
+    config.mcpServerEnabled = { ...readCodexMcpEnabledOverrides(args), ...config.mcpServerEnabled };
+  }
+
   private sessionDeps(launchEnv: Record<string, string> | undefined): CodexAppServerAgentDeps {
     return {
       ...this.deps,
@@ -7278,6 +7300,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       // utility generations through `codex exec --ephemeral` in a larger change.
     }
     const sessionConfig: AgentSessionConfig = { ...config, provider: CODEX_PROVIDER };
+    this.applyProviderMcpEnabledOverrides(sessionConfig);
     const goalsEnabled = await this.resolveGoalsEnabled();
     const autoReviewEnabled = await this.resolveAutoReviewEnabled();
     const environment = buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env);
@@ -7315,6 +7338,7 @@ export class CodexAppServerAgentClient implements AgentClient {
       provider: CODEX_PROVIDER,
       cwd: overrides?.cwd ?? storedConfig.cwd ?? process.cwd(),
     };
+    this.applyProviderMcpEnabledOverrides(merged);
     const goalsEnabled = await this.resolveGoalsEnabled();
     const autoReviewEnabled = await this.resolveAutoReviewEnabled();
     const environment = buildCodexAppServerEnv(this.runtimeSettings, launchContext?.env);
