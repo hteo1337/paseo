@@ -28,6 +28,8 @@ const SERIALIZABLE_CONFIG_SCHEMA = z
       .optional(),
     systemPrompt: z.string().nullable().optional(),
     mcpServers: z.record(z.string(), z.any()).nullable().optional(),
+    mcpServerEnabled: z.record(z.string(), z.boolean()).nullable().optional(),
+    expectedCodexHome: z.string().nullable().optional(),
   })
   .nullable()
   .optional();
@@ -87,6 +89,8 @@ export type SerializableAgentConfig = Pick<
   | "toolPolicy"
   | "systemPrompt"
   | "mcpServers"
+  | "mcpServerEnabled"
+  | "expectedCodexHome"
 >;
 
 export type StoredAgentRecord = z.infer<typeof STORED_AGENT_SCHEMA>;

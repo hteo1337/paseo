@@ -3093,6 +3093,8 @@ describe("create_agent MCP tool", () => {
       provider: "codex",
       currentModeId: null,
       config: {
+        mcpServerEnabled: { optional: false },
+        expectedCodexHome: "/fixture/account",
         providerOptions: {
           sandbox_mode: "workspace-write",
           sandbox_workspace_write: { writable_roots: ["/tmp/shared"] },
@@ -3123,7 +3125,11 @@ describe("create_agent MCP tool", () => {
       initialPrompt: "Do work",
     });
     expect(spies.agentManager.createAgent).toHaveBeenLastCalledWith(
-      expect.objectContaining({ providerOptions: parentAgent.config.providerOptions }),
+      expect.objectContaining({
+        providerOptions: parentAgent.config.providerOptions,
+        mcpServerEnabled: { optional: false },
+        expectedCodexHome: "/fixture/account",
+      }),
       undefined,
       expect.any(Object),
     );
@@ -3139,6 +3145,12 @@ describe("create_agent MCP tool", () => {
       expect.not.objectContaining({ providerOptions: expect.anything() }),
       undefined,
       expect.any(Object),
+    );
+    expect(spies.agentManager.createAgent.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "mcpServerEnabled",
+    );
+    expect(spies.agentManager.createAgent.mock.calls.at(-1)?.[0]).not.toHaveProperty(
+      "expectedCodexHome",
     );
   });
 
@@ -5098,6 +5110,50 @@ describe("create_schedule MCP tool", () => {
         featureValues: { auto_accept: true },
       },
     });
+  });
+
+  it("retains MCP selection only for schedules on the caller account", async () => {
+    const { agentManager, agentStorage, spies } = createTestDeps();
+    spies.agentManager.getAgent.mockReturnValue(
+      createManagedAgent({
+        id: "parent-agent",
+        provider: "codex",
+        config: {
+          provider: "codex",
+          cwd: REPO_CWD,
+          mcpServerEnabled: { optional: false },
+          expectedCodexHome: "/fixture/account",
+        },
+      }),
+    );
+    const createOrReplace = vi.fn(async (input: CreateScheduleInput) =>
+      createStoredSchedule(input),
+    );
+    const server = await createAgentMcpServer({
+      agentManager,
+      agentStorage,
+      providerSnapshotManager: createOpenCodeManager().manager,
+      scheduleService: { createOrReplace } as unknown as ScheduleService,
+      callerAgentId: "parent-agent",
+      logger,
+    });
+    const tool = registeredTool(server, "create_schedule");
+    const same = await tool.handler({ prompt: "fixture", cron: "*/5 * * * *" });
+    expect(same.structuredContent.target).toMatchObject({
+      type: "new-agent",
+      config: {
+        provider: "codex",
+        mcpServerEnabled: { optional: false },
+        expectedCodexHome: "/fixture/account",
+      },
+    });
+    const other = await tool.handler({
+      prompt: "fixture",
+      cron: "*/5 * * * *",
+      provider: "claude/sonnet",
+    });
+    expect(other.structuredContent.target.config).not.toHaveProperty("mcpServerEnabled");
+    expect(other.structuredContent.target.config).not.toHaveProperty("expectedCodexHome");
   });
 
   it("passes timezone through cron create_schedule input", async () => {
