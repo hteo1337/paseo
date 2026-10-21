@@ -2059,6 +2059,7 @@ export class VoiceAssistantWebSocketServer {
         relayProtectedSecurity: true,
         usageSetting: true,
         usageSources: true,
+        codexMcpServerEnabled: true,
         projectGroups: true,
         guardedProjectRemove: true,
         ownedSubscriptions: true,

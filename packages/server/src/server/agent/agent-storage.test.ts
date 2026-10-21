@@ -45,6 +45,8 @@ function buildManagedAgentConfig(
     toolPolicy: configOverrides.toolPolicy,
     systemPrompt: configOverrides.systemPrompt,
     mcpServers: configOverrides.mcpServers,
+    mcpServerEnabled: configOverrides.mcpServerEnabled,
+    expectedCodexHome: configOverrides.expectedCodexHome,
   };
   return config;
 }
@@ -295,6 +297,20 @@ describe("AgentStorage", () => {
     const [persisted] = await reloaded.listAll();
     expect(persisted.cwd).toBe("/tmp/project");
     expect(persisted.config?.providerOptions).toEqual({ allowedTools: ["Read"] });
+  });
+
+  test("persists MCP selection and account guard through reconstruction", async () => {
+    const config = {
+      mcpServerEnabled: { optional: false, selected: true },
+      expectedCodexHome: "/fixture/account",
+    };
+    await storage.applySnapshot(
+      createManagedAgent({ id: "mcp-selection", provider: "codex", config }),
+    );
+    const [record] = await new AgentStorage(storagePath, logger).list();
+    expect(record.config).toMatchObject(config);
+    expect(buildConfigOverrides(record)).toMatchObject(config);
+    expect(buildSessionConfig(record)).toMatchObject(config);
   });
 
   test("applySnapshot stores and reloads composer values as providerOptions", async () => {
