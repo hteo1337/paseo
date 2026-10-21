@@ -610,6 +610,10 @@ export interface AgentSessionConfig {
   providerOptions?: ProviderOptions;
   toolPolicy?: ToolPolicy;
   mcpServers?: Record<string, McpServerConfig>;
+  /** Codex session overrides; omitted non-coordination injections are disabled. */
+  mcpServerEnabled?: Record<string, boolean>;
+  /** Canonical account directory from preview; refuse launch if final routing resolves elsewhere. */
+  expectedCodexHome?: string;
   /**
    * Internal agents are hidden from listings and don't trigger notifications.
    * They are used for ephemeral system tasks like commit/PR generation.
