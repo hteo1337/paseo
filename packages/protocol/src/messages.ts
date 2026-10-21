@@ -529,6 +529,8 @@ const AgentSessionConfigSchema = z.object({
   toolPolicy: ToolPolicySchema.optional(),
   systemPrompt: z.string().optional(),
   mcpServers: z.record(z.string(), McpServerConfigSchema).optional(),
+  mcpServerEnabled: z.record(z.string(), z.boolean()).optional(),
+  expectedCodexHome: z.string().optional(),
 });
 
 const AgentPermissionUpdateSchema = z.record(z.string(), z.unknown());
@@ -3327,6 +3329,8 @@ export const HubExecutionAgentCreateRequestSchema = z.object({
   toolPolicy: ToolPolicySchema.optional(),
   env: z.record(z.string(), z.string()).optional(),
   mcpServers: z.record(z.string(), McpServerConfigSchema).optional(),
+  mcpServerEnabled: z.record(z.string(), z.boolean()).optional(),
+  expectedCodexHome: z.string().optional(),
   worktree: CreateAgentWorktreeTargetSchema.optional(),
 });
 
@@ -3857,6 +3861,7 @@ export const ServerInfoStatusPayloadSchema = z
         // COMPAT(usageSetting): added in v0.14, remove after 2027-05-01.
         usageSetting: z.boolean().optional(),
         usageSources: z.boolean().optional(),
+        codexMcpServerEnabled: z.boolean().optional(),
         // COMPAT(providersSnapshotCwd): added in v0.3.2, remove gate after 2027-02-10.
         providersSnapshotCwd: z.boolean().optional(),
         // COMPAT(directorySync): added in v0.3.x, remove gate after 2027-02-12.
