@@ -867,6 +867,27 @@ test("status accepts future credential states and drains its maintenance host", 
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
   expect(await h.recorded()).toContainEqual({ event: "hostClosed" });
 });
+test("repeated status polls share one Muse host until the result expires", async () => {
+  const h = await harness("catalog-controls");
+  const hosts = async () =>
+    (await h.recorded()).filter((row) => row.event === "hostStarted").length;
+  const other = (id: number) => ({
+    ...h.launch,
+    env: { ...h.launch.env, MUSE_TEST_LAUNCH: `${id}` },
+  });
+  // Eight other launches fill the cache while the first probe is still pending.
+  const polls = await Promise.all([
+    h.provider.status!({ launch: { ...h.launch } }),
+    ...Array.from({ length: 8 }, (_, id) => h.provider.status!({ launch: other(id) })),
+    h.provider.status!({ launch: { ...h.launch } }),
+  ]);
+  expect(polls).toEqual(Array(10).fill({ available: true }));
+  expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  expect(await hosts()).toBe(9);
+  vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 301000 });
+  expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  expect(await hosts()).toBe(10);
+});
 
 for (const [tool, detail] of [
   ["grep", "search"],
