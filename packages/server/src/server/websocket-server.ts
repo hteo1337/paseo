@@ -2105,6 +2105,7 @@ export class VoiceAssistantWebSocketServer {
         usageSetting: true,
         usageSources: true,
         providerInstallation: true,
+        codexMcpServerEnabled: true,
         projectGroups: true,
         guardedProjectRemove: true,
         ownedSubscriptions: true,
