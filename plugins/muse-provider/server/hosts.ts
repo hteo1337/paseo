@@ -65,10 +65,19 @@ export class Hosts {
   ): Promise<T> {
     const stamp = await freshKey(launch);
     const shared = await this.acquire(launch, stamp, options);
-    // A cancelled caller cannot withdraw an MSP request, so the host it was using is discarded.
-    const cancel = () => void this.discard(shared);
-    options.signal?.addEventListener("abort", cancel, { once: true });
-    if (options.signal?.aborted) cancel();
+    const task = this.run(shared, work);
+    const signal = options.signal;
+    if (!signal) return task;
+    // A cancelled caller detaches; the shared host keeps serving peers and its request runs out.
+    return new Promise<T>((resolve, reject) => {
+      const abort = () => reject(new MuseError("closed", "Muse request was cancelled"));
+      signal.addEventListener("abort", abort, { once: true });
+      if (signal.aborted) abort();
+      task.then(resolve, reject).finally(() => signal.removeEventListener("abort", abort));
+    });
+  }
+
+  private async run<T>(shared: SharedHost, work: (host: MspConnection) => Promise<T>): Promise<T> {
     try {
       await shared.ready;
       return await work(shared.host);
@@ -77,7 +86,6 @@ export class Hosts {
         await this.discard(shared);
       throw error;
     } finally {
-      options.signal?.removeEventListener("abort", cancel);
       this.release(shared);
     }
   }
