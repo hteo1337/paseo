@@ -27,6 +27,8 @@ export interface HubExecutionAgentCreateInput {
   toolPolicy?: ToolPolicy;
   env?: Record<string, string>;
   mcpServers?: Record<string, McpServerConfig>;
+  mcpServerEnabled?: Record<string, boolean>;
+  expectedCodexHome?: string;
   worktree?: CreateAgentWorktreeTarget;
 }
 
@@ -194,10 +196,16 @@ export class DaemonExecutions implements HubExecutionAgents {
         mode: input.modeId,
         thinking: input.thinkingOptionId,
         env: input.env,
-        ...(input.mcpServers || input.providerOptions || input.toolPolicy
+        ...(input.mcpServers ||
+        input.providerOptions ||
+        input.toolPolicy ||
+        input.mcpServerEnabled ||
+        input.expectedCodexHome
           ? {
               config: {
                 ...(input.mcpServers ? { mcpServers: input.mcpServers } : {}),
+                ...(input.mcpServerEnabled ? { mcpServerEnabled: input.mcpServerEnabled } : {}),
+                ...(input.expectedCodexHome ? { expectedCodexHome: input.expectedCodexHome } : {}),
                 ...(input.providerOptions ? { providerOptions: input.providerOptions } : {}),
                 ...(input.toolPolicy ? { toolPolicy: input.toolPolicy } : {}),
               },
