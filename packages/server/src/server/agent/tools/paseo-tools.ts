@@ -862,12 +862,22 @@ function createToolCatalog(
 
   const resolveInheritedProviderConfig = (
     selectedProvider: string,
-  ): Pick<AgentSessionConfig, "providerOptions"> | undefined => {
+  ):
+    | Pick<AgentSessionConfig, "providerOptions" | "mcpServerEnabled" | "expectedCodexHome">
+    | undefined => {
     const callerAgent = resolveCallerAgent();
-    if (callerAgent?.provider !== selectedProvider || !callerAgent.config?.providerOptions) {
-      return undefined;
-    }
-    return { providerOptions: callerAgent.config.providerOptions };
+    if (callerAgent?.provider !== selectedProvider) return undefined;
+    return {
+      ...(callerAgent.config.providerOptions
+        ? { providerOptions: callerAgent.config.providerOptions }
+        : {}),
+      ...(callerAgent.config.mcpServerEnabled !== undefined
+        ? { mcpServerEnabled: callerAgent.config.mcpServerEnabled }
+        : {}),
+      ...(callerAgent.config.expectedCodexHome !== undefined
+        ? { expectedCodexHome: callerAgent.config.expectedCodexHome }
+        : {}),
+    };
   };
 
   const resolveScopedCwd = (requestedCwd?: string, opts?: { required?: boolean }): string => {
@@ -944,6 +954,14 @@ function createToolCatalog(
         : {}),
       ...(callerAgent.config.systemPrompt ? { systemPrompt: callerAgent.config.systemPrompt } : {}),
       ...(callerAgent.config.mcpServers ? { mcpServers: callerAgent.config.mcpServers } : {}),
+      ...(callerAgent.provider === resolvedProvider &&
+      callerAgent.config.mcpServerEnabled !== undefined
+        ? { mcpServerEnabled: callerAgent.config.mcpServerEnabled }
+        : {}),
+      ...(callerAgent.provider === resolvedProvider &&
+      callerAgent.config.expectedCodexHome !== undefined
+        ? { expectedCodexHome: callerAgent.config.expectedCodexHome }
+        : {}),
     };
   };
 
