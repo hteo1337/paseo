@@ -30,6 +30,7 @@ const capabilities = [
 ] as const;
 
 export function createMuseProvider(usage: Usage): ProviderRegistration {
+  const statuses = new Map<string, StatusEntry>();
   return {
     id: "muse",
     label: "Muse Code",
@@ -42,7 +43,7 @@ export function createMuseProvider(usage: Usage): ProviderRegistration {
       if (!launch)
         return { available: false, diagnostic: "Install Muse Code and ensure `muse` is on PATH." };
       usage.remember(launch);
-      return status(launch);
+      return cachedStatus(statuses, launch);
     },
     async connect(request) {
       if (!request.versions.includes(1))
@@ -59,6 +60,44 @@ export function createMuseProvider(usage: Usage): ProviderRegistration {
 function requireLaunch(launch: ProviderLaunch | undefined): ProviderLaunch {
   if (!launch) throw new MuseError("missingLaunch", "Muse requires a daemon-resolved executable");
   return launch;
+}
+interface StatusEntry {
+  expires: number;
+  status: Promise<ProviderStatus>;
+}
+// Every probe starts `muse serve`, which writes a bootstrap log, so daemon polls share one result.
+function cachedStatus(
+  cache: Map<string, StatusEntry>,
+  launch: ProviderLaunch,
+): Promise<ProviderStatus> {
+  const key = launchKey(launch);
+  const cached = cache.get(key);
+  if (cached && cached.expires > Date.now()) return cached.status;
+  const entry = { expires: Number.POSITIVE_INFINITY, status: status(launch) };
+  cache.delete(key);
+  evictSettled(cache, 7);
+  cache.set(key, entry);
+  void expireWhenSettled(cache, key, entry);
+  return entry.status;
+}
+// Pending probes are never evicted, so a launch keeps one in-flight host however many others poll.
+function evictSettled(cache: Map<string, StatusEntry>, limit: number): void {
+  for (const [key, entry] of cache) {
+    if (cache.size <= limit) return;
+    if (Number.isFinite(entry.expires)) cache.delete(key);
+  }
+}
+async function expireWhenSettled(
+  cache: Map<string, StatusEntry>,
+  key: string,
+  entry: StatusEntry,
+): Promise<void> {
+  try {
+    const result = await entry.status;
+    entry.expires = Date.now() + (result.available ? 300000 : 60000);
+  } catch {
+    if (cache.get(key) === entry) cache.delete(key);
+  }
 }
 async function status(launch: ProviderLaunch): Promise<ProviderStatus> {
   let host: MspConnection | undefined;
