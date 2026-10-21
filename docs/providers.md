@@ -574,3 +574,32 @@ Tests use `isProviderAvailable(provider)` to skip when the binary or credentials
 - Gate the operations **the daemon issues** (prompt, slash command, summarize) on both the terminal and cancel settlement. Permission and question responses are not runner operations and must stay outside the gate, or an auto-approve deadlocks the stop. Runs the _provider_ starts on its own — plugin or autonomous wakes — are observed, not gated: the daemon does not choose when they begin, and holding their events back does not protect them from a cancel already in flight, it only hides a run that may already be dead.
 - Fail closed: if the cancel never succeeded you never proved the run stopped, so refuse new runs until the next Stop issues a fresh cancel. `AgentManager` already turns a rejected `interrupt()` into a refused cancel.
 - Suppress the canceled run's residue only until its authoritative terminal. Anything the provider publishes after that terminal is a new run by construction and must take the normal live path — buffering it and replaying it later is how autonomous/plugin wakes get lost.
+
+## Per-session Codex MCP selection
+
+Clients gate this feature once on `server_info.features.codexMcpServerEnabled`.
+Plugin callers use `paseo.agents.supportsMcpServerEnabled` before creation.
+Use `config.provider: "codex-work"` to retain that provider's configured model default,
+or `"codex-work/model-id"` to select an explicit model.
+The optional agent configuration fields are:
+
+- `mcpServerEnabled`: a record of MCP server names to booleans. Each entry overrides
+  that server in the thread configuration without copying its transport or credentials.
+  When present, final injected non-coordination servers omitted from the record are
+  disabled. Omitted inherited servers retain their normal Codex configuration.
+- `expectedCodexHome`: the canonical account directory (`realpath`) resolved during preview. The native
+  provider refuses creation or resume if its final environment resolves another home or
+  the directory is unavailable. This also catches account-routing symlink changes.
+
+These fields are retained through persistence and resume. The provider composes
+one `mcp_servers` table after injections and tool policy, preserving approval and
+sandbox settings. Disabling an injected coordination server is rejected. A disabled
+inherited coordination server remains disabled unless explicitly selected.
+
+This is an explicit override contract, not discovery of every Codex plugin or managed
+server. Callers must validate inventory and preview drift before creation. Provider
+MCP CLI overrides other than literal per-server `enabled=true|false` are rejected
+for selection launches, because aggregating them could drop tool approval policy.
+Literal enabled flags are retained unless the explicit session selection overrides them.
+CLI `-c` overrides alone are insufficient when a later thread `mcp_servers` table
+replaces their override layer. Codex 0.163 does not support CLI profiles for app-server.
