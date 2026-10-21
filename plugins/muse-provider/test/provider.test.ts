@@ -880,7 +880,7 @@ test("repeated status polls share one Muse host until the result expires", async
     ...h.launch,
     env: { ...h.launch.env, MUSE_TEST_LAUNCH: `${id}` },
   });
-  // Eight other launches fill the cache while the first probe is still pending.
+  // Eight other launches fill the cache and the host cap while the first probe is still pending.
   const polls = await Promise.all([
     h.provider.status!({ launch: { ...h.launch } }),
     ...Array.from({ length: 8 }, (_, id) => h.provider.status!({ launch: other(id) })),
@@ -895,7 +895,14 @@ test("repeated status polls share one Muse host until the result expires", async
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 301000 });
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
   expect(await probes()).toBe(10);
-  expect(await hosts()).toBe(9);
+  // Nine launches against the eight-host cap: the ninth waits for a slot instead of overshooting.
+  let live = 0;
+  let peak = 0;
+  for (const row of await h.recorded()) {
+    if (row.event === "hostStarted") peak = Math.max(peak, ++live);
+    if (row.event === "hostClosed") live--;
+  }
+  expect(peak).toBe(8);
 });
 test("status, catalogs on two connections and session-less usage share one Muse host", async () => {
   const h = await harness("catalog-controls");
