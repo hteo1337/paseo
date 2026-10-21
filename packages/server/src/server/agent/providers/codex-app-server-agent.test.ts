@@ -1,7 +1,17 @@
 import { describe, expect, test, vi } from "vitest";
 import type { ChildProcessWithoutNullStreams } from "node:child_process";
 import { EventEmitter } from "node:events";
-import { type Dirent, existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import {
+  type Dirent,
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  realpathSync,
+  rmSync,
+  symlinkSync,
+  unlinkSync,
+  writeFileSync,
+} from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import path from "node:path";
@@ -6741,6 +6751,167 @@ describe("Codex app-server provider", () => {
         }),
       }),
     );
+  });
+});
+
+describe("native session MCP selection", () => {
+  test("refuses unsupported provider MCP policy flags before create or resume spawning", async () => {
+    const appServer = createFakeCodexAppServer();
+    const provider = createProviderWithFakeAppServer(appServer, {
+      runtimeSettings: {
+        command: { mode: "append", args: ["-c", "mcp_servers.fixture.disabled_tools=[]"] },
+      },
+    });
+    await expect(provider.createSession(createConfig({ mcpServerEnabled: {} }))).rejects.toThrow(
+      "cannot preserve this provider MCP override",
+    );
+    await expect(
+      provider.resumeSession({ sessionId: "fixture", metadata: { mcpServerEnabled: {} } }),
+    ).rejects.toThrow("cannot preserve this provider MCP override");
+    expect(appServer.requests()).toEqual([]);
+    appServer.disconnect();
+  });
+  test("retains simple provider enabled flags inside the final aggregate", async () => {
+    const appServer = createFakeCodexAppServer();
+    const provider = createProviderWithFakeAppServer(appServer, {
+      runtimeSettings: {
+        command: { mode: "append", args: ["-c", "mcp_servers.inherited.enabled=false"] },
+      },
+    });
+    const session = await provider.createSession(
+      createConfig({ mcpServerEnabled: { selected: true } }),
+    );
+    try {
+      await session.startTurn("fixture only");
+      expect(
+        appServer.requests().find((request) => request.method === "thread/start")?.params,
+      ).toMatchObject({
+        config: { mcp_servers: { inherited: { enabled: false }, selected: { enabled: true } } },
+      });
+      expect(session.describePersistence().metadata).toMatchObject({
+        mcpServerEnabled: { inherited: false, selected: true },
+      });
+      appServer.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+
+  test("sends one aggregate through start, turn, persistence and resume", async () => {
+    const config = createConfig({
+      modeId: undefined,
+      providerOptions: { approval_policy: "on-request", sandbox_mode: "read-only" },
+      mcpServers: {
+        selected: { type: "stdio", command: "fixture" },
+        extra: { type: "http", url: "http://fixture.invalid" },
+        paseo: { type: "http", url: "http://coordination.invalid" },
+      },
+      mcpServerEnabled: { selected: true, inherited: false },
+      toolPolicy: { preapproved: [{ kind: "mcp", server: "paseo", tool: "finish_execution" }] },
+    });
+    const first = createFakeCodexAppServer();
+    const session = await createProviderWithFakeAppServer(first).createSession(config);
+    try {
+      await session.startTurn("fixture only");
+      const expected = {
+        config: {
+          approval_policy: "on-request",
+          sandbox_mode: "read-only",
+          mcp_servers: {
+            selected: { command: "fixture", enabled: true },
+            extra: { url: "http://fixture.invalid", enabled: false },
+            inherited: { enabled: false },
+            paseo: {
+              url: "http://coordination.invalid",
+              enabled_tools: ["finish_execution"],
+              tools: { finish_execution: { approval_mode: "approve" } },
+            },
+          },
+        },
+      };
+      expect(
+        first.requests().find((request) => request.method === "thread/start")?.params,
+      ).toMatchObject(expected);
+      expect(
+        first.requests().find((request) => request.method === "turn/start")?.params,
+      ).toMatchObject(expected);
+      const handle = session.describePersistence();
+      expect(handle.metadata).toMatchObject({ mcpServerEnabled: config.mcpServerEnabled });
+      await session.close();
+      const second = createFakeCodexAppServer();
+      const resumed = await createProviderWithFakeAppServer(second).resumeSession(handle, {
+        providerOptions: config.providerOptions,
+      });
+      try {
+        expect(
+          second.requests().find((request) => request.method === "thread/resume")?.params,
+        ).toMatchObject(expected);
+        second.assertNoErrors();
+      } finally {
+        await resumed.close();
+      }
+      first.assertNoErrors();
+    } finally {
+      await session.close();
+    }
+  });
+  test("refuses a retargeted account symlink before spawning", async () => {
+    const directory = await mkdtemp(path.join(tmpdir(), "codex-selection-identity-"));
+    const firstHome = path.join(directory, "first"),
+      secondHome = path.join(directory, "second"),
+      alias = path.join(directory, "account");
+    mkdirSync(firstHome);
+    mkdirSync(secondHome);
+    symlinkSync(firstHome, alias);
+    const spawn = vi.fn();
+    const config = createConfig({
+      expectedCodexHome: realpathSync.native(alias),
+      mcpServerEnabled: {},
+    });
+    try {
+      const session = new CodexAppServerAgentSession(config, null, createTestLogger(), spawn, {
+        codexHome: alias,
+      });
+      unlinkSync(alias);
+      symlinkSync(secondHome, alias);
+      await expect(session.connect()).rejects.toThrow("account routing changed");
+      await session.close();
+      expect(
+        () =>
+          new CodexAppServerAgentSession(config, null, createTestLogger(), spawn, {
+            codexHome: alias,
+          }),
+      ).toThrow("account routing changed");
+      expect(spawn).not.toHaveBeenCalled();
+    } finally {
+      rmSync(directory, { recursive: true, force: true });
+    }
+  });
+  test("refuses account drift and coordination exclusion before spawning", () => {
+    const spawn = vi.fn();
+    expect(
+      () =>
+        new CodexAppServerAgentSession(
+          createConfig({ expectedCodexHome: "/fixture/expected" }),
+          null,
+          createTestLogger(),
+          spawn,
+          { codexHome: "/fixture/changed" },
+        ),
+    ).toThrow("account routing changed");
+    expect(
+      () =>
+        new CodexAppServerAgentSession(
+          createConfig({
+            mcpServers: { paseo: { type: "http", url: "http://coordination.invalid" } },
+            mcpServerEnabled: { paseo: false },
+          }),
+          null,
+          createTestLogger(),
+          spawn,
+        ),
+    ).toThrow("cannot disable an injected coordination");
+    expect(spawn).not.toHaveBeenCalled();
   });
 });
 

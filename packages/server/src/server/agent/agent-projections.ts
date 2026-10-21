@@ -328,6 +328,10 @@ function buildSerializableConfig(config: AgentSessionConfig): SerializableAgentC
   if (config.mcpServers) {
     serializable.mcpServers = config.mcpServers;
   }
+  if (config.mcpServerEnabled !== undefined)
+    serializable.mcpServerEnabled = { ...config.mcpServerEnabled };
+  if (config.expectedCodexHome !== undefined)
+    serializable.expectedCodexHome = config.expectedCodexHome;
   return Object.keys(serializable).length ? serializable : null;
 }
 
