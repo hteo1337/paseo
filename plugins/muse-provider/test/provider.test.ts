@@ -620,7 +620,7 @@ test("CLI-style allow response selects a published allow action without a suppli
     (await h.recorded()).find((frame) => frame.method === "approval/decide").params.choiceId,
   ).toBe("allow_once");
 });
-test("closing cancels a catalogue host instead of waiting for a stalled request", async () => {
+test("closing detaches a stalled catalogue read and leaves the shared host to disposal", async () => {
   const h = await harness("catalog-controls", { MUSE_TEST_HANG: "model/list" });
   await h.send({ type: "catalog", requestId: "catalog" });
   await expect
@@ -628,6 +628,8 @@ test("closing cancels a catalogue host instead of waiting for a stalled request"
     .toBe(true);
   await h.connection.close();
   expect(h.events.filter((event) => event.type === "catalog")).toEqual([]);
+  expect(await h.recorded()).not.toContainEqual({ event: "hostClosed" });
+  await h.dispose();
   expect(await h.recorded()).toContainEqual({ event: "hostClosed" });
 });
 
