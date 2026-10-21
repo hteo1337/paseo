@@ -11,7 +11,7 @@ import {
   toneFromUsedPct,
 } from "@getpaseo/plugin/server/usage";
 
-import { MspConnection } from "./connection.js";
+import type { Hosts } from "./hosts.js";
 import { usageSchema } from "./wire.js";
 
 const inputSchema = z.object({ account: z.string() }).strict();
@@ -29,6 +29,7 @@ export class Usage {
     string,
     { account: string; read: () => Promise<Observation> }
   >();
+  constructor(private readonly hosts: Hosts) {}
   remember(launch: ProviderLaunch): { account: string } {
     const key = accountKey(launch.env);
     this.launches.set(key, launch);
@@ -50,13 +51,7 @@ export class Usage {
       usages.sort((a, b) => b.observedAtMs - a.observedAtMs);
       return usages.length > 0 ? { usage: usages[0] } : {};
     }
-    const host = new MspConnection({ launch });
-    try {
-      await host.initialize();
-      return await host.request("usage/read", {}, usageSchema);
-    } finally {
-      await host.close();
-    }
+    return this.hosts.use(launch, (host) => host.request("usage/read", {}, usageSchema));
   }
   registration(): UsageSourceRegistration {
     return {

@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
 import { UsageSourceRegistry } from "../../../packages/server/src/server/plugins/usage-sources/index.js";
+import { Hosts } from "../server/hosts.js";
 import { Usage as MuseUsage } from "../server/usage.js";
 import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { setTimeout as delay } from "node:timers/promises";
@@ -22,8 +23,10 @@ import contribute from "../index.server.js";
 
 const connections: ProviderConnection[] = [];
 const roots: string[] = [];
+const disposers: (() => void | Promise<void>)[] = [];
 afterEach(async () => {
   vi.useRealTimers();
+  await Promise.all(disposers.splice(0).map((dispose) => dispose()));
   await Promise.all(connections.splice(0).map((connection) => connection.close()));
   await Promise.all(roots.splice(0).map((root) => rm(root, { recursive: true, force: true })));
 });
@@ -37,7 +40,7 @@ function registration(
       provider = value;
     },
   };
-  contribute(server);
+  disposers.push(contribute(server));
   if (!provider) throw new Error("Provider was not registered");
   return provider;
 }
@@ -150,6 +153,7 @@ async function harness(
     recorded,
     root,
     usageSource,
+    dispose: disposers.at(-1)!,
   };
 }
 
@@ -865,6 +869,7 @@ for (const metadata of [
 test("status accepts future credential states and drains its maintenance host", async () => {
   const h = await harness("catalog-controls", { MUSE_TEST_ACCOUNT: "futureCredential" });
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  await h.dispose();
   expect(await h.recorded()).toContainEqual({ event: "hostClosed" });
 });
 test("repeated status polls share one Muse host until the result expires", async () => {
@@ -883,10 +888,38 @@ test("repeated status polls share one Muse host until the result expires", async
   ]);
   expect(polls).toEqual(Array(10).fill({ available: true }));
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  const probes = async () =>
+    (await h.recorded()).filter((row) => row.method === "account/read").length;
   expect(await hosts()).toBe(9);
+  expect(await probes()).toBe(9);
   vi.useFakeTimers({ toFake: ["Date"], now: Date.now() + 301000 });
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
-  expect(await hosts()).toBe(10);
+  expect(await probes()).toBe(10);
+  expect(await hosts()).toBe(9);
+});
+test("status, catalogs on two connections and session-less usage share one Muse host", async () => {
+  const h = await harness("catalog-controls");
+  expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  const second = await h.provider.connect({
+    launch: h.launch,
+    versions: [1],
+    capabilities: PROVIDER_CAPABILITIES,
+  });
+  connections.push(second);
+  const secondCatalog = new Promise<ProviderEvent>((resolve) =>
+    second.onEvent((event) => event.type === "catalog" && resolve(event)),
+  );
+  await h.send({ type: "catalog", requestId: "first" });
+  await second.send({ type: "catalog", requestId: "second" });
+  await h.wait((event) => event.type === "catalog");
+  await secondCatalog;
+  const [account] = await h.usageSource.discover({ kind: "global" });
+  for (let poll = 0; poll < 2; poll++)
+    expect(await h.usageSource.fetch(account!.input)).not.toMatchObject({ status: "error" });
+  const rows = await h.recorded();
+  expect(rows.filter((row) => row.method === "model/list")).toHaveLength(2);
+  expect(rows.filter((row) => row.method === "usage/read")).toHaveLength(2);
+  expect(rows.filter((row) => row.event === "hostStarted")).toHaveLength(1);
 });
 
 for (const [tool, detail] of [
@@ -1612,7 +1645,7 @@ test("usage identity follows the resolved config directory across credential and
 
 test.each(["no sessions", "unrelated environment"])("Muse discovery is empty with %s", async () => {
   const { Usage } = await import("../server/usage.js");
-  expect(await new Usage().registration().discover({ kind: "global" })).toEqual([]);
+  expect(await new Usage(new Hosts()).registration().discover({ kind: "global" })).toEqual([]);
 });
 
 test("Muse window identity follows the reported duration instead of assuming five hours", async () => {
@@ -1640,6 +1673,7 @@ test("Muse window identity follows the reported duration instead of assuming fiv
 test("status accepts initialization slower than the account deadline without isolating history", async () => {
   const h = await harness("catalog-controls", { MUSE_TEST_INITIALIZE_DELAY_MS: "3500" });
   expect(await h.provider.status!({ launch: h.launch })).toEqual({ available: true });
+  await h.dispose();
   expect(await h.recorded()).toContainEqual({ event: "hostClosed" });
 }, 10000);
 
@@ -1670,7 +1704,10 @@ test("force-stops a Muse host that ignores stdin EOF", async () => {
   const h = await stubbornHostHarness();
   try {
     const result = await Promise.race([
-      h.provider.status!({ launch: h.launch }),
+      h.provider.status!({ launch: h.launch }).then(async (status) => {
+        await h.dispose();
+        return status;
+      }),
       delay(10000).then(() => {
         throw new Error("Muse status did not finish closing its host");
       }),
@@ -1725,7 +1762,7 @@ async function cleanupStubbornHosts(h: Awaited<ReturnType<typeof harness>>) {
 }
 
 test("Muse reports belong only to the session's account and remain available globally", async () => {
-  const usage = new MuseUsage();
+  const usage = new MuseUsage(new Hosts());
   const homeEnv = { HOME: "/usage/home" };
   const configEnv = { HOME: "/usage/home", XDG_CONFIG_HOME: "/usage/work" };
   const accountIds = [homeEnv, configEnv].map((env, index) => {
