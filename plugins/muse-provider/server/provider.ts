@@ -11,8 +11,8 @@ import {
 import { serveArgs } from "./options.js";
 import { Usage } from "./usage.js";
 import { execCommand } from "@getpaseo/plugin/server";
-import { Catalog, launchKey } from "./catalog.js";
-import { MspConnection } from "./connection.js";
+import { Catalog } from "./catalog.js";
+import { freshKey, type Hosts } from "./hosts.js";
 import { MuseError, actionableError } from "./errors.js";
 import { Sessions } from "./sessions.js";
 import { Session } from "./session.js";
@@ -41,6 +41,7 @@ export interface MuseProviderOptions {
 
 export function createMuseProvider(
   usage: Usage,
+  hosts: Hosts,
   museOptions: MuseProviderOptions = {},
 ): ProviderRegistration {
   const statuses = new Map<string, StatusEntry>();
@@ -69,13 +70,13 @@ export function createMuseProvider(
       },
     },
     async getCatalogCacheKey(options) {
-      return launchKey(requireLaunch(options.launch));
+      return freshKey(requireLaunch(options.launch));
     },
     async status({ launch }) {
       if (!launch)
         return { available: false, diagnostic: "Install Muse Code and ensure `muse` is on PATH." };
       usage.remember(launch);
-      return cachedStatus(statuses, launch);
+      return cachedStatus(statuses, launch, hosts);
     },
     async connect(request) {
       if (!request.versions.includes(1))
@@ -85,6 +86,7 @@ export function createMuseProvider(
         requireLaunch(request.launch),
         negotiateProviderCapabilities(request.capabilities, capabilities),
         usage,
+        hosts,
       );
     },
   };
@@ -121,15 +123,16 @@ interface StatusEntry {
   expires: number;
   status: Promise<ProviderStatus>;
 }
-// Every probe starts `muse serve`, which writes a bootstrap log, so daemon polls share one result.
-function cachedStatus(
+// Probes run on the shared maintenance host; daemon polls also share one result per launch.
+async function cachedStatus(
   cache: Map<string, StatusEntry>,
   launch: ProviderLaunch,
+  hosts: Hosts,
 ): Promise<ProviderStatus> {
-  const key = launchKey(launch);
+  const key = await freshKey(launch);
   const cached = cache.get(key);
   if (cached && cached.expires > Date.now()) return cached.status;
-  const entry = { expires: Number.POSITIVE_INFINITY, status: status(launch) };
+  const entry = { expires: Number.POSITIVE_INFINITY, status: status(launch, hosts) };
   cache.delete(key);
   evictSettled(cache, 7);
   cache.set(key, entry);
@@ -155,8 +158,7 @@ async function expireWhenSettled(
     if (cache.get(key) === entry) cache.delete(key);
   }
 }
-async function status(launch: ProviderLaunch): Promise<ProviderStatus> {
-  let host: MspConnection | undefined;
+async function status(launch: ProviderLaunch, hosts: Hosts): Promise<ProviderStatus> {
   try {
     const version = await readVersion(launch);
     if (!version) return { available: false, diagnostic: "Muse returned an unrecognized version." };
@@ -166,26 +168,27 @@ async function status(launch: ProviderLaunch): Promise<ProviderStatus> {
         diagnostic: `Update Muse Code: found ${version.text}, need ≥1.3.0`,
       };
     // Leave room for the version probe, account read and cleanup within the status RPC deadline.
-    host = new MspConnection({ launch, timeoutMs: 3000, startupTimeoutMs: 20000 });
-    await host.initialize();
-    const account = await host.request("account/read", {}, accountSchema);
+    const account = await hosts.use(
+      launch,
+      (host) => host.request("account/read", {}, accountSchema, 3000),
+      { startupTimeoutMs: 20000 },
+    );
     if (account.state === "loggedOut")
       return { available: false, diagnostic: "Run `muse login` or set META_API_KEY" };
     return { available: true };
   } catch (error) {
     return { available: false, diagnostic: actionableError(error, launch).message };
-  } finally {
-    await host?.close();
   }
 }
 function connect(
   launch: ProviderLaunch,
   negotiated: readonly string[],
   usage: Usage,
+  hosts: Hosts,
 ): ProviderConnection {
   const listeners = new Set<(event: ProviderEvent) => void>();
   const sessions = new Map<string, Session>();
-  const catalog = new Catalog();
+  const catalog = new Catalog(hosts);
   const imports = new Sessions();
   let closed = false;
   function emit(event: ProviderEvent): void {

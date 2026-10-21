@@ -1,7 +1,7 @@
 import type { ProviderCatalog, ProviderLaunch } from "@getpaseo/plugin/server/provider";
 import type { z } from "zod";
 import { createHash } from "node:crypto";
-import { MspConnection } from "./connection.js";
+import { freshKey, type Hosts } from "./hosts.js";
 import { catalogSchema, effortSchema } from "./wire.js";
 
 export const modes = [
@@ -31,33 +31,35 @@ export function launchKey(launch: ProviderLaunch): string {
 
 export class Catalog {
   private readonly cache = new Map<string, { expires: number; catalog: ProviderCatalog }>();
-  private readonly hosts = new Set<MspConnection>();
-  private closed = false;
+  private readonly reads = new Set<Promise<unknown>>();
+  private readonly cancel = new AbortController();
+  constructor(private readonly hosts: Hosts) {}
   async read(launch: ProviderLaunch): Promise<ProviderCatalog> {
-    if (this.closed) throw new Error("Muse catalogue is closed");
-    const key = launchKey(launch);
+    if (this.cancel.signal.aborted) throw new Error("Muse catalogue is closed");
+    const key = await freshKey(launch);
     const cached = this.cache.get(key);
     if (cached && cached.expires > Date.now()) return cached.catalog;
-    const host = new MspConnection({ launch, timeoutMs: 5000 });
-    this.hosts.add(host);
+    const read = this.hosts.use(
+      launch,
+      (host) => host.request("model/list", {}, catalogSchema, 5000),
+      { signal: this.cancel.signal },
+    );
+    this.reads.add(read);
     try {
-      await host.initialize();
-      const response = await host.request("model/list", {}, catalogSchema);
-      const catalog = presentCatalog(response);
-      if (!this.closed) {
+      const catalog = presentCatalog(await read);
+      if (!this.cancel.signal.aborted) {
         if (this.cache.size >= 8) this.cache.delete(this.cache.keys().next().value!);
         this.cache.set(key, { expires: Date.now() + 60000, catalog });
       }
       return catalog;
     } finally {
-      await host.close();
-      this.hosts.delete(host);
+      this.reads.delete(read);
     }
   }
   async close(): Promise<void> {
-    this.closed = true;
+    this.cancel.abort();
     this.cache.clear();
-    await Promise.all([...this.hosts].map((host) => host.close()));
+    await Promise.allSettled(this.reads);
   }
 }
 
