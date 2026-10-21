@@ -49,3 +49,25 @@ describe("create request internal field", () => {
     });
   });
 });
+
+test.each(["create_agent_request", "agent.create.request"])(
+  "%s preserves optional MCP selection",
+  (type) => {
+    const config = {
+      provider: "codex",
+      cwd: "/fixture/repo",
+      mcpServerEnabled: { inherited: false, selected: true },
+      expectedCodexHome: "/fixture/account",
+    };
+    expect(
+      SessionInboundMessageSchema.parse({ type, requestId: "mcp-selection", config }),
+    ).toMatchObject({ config });
+    expect(
+      SessionInboundMessageSchema.safeParse({
+        type,
+        requestId: "invalid",
+        config: { ...config, mcpServerEnabled: { inherited: "false" } },
+      }).success,
+    ).toBe(false);
+  },
+);
