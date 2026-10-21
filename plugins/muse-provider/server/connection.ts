@@ -105,6 +105,9 @@ export class MspConnection {
     this.write({ jsonrpc: "2.0", method: "initialized", params: {} });
   }
 
+  get failed(): boolean {
+    return this.failure !== null;
+  }
   onNotification(listener: (notification: Notification) => void): () => void {
     this.listeners.add(listener);
     return () => this.listeners.delete(listener);
