@@ -1822,6 +1822,7 @@ export class VoiceAssistantWebSocketServer {
       ...(this.serverCapabilities ? { capabilities: this.serverCapabilities } : {}),
       features: {
         usageSources: true,
+        codexMcpServerEnabled: true,
         projectGroups: true,
         guardedProjectRemove: true,
         ownedSubscriptions: true,

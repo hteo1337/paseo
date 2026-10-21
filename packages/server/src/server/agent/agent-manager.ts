@@ -255,6 +255,10 @@ function buildStoredAgentConfig(record: StoredAgentRecord): AgentSessionConfig {
     config.systemPrompt = record.config.systemPrompt;
   }
   if (record.config.mcpServers != null) config.mcpServers = record.config.mcpServers;
+  if (record.config.mcpServerEnabled != null)
+    config.mcpServerEnabled = record.config.mcpServerEnabled;
+  if (record.config.expectedCodexHome != null)
+    config.expectedCodexHome = record.config.expectedCodexHome;
   return stripInternalPaseoMcpServer(config);
 }
 
@@ -6727,6 +6731,17 @@ export class AgentManager {
   }
 
   private applyProviderConfiguration(config: AgentSessionConfig): AgentSessionConfig {
+    if (config.mcpServerEnabled !== undefined || config.expectedCodexHome !== undefined) {
+      let providerId: string | null = config.provider;
+      const visited = new Set<string>();
+      while (providerId !== null && providerId !== "codex" && !visited.has(providerId)) {
+        visited.add(providerId);
+        providerId = this.providerDefinitions.get(providerId)?.derivedFromProviderId ?? null;
+      }
+      if (providerId !== "codex") {
+        throw new Error("Per-session MCP selection requires a native Codex provider");
+      }
+    }
     const definition = this.providerDefinitions.get(config.provider);
     this.validateToolPolicyServers(config);
     if (config.toolPolicy && !definition?.applyToolPolicy) {
