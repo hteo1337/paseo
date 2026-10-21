@@ -64,20 +64,23 @@ export function attachAgentStoragePersistence(
 }
 
 export function buildConfigOverrides(record: StoredAgentRecord): Partial<AgentSessionConfig> {
+  const config = record.config ?? {};
   return stripInternalPaseoMcpServer({
     provider: record.provider,
     cwd: record.cwd,
     // lastModeId is the last live mode — it also covers provider-side switches
     // (ACP current_mode_update, in-session commands) that never reach
     // record.config.modeId.
-    modeId: record.lastModeId ?? record.config?.modeId ?? undefined,
-    model: record.config?.model ?? undefined,
-    thinkingOptionId: record.config?.thinkingOptionId ?? undefined,
-    featureValues: record.config?.featureValues ?? undefined,
-    providerOptions: record.config?.providerOptions ?? undefined,
-    toolPolicy: record.config?.toolPolicy ?? undefined,
-    systemPrompt: record.config?.systemPrompt ?? undefined,
-    mcpServers: record.config?.mcpServers ?? undefined,
+    modeId: record.lastModeId ?? config.modeId ?? undefined,
+    model: config.model ?? undefined,
+    thinkingOptionId: config.thinkingOptionId ?? undefined,
+    featureValues: config.featureValues ?? undefined,
+    providerOptions: config.providerOptions ?? undefined,
+    toolPolicy: config.toolPolicy ?? undefined,
+    systemPrompt: config.systemPrompt ?? undefined,
+    mcpServers: config.mcpServers ?? undefined,
+    mcpServerEnabled: config.mcpServerEnabled ?? undefined,
+    expectedCodexHome: config.expectedCodexHome ?? undefined,
   });
 }
 
@@ -100,6 +103,8 @@ export function buildSessionConfig(
     toolPolicy: overrides.toolPolicy,
     systemPrompt: overrides.systemPrompt,
     mcpServers: overrides.mcpServers,
+    mcpServerEnabled: overrides.mcpServerEnabled,
+    expectedCodexHome: overrides.expectedCodexHome,
   });
 }
 
