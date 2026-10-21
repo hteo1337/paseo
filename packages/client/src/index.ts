@@ -234,7 +234,7 @@ export type PaseoAgentProvider = PaseoAgentSessionConfig["provider"];
 export type PaseoProviderFeatureValues = Record<string, unknown>;
 
 export interface PaseoAgentConfig {
-  /** Provider and model in `provider/model` format. */
+  /** Provider id for its configured default, or an explicit `provider/model`. */
   provider: string;
   modeId?: PaseoAgentSessionConfig["modeId"];
   thinkingOptionId?: PaseoAgentSessionConfig["thinkingOptionId"];
@@ -244,6 +244,8 @@ export interface PaseoAgentConfig {
   systemPrompt?: PaseoAgentSessionConfig["systemPrompt"];
   toolPolicy?: PaseoAgentSessionConfig["toolPolicy"];
   mcpServers?: PaseoAgentSessionConfig["mcpServers"];
+  mcpServerEnabled?: PaseoAgentSessionConfig["mcpServerEnabled"];
+  expectedCodexHome?: PaseoAgentSessionConfig["expectedCodexHome"];
 }
 
 export interface PaseoAgentCreateOptions {
@@ -394,6 +396,7 @@ export interface PaseoAgentHandle {
 }
 
 export interface PaseoAgentActions {
+  readonly supportsMcpServerEnabled: boolean;
   /** Read a durable creation receipt; never launches an agent. */
   readCreation(idempotencyKey: string): Promise<CreationSnapshot | null>;
   list(options: PaseoAgentListOptions & { subscribe: {} }): Promise<
@@ -419,7 +422,7 @@ export interface PaseoProviderFeaturesInput extends Omit<
   PaseoProviderFeaturesDraft,
   "provider" | "model"
 > {
-  /** Provider and model in `provider/model` format. */
+  /** Provider id for its configured default, or an explicit `provider/model`. */
   provider: string;
 }
 export type PaseoProviderFeaturesResult = ListProviderFeaturesResponseMessage["payload"];
@@ -610,6 +613,15 @@ export function createPaseoApi(
     options: PaseoAgentCreateOptions,
     placement?: { workspaceId: string; cwd: string },
   ) => {
+    const requestsMcpSelection =
+      options.config.mcpServerEnabled !== undefined ||
+      options.config.expectedCodexHome !== undefined;
+    if (
+      requestsMcpSelection &&
+      daemonClient.getLastServerInfoMessage()?.features?.codexMcpServerEnabled !== true
+    ) {
+      throw new Error("Update the host to use per-session Codex MCP selection");
+    }
     const agent = await daemonClient.createAgent(
       toDaemonAgentCreateOptions(
         options,
@@ -765,6 +777,9 @@ export function createPaseoApi(
       subscribe: listenWorkspaces,
     },
     agents: {
+      get supportsMcpServerEnabled() {
+        return daemonClient.getLastServerInfoMessage()?.features?.codexMcpServerEnabled === true;
+      },
       readCreation: (key) => daemonClient.readAgentCreation(key),
       list: listAgents,
       ref: (agent) => createAgentHandle(agent),
@@ -1080,10 +1095,13 @@ function encodeParent(
     : { labels: parentAddressLabels(address) };
 }
 
-function parseProviderModel(selection: string): { provider: string; model: string } {
+function parseProviderModel(selection: string): { provider: string; model?: string } {
   const separator = selection.indexOf("/");
+  if (separator === -1 && /^[A-Za-z0-9][A-Za-z0-9._-]*$/.test(selection)) {
+    return { provider: selection };
+  }
   if (separator <= 0 || separator === selection.length - 1) {
-    throw new Error('Expected config.provider in "provider/model" format');
+    throw new Error('Expected config.provider as a provider id or in "provider/model" format');
   }
   return {
     provider: selection.slice(0, separator),
