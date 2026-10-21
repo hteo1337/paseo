@@ -748,11 +748,18 @@ test("agents.create with internal fails before sending on a host without interna
 });
 
 test("agent handles delegate create, send, timeline refetch, archive, and local updates", async () => {
-  const { client, ws } = await connectClient();
+  const { client, ws } = await connectClient({
+    codexMcpServerEnabled: true,
+    ownedSubscriptions: true,
+  });
   const createdAgent = createAgent();
 
   const createPromise = client.agents.create({
-    config: { provider: "codex/gpt-5.4" },
+    config: {
+      provider: "codex/gpt-5.4",
+      mcpServerEnabled: { inherited: false },
+      expectedCodexHome: "/fixture/account",
+    },
     cwd: "/repo/sdk",
     prompt: "ship it",
   });
@@ -763,6 +770,8 @@ test("agent handles delegate create, send, timeline refetch, archive, and local 
       provider: "codex",
       model: "gpt-5.4",
       cwd: "/repo/sdk",
+      mcpServerEnabled: { inherited: false },
+      expectedCodexHome: "/fixture/account",
     },
     initialPrompt: "ship it",
   });
@@ -1666,16 +1675,35 @@ test("agent config maps provider/model and provider-native options to the daemon
   await client.close();
 });
 
-test("agent config requires provider/model syntax", async () => {
-  const { client } = await connectClient();
+test.each(["", "/model", "codex/"])(
+  "agent config rejects malformed provider selection %s",
+  async (provider) => {
+    const { client } = await connectClient();
+    await expect(client.agents.create({ config: { provider }, cwd: "/repo/sdk" })).rejects.toThrow(
+      "Expected config.provider",
+    );
+    await client.close();
+  },
+);
 
-  await expect(
-    client.agents.create({
-      config: { provider: "codex" },
-      cwd: "/repo/sdk",
+test("bare provider selection preserves the configured model default", async () => {
+  const { client, ws } = await connectClient();
+  const pending = client.agents.create({ config: { provider: "codex-work" }, cwd: "/repo/sdk" });
+  const request = parseSentSessionMessage(ws.sent.at(-1));
+  expect(request).toMatchObject({ config: { provider: "codex-work", cwd: "/repo/sdk" } });
+  expect(request.config).not.toHaveProperty("model");
+  ws.message(
+    sessionMessage({
+      type: "status",
+      payload: {
+        status: "agent_created",
+        requestId: request.requestId,
+        agentId: "agent_sdk",
+        agent: createAgent(),
+      },
     }),
-  ).rejects.toThrow('Expected config.provider in "provider/model" format');
-
+  );
+  expect((await pending).id).toBe("agent_sdk");
   await client.close();
 });
 
@@ -1771,4 +1799,24 @@ test("qualified parents preserve foreign identity without resolving an equal loc
   await creating;
   await client.close();
   expect(localParent.address).toEqual({ serverId: "srv_sdk_test", agentId: "same-parent" });
+});
+
+test("MCP selection is capability gated before native creation", async () => {
+  const { client, ws } = await connectClient({ codexMcpServerEnabled: false });
+  expect(client.agents.supportsMcpServerEnabled).toBe(false);
+  const count = ws.sent.length;
+  await expect(
+    client.agents.create({
+      cwd: "/fixture/repo",
+      config: { provider: "codex", mcpServerEnabled: { optional: false } },
+    }),
+  ).rejects.toThrow("Update the host");
+  expect(ws.sent).toHaveLength(count);
+  await client.close();
+});
+
+test("MCP selection capability follows the connected host", async () => {
+  const { client } = await connectClient({ codexMcpServerEnabled: true });
+  expect(client.agents.supportsMcpServerEnabled).toBe(true);
+  await client.close();
 });

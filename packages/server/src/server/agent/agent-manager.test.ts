@@ -14634,3 +14634,16 @@ test("set_model: null provider report preserves the requested model without poli
   expect(manager.getAgent(agent.id)?.id).toBe(agent.id);
   await manager.closeAgent(agent.id);
 });
+
+test("rejects Codex MCP selection on another provider before session creation", async () => {
+  const client = new TestAgentClient("claude");
+  const manager = new AgentManager({ clients: { claude: client }, logger });
+  await expect(
+    manager.createAgent(
+      { provider: "claude", cwd: process.cwd(), mcpServerEnabled: { optional: false } },
+      undefined,
+      {},
+    ),
+  ).rejects.toThrow("requires a native Codex provider");
+  expect(manager.listAgents()).toEqual([]);
+});

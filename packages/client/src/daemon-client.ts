@@ -887,6 +887,8 @@ export interface CreateScheduleOptions {
           providerOptions?: AgentSessionConfig["providerOptions"];
           systemPrompt?: string;
           mcpServers?: AgentSessionConfig["mcpServers"];
+          mcpServerEnabled?: AgentSessionConfig["mcpServerEnabled"];
+          expectedCodexHome?: AgentSessionConfig["expectedCodexHome"];
         };
       };
   maxRuns?: number;
