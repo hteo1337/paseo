@@ -1113,6 +1113,8 @@ function buildScheduleAgentConfig(
     featureValues: config.featureValues,
     systemPrompt: config.systemPrompt,
     mcpServers: config.mcpServers as AgentSessionConfig["mcpServers"],
+    mcpServerEnabled: config.mcpServerEnabled,
+    expectedCodexHome: config.expectedCodexHome,
   };
 }
 
