@@ -172,6 +172,8 @@ export class HubExecutionController {
         toolPolicy: message.toolPolicy,
         env: message.env,
         mcpServers: message.mcpServers,
+        mcpServerEnabled: message.mcpServerEnabled,
+        expectedCodexHome: message.expectedCodexHome,
         worktree: message.worktree,
       });
       if (this.closed) return;

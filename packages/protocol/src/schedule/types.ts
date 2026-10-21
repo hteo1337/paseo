@@ -37,6 +37,8 @@ export const ScheduleTargetSchema = z.discriminatedUnion("type", [
       featureValues: z.record(z.string(), z.unknown()).optional(),
       systemPrompt: z.string().optional(),
       mcpServers: z.record(z.string(), z.unknown()).optional(),
+      mcpServerEnabled: z.record(z.string(), z.boolean()).optional(),
+      expectedCodexHome: z.string().optional(),
     }),
   }),
 ]);
