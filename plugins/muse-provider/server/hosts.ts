@@ -18,9 +18,11 @@ interface SharedHost {
   host: MspConnection;
   ready: Promise<void>;
   started: number;
+  released: number;
   users: number;
   idle?: ReturnType<typeof setTimeout>;
   retired: boolean;
+  closing?: Promise<void>;
 }
 
 /** Identifies a launch plus the installed Muse build and login, so upgrades and `muse login` miss caches. */
@@ -51,6 +53,9 @@ export async function freshKey(launch: ProviderLaunch): Promise<string> {
 /** Shares one maintenance `muse serve` per launch; every start writes a bootstrap log. */
 export class Hosts {
   private readonly hosts = new Map<string, SharedHost>();
+  // Every child not yet exited, including retired generations still serving or closing.
+  private readonly owned = new Set<SharedHost>();
+  private waiters = new Set<() => void>();
   private closed = false;
 
   async use<T>(
@@ -59,14 +64,11 @@ export class Hosts {
     options: { startupTimeoutMs?: number; signal?: AbortSignal } = {},
   ): Promise<T> {
     const stamp = await freshKey(launch);
-    if (this.closed) throw new MuseError("closed", "Muse hosts are closed");
-    options.signal?.throwIfAborted();
-    const shared = this.acquire(launch, stamp, options.startupTimeoutMs);
-    shared.users++;
-    clearTimeout(shared.idle);
+    const shared = await this.acquire(launch, stamp, options);
     // A cancelled caller cannot withdraw an MSP request, so the host it was using is discarded.
     const cancel = () => void this.discard(shared);
     options.signal?.addEventListener("abort", cancel, { once: true });
+    if (options.signal?.aborted) cancel();
     try {
       await shared.ready;
       return await work(shared.host);
@@ -82,19 +84,49 @@ export class Hosts {
 
   async close(): Promise<void> {
     this.closed = true;
-    await Promise.all([...this.hosts.values()].map((shared) => this.discard(shared)));
+    this.notify();
+    await Promise.all([...this.owned].map((shared) => this.discard(shared)));
   }
 
-  private acquire(launch: ProviderLaunch, stamp: string, startupTimeoutMs?: number): SharedHost {
+  /** Returns a host with the caller counted as a user; waits while `maxHosts` children are alive. */
+  private async acquire(
+    launch: ProviderLaunch,
+    stamp: string,
+    options: { startupTimeoutMs?: number; signal?: AbortSignal },
+  ): Promise<SharedHost> {
     const key = launchKey(launch);
-    const current = this.hosts.get(key);
-    if (current && current.stamp === stamp && Date.now() - current.started < maxAgeMs)
-      return current;
-    if (current) this.retire(current);
-    for (const shared of this.hosts.values()) {
-      if (this.hosts.size < maxHosts) break;
-      if (shared.users === 0) this.retire(shared);
+    for (;;) {
+      if (this.closed) throw new MuseError("closed", "Muse hosts are closed");
+      options.signal?.throwIfAborted();
+      const current = this.hosts.get(key);
+      if (current && current.stamp === stamp && Date.now() - current.started < maxAgeMs) {
+        current.users++;
+        clearTimeout(current.idle);
+        return current;
+      }
+      if (current) this.retire(current);
+      if (this.owned.size < maxHosts) {
+        const shared = this.start(key, launch, stamp, options.startupTimeoutMs);
+        shared.users++;
+        return shared;
+      }
+      // Free one slot at a time: only evict an idle host when nothing retired is draining.
+      if (this.owned.size === this.hosts.size) {
+        const idle = [...this.hosts.values()]
+          .filter((shared) => shared.users === 0)
+          .sort((a, b) => a.released - b.released)[0];
+        if (idle) this.retire(idle);
+      }
+      await this.changed(options.signal);
     }
+  }
+
+  private start(
+    key: string,
+    launch: ProviderLaunch,
+    stamp: string,
+    startupTimeoutMs?: number,
+  ): SharedHost {
     const host = new MspConnection({ launch, startupTimeoutMs });
     const shared: SharedHost = {
       launch: key,
@@ -102,20 +134,24 @@ export class Hosts {
       host,
       ready: host.initialize(),
       started: Date.now(),
+      released: Date.now(),
       users: 0,
       retired: false,
     };
     shared.ready.catch(() => this.discard(shared));
     host.onExit(() => void this.discard(shared));
     this.hosts.set(key, shared);
+    this.owned.add(shared);
     return shared;
   }
 
   private release(shared: SharedHost): void {
     shared.users--;
+    shared.released = Date.now();
+    this.notify();
     if (shared.users > 0) return;
     if (shared.retired) {
-      void shared.host.close().catch(() => {});
+      void this.shut(shared);
       return;
     }
     shared.idle = setTimeout(() => this.retire(shared), idleMs);
@@ -127,11 +163,44 @@ export class Hosts {
     if (this.hosts.get(shared.launch) === shared) this.hosts.delete(shared.launch);
     shared.retired = true;
     clearTimeout(shared.idle);
-    if (shared.users === 0) void shared.host.close().catch(() => {});
+    if (shared.users === 0) void this.shut(shared);
   }
 
   private discard(shared: SharedHost): Promise<void> {
     this.retire(shared);
-    return shared.host.close().catch(() => {});
+    return this.shut(shared);
+  }
+
+  private shut(shared: SharedHost): Promise<void> {
+    shared.closing ??= shared.host
+      .close()
+      .catch(() => {})
+      .finally(() => {
+        this.owned.delete(shared);
+        this.notify();
+      });
+    return shared.closing;
+  }
+
+  /** Resolves on the next release or exit, when a slot may have opened. */
+  private changed(signal?: AbortSignal): Promise<void> {
+    return new Promise((resolve, reject) => {
+      const done = () => {
+        signal?.removeEventListener("abort", abort);
+        resolve();
+      };
+      const abort = () => {
+        this.waiters.delete(done);
+        reject(signal?.reason);
+      };
+      signal?.addEventListener("abort", abort, { once: true });
+      this.waiters.add(done);
+    });
+  }
+
+  private notify(): void {
+    const waiters = this.waiters;
+    this.waiters = new Set();
+    for (const wake of waiters) wake();
   }
 }
