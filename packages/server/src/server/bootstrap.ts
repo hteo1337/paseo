@@ -1245,6 +1245,7 @@ export async function createPaseoDaemon(
       providerSnapshotManager,
       readDaemonConfig: () => ({ metadataGeneration: daemonConfigStore.get().metadataGeneration }),
       getFocusedSelection: () => undefined,
+      logger,
     }),
     emit: emitExternalSessionMessage,
     workspaceGitService,
