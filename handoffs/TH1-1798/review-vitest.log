@@ -1,0 +1,35 @@
+npm notice run paseo@0.13.0-beta.2 npx
+npm notice run 'vitest' run src/server/agent/prompt-suggestions/service.test.ts --bail=1 -t review: reserves concurrency slots
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/TH1-1798-review/packages/server
+
+stdout | src/server/agent/prompt-suggestions/service.test.ts > review: reserves concurrency slots while workspace context is pending
+review evidence: maxConcurrent=2; pending provider requests=3
+
+stdout | src/server/agent/prompt-suggestions/service.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  suppress all logs with { quiet: true }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+ ❯ src/server/agent/prompt-suggestions/service.test.ts (31 tests | 1 failed | 30 skipped) 48ms
+   × review: reserves concurrency slots while workspace context is pending 48ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/prompt-suggestions/service.test.ts > review: reserves concurrency slots while workspace context is pending
+AssertionError: expected 3 to be less than or equal to 2
+ ❯ src/server/agent/prompt-suggestions/service.test.ts:681:34
+    679|   console.info("review evidence: maxConcurrent=2; pending provider req…
+    680|   harness.service.stop();
+    681|   expect(harness.pending.length).toBeLessThanOrEqual(2);
+       |                                  ^
+    682| });
+    683|
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 30 skipped (31)
+   Start at  22:01:26
+   Duration  385ms (transform 161ms, setup 18ms, import 253ms, tests 48ms, environment 0ms)
+

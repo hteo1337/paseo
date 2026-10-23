@@ -1,0 +1,36 @@
+npm notice run paseo@0.13.0-beta.2 npx
+npm notice run 'tsx' handoffs/review-inspect.mts
+{
+  "base": "d6fa23189",
+  "actualAppEvents": [
+    "agent_attention_required",
+    "agent_prompt_suggestions",
+    "terminal_attention_required",
+    "agent_permission_request",
+    "agent_permission_resolved",
+    "agent.provider_subagents.update",
+    "checkout_status_update",
+    "status.server_info"
+  ],
+  "controlWithoutNewEvent": true,
+  "withNewEvent": false,
+  "headAccepts": true,
+  "issues": [
+    {
+      "path": [
+        "events",
+        1
+      ],
+      "code": "invalid_value"
+    }
+  ]
+}
+{"locale":"en","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"ar","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"es","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"fr","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"ja","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"ko","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"pt-BR","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"ru","newKeys":9,"missing":[],"badPlaceholders":[]}
+{"locale":"zh-CN","newKeys":9,"missing":[],"badPlaceholders":[]}

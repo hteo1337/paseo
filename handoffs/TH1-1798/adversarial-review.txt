@@ -1,0 +1,11 @@
+Verdict: BLOCKING
+Issue: TH1-1798; PR getpaseo/paseo#7753; exact head 95cee63a8edf6ea8560c2f471b91ffe50274fb87.
+Decision: actual 286077-character full diff submitted to semif_decide; service rejected 84037 input tokens against 4096 limit. Invalid judgment defaults to adversarial required.
+Exactly one short read-only in-session adversarial reviewer launched with explicit gpt-6.1-sol/high override in separate detached TH1-1798-adversarial worktree. No durable worker lane, further agents, tests, edits or external writes.
+Returned artifact inspected by the primary reviewer:
+- Existing P1 session-context.tsx:489 event-subscription compatibility finding stands.
+- Existing P2 service.ts:440 concurrency-slot reservation and draft-queue bypass finding stands.
+- Existing P2 suggestion-model-section.tsx:67 invisible web save errors finding stands.
+- Nothing additional confidently blocking in lifecycle/shutdown, outbound authorization, capability routing, question handling or context filtering. Agent registration is guarded during shutdown.
+Primary runtime independently checked through dispatcher status: codex-auto/gpt-6.1-sol/high. Adversarial launch model explicit; collaboration tool exposes completion but no separate runtime-provider telemetry.
+No second PR comment: result added to the existing comment 6372635941.
