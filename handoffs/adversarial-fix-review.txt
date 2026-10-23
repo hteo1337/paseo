@@ -1,0 +1,14 @@
+TH1-1767 new fix PR30; exactly one adversarial latest Sol review, separate worktree TH1-1767-fix-adversarial, short read-only in-session exception.
+Decision: required. Semif actual-source-diff+plan returned no(0.6481), yes(0.3469), unknown(0.00495), fast0.207s. No is invalid under the mandatory concurrency/close-coordination rubric; standing fallback requires one adversarial.
+Reviewer /root/sol_fix_adversarial; requested and returned model gpt-6.1-sol.
+PASS — Verdict: CONFIRMED
+Model: gpt-6.1-sol
+Patch PR head:3e2bebb1d5f0c9eea33ee21f5234e63a582df913
+Reviewed source:7c8e2dfd780c31493762a6467052e429545569b9 HEAD^..HEAD.
+No confident material findings.
+Nothing found in resident lookup/close interleavings: agent-loading.ts:75 retains use lease and both close barriers; resumed registration establishes fresh activity at agent-manager.ts:4703.
+Nothing found in nested observation/real uses: agent-manager.ts:1428 preserves independent lease counts and idempotent release; real uses retain touches.
+Nothing found in stream release during unload: agent-manager.ts:1449 preserves holds; unload rechecks eligibility immediately before provider closure at:2399.
+Nothing found in real activity preservation: prompt admission retains default activity lease at agent-prompt.ts:337; touchUpdatedAt intact at agent-manager.ts:1125.
+Regression covers repeated observations, held stream protection, duplicate release, no resume and distinct use/prompt/update deadlines.
+Read-only review; no tests rerun or files changed.

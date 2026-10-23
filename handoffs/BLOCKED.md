@@ -1,1 +1,1 @@
-No implementation blocker: m5 SSH alias resolves as teo-mbp-m5; gathering observer ownership from the existing daemon log and code. Native installation/restart prohibited.
+No delivery blocker. Native installation/restart remains Teo-only after beta-window coordination; historical skip rows omit released owners, so individual-reset attribution remains inferred from verified Agent Watch code and log timing. GitHub connector404 and Linear context-tool unavailable were handled with CLI/issue evidence.
