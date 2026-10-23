@@ -37,6 +37,13 @@ daemon checks once a minute. Opening a chat or asking for prompt suggestions can
 the idle clock. If descendant cleanup fails after the provider closes, the runtime enters an error
 state and rejects prompts. The next access retries cleanup before it can resume the durable session.
 
+Idle-unload diagnostics default on. Each pass reports resident agents that did not unload as
+`Idle agent unload skipped`, including cached guard operands and known stream/use owners.
+Unchanged operands are logged at most once per agent every ten minutes; a changed operand logs
+on the next pass. Set `PASEO_IDLE_UNLOAD_DIAG=0` to disable them. The diagnostic reads cached state
+without loading an agent or resetting its idle clock. `unknown` owners and unavailable operands
+are explicit; the log does not infer ownership from a provider process or imply that a skip is a fault.
+
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
 workflows all live in the CLI process, and the completion notification that would have woken the

@@ -231,6 +231,7 @@ export async function unarchiveAgentState(
 }
 
 export interface SendPromptToAgentParams {
+  useOwnerId?: string;
   onDispatch?: StartAgentRunOptions["onDispatch"];
   agentManager: AgentManager;
   agentStorage: AgentStorage;
@@ -331,7 +332,9 @@ async function resolvePromptSource(
 export async function sendPromptToAgent(
   params: SendPromptToAgentParams,
 ): Promise<{ disposition: PromptDispatchDisposition }> {
-  const release = params.agentManager.beginAgentUse(params.agentId);
+  const useOwnerId =
+    params.useOwnerId ?? (params.source ? `agent:${params.source.agentId}` : undefined);
+  const release = params.agentManager.beginAgentUse(params.agentId, useOwnerId);
   try {
     const unarchive = params.unarchive ?? true;
 
@@ -348,6 +351,7 @@ export async function sendPromptToAgent(
 
     try {
       await ensureAgentLoaded(params.agentId, {
+        useOwnerId,
         agentManager: params.agentManager,
         agentStorage: params.agentStorage,
         logger: params.logger,

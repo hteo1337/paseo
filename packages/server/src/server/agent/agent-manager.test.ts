@@ -1,3 +1,4 @@
+import pino from "pino";
 import {
   prepareAgentMessage,
   formatAgentMessage,
@@ -9974,6 +9975,113 @@ test("subscribe does not emit state events for internal agents to global subscri
   // Should only have events from the normal agent
   expect(receivedEvents.filter((id) => id === generatedAgentIds[0]).length).toBeGreaterThan(0);
   expect(receivedEvents.filter((id) => id === generatedAgentIds[1]).length).toBe(0);
+});
+
+test("idle unload diagnostics report skipped operands without changing residency or activity", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-diagnostics-"));
+  const entries: Record<string, unknown>[] = [];
+  const diagnosticLogger = pino(
+    { level: "info" },
+    {
+      write(line: string) {
+        entries.push(JSON.parse(line));
+      },
+    },
+  );
+  const client = new TestAgentClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: new AgentStorage(join(workdir, "agents"), diagnosticLogger),
+    logger: diagnosticLogger,
+  });
+  const skipped = (agentId: string) =>
+    entries.filter(
+      (entry) => entry.msg === "Idle agent unload skipped" && entry.agentId === agentId,
+    );
+  vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", "1");
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const control = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const releaseUse = manager.beginAgentUse(agent.id, "plugin:diagnostic-use");
+    const releaseStream = manager.holdClientStream(agent.id, "diagnostic-client");
+    const releaseGlobal = manager.holdGlobalClientStream("legacy-client");
+    const originalUpdatedAt = agent.updatedAt;
+    const beginUse = vi.spyOn(manager, "beginAgentUse");
+    const now = Date.now();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 60_001)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(1);
+    const first = skipped(agent.id)[0]!;
+    expect(first).toMatchObject({
+      lifecycle: "idle",
+      hasPersistence: true,
+      pendingPermissions: 0,
+      providerPendingPermissions: 0,
+      clientStreamHolds: 1,
+      globalClientStreamHolds: 1,
+      activeAgentUses: 1,
+      foregroundMutationTails: false,
+      autonomousTurnPhases: false,
+      hasInFlightRun: false,
+      hasLiveTerminals: false,
+      runningSubagentIds: [],
+      runningSubagentCount: 0,
+      inFlightPermissionResponses: 0,
+      pendingReplacement: false,
+      inFlightAgentClose: false,
+      lifecycleMutationTails: false,
+      idleReapPending: false,
+      residentLastUsedAt: expect.any(Number),
+      idleMs: 60_000,
+      idleThresholdMet: true,
+      clientStreamOwners: [{ ownerId: "diagnostic-client", count: 1 }],
+      globalClientStreamOwners: [{ ownerId: "legacy-client", count: 1 }],
+      activeAgentUseOwners: [{ ownerId: "plugin:diagnostic-use", count: 1 }],
+      unavailableOperands: [],
+    });
+    expect(skipped(control.id)).toHaveLength(1);
+    expect(await manager.unloadIdleAgents(60_000, now + 60_002)).toBe(0);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_000)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(1);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_001)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(2);
+    expect(skipped(agent.id)[1]!.residentLastUsedAt).toBe(first.residentLastUsedAt);
+    expect(manager.getAgent(agent.id)?.updatedAt).toEqual(originalUpdatedAt);
+    expect(beginUse).not.toHaveBeenCalled();
+    expect(client.resumeOverrides).toHaveLength(0);
+
+    releaseGlobal();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_002)).toBe(1);
+    expect(manager.getAgent(control.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(3);
+    expect(skipped(agent.id)[2]!.globalClientStreamHolds).toBe(0);
+    expect(skipped(agent.id)[2]!.globalClientStreamOwners).toEqual([]);
+    expect(manager.getAgent(agent.id)?.session).toBe(agent.session);
+
+    const disabledControl = await manager.createAgent(
+      { provider: "codex", cwd: workdir },
+      undefined,
+      {},
+    );
+    vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", "0");
+    releaseUse();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_003)).toBe(1);
+    expect(manager.getAgent(disabledControl.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(3);
+    vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", undefined);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_004)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(4);
+    expect(skipped(agent.id)[3]!.activeAgentUseOwners).toEqual([]);
+    releaseStream();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_005)).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(4);
+    expect(client.resumeOverrides).toHaveLength(0);
+  } finally {
+    vi.unstubAllEnvs();
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    rmSync(workdir, { recursive: true, force: true });
+  }
 });
 
 test("idle runtime unloads after the threshold and the next access resumes it", async () => {

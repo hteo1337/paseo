@@ -403,6 +403,33 @@ export interface AgentManagerOptions {
   logger: Logger;
 }
 
+interface IdleUnloadOwnerCounts {
+  uses: number;
+  streams: number;
+}
+
+interface IdleUnloadHold {
+  agentId: string | null;
+  kind: keyof IdleUnloadOwnerCounts;
+  ownerId?: string;
+}
+
+interface IdleUnloadOwner {
+  ownerId: string;
+  count: number;
+}
+
+interface IdleUnloadDiagnosticStamp {
+  fingerprint: string;
+  loggedAt: number;
+}
+
+interface IdleUnloadProviderOperands {
+  providerPendingPermissions: number | null;
+  hasLiveTerminals: boolean | null;
+  unavailableOperands: string[];
+}
+
 function resolveRescueTimeouts(
   timeouts: AgentManagerRescueTimeouts | undefined,
 ): Required<AgentManagerRescueTimeouts> {
@@ -899,6 +926,11 @@ export class AgentManager {
   private readonly activeAgentUses = new Map<string, number>();
   private readonly clientStreamHolds = new Map<string, number>();
   private globalClientStreamHolds = 0;
+  private readonly idleUnloadHoldOwners = new Map<
+    string | null,
+    Map<string, IdleUnloadOwnerCounts>
+  >();
+  private readonly idleUnloadDiagnosticStamps = new Map<string, IdleUnloadDiagnosticStamp>();
   private readonly reloadedSessionCloses = new WeakMap<AgentSession, Promise<void>>();
   private readonly refusedProviderSessions = new WeakSet<AgentSession>();
   private readonly approvedClaudeSessions = new WeakSet<AgentSession>();
@@ -1393,13 +1425,15 @@ export class AgentManager {
   }
 
   /** Hold a resident session while an access is still loading or admitting work. */
-  beginAgentUse(agentId: string): () => void {
+  beginAgentUse(agentId: string, ownerId?: string): () => void {
     this.residentLastUsedAt.set(agentId, Date.now());
     this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
+    const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "uses", ownerId });
     let released = false;
     return () => {
       if (released) return;
       released = true;
+      releaseOwner();
       const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
       if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
       else this.activeAgentUses.delete(agentId);
@@ -1408,14 +1442,16 @@ export class AgentManager {
   }
 
   /** A selective timeline subscription is an active client stream. */
-  holdClientStream(agentId: string): () => void {
+  holdClientStream(agentId: string, ownerId?: string): () => void {
     this.clientStreamHolds.set(agentId, (this.clientStreamHolds.get(agentId) ?? 0) + 1);
+    const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "streams", ownerId });
     const releaseUse = this.beginAgentUse(agentId);
     releaseUse();
     let released = false;
     return () => {
       if (released) return;
       released = true;
+      releaseOwner();
       const remaining = (this.clientStreamHolds.get(agentId) ?? 1) - 1;
       if (remaining > 0) this.clientStreamHolds.set(agentId, remaining);
       else this.clientStreamHolds.delete(agentId);
@@ -1424,16 +1460,119 @@ export class AgentManager {
   }
 
   /** Legacy clients receive every timeline, so any one protects all live runtimes. */
-  holdGlobalClientStream(): () => void {
+  holdGlobalClientStream(ownerId?: string): () => void {
     this.globalClientStreamHolds += 1;
+    const releaseOwner = this.trackIdleUnloadHold({ agentId: null, kind: "streams", ownerId });
     let released = false;
     return () => {
       if (released) return;
       released = true;
+      releaseOwner();
       this.globalClientStreamHolds -= 1;
       const now = Date.now();
       for (const agentId of this.agents.keys()) this.residentLastUsedAt.set(agentId, now);
     };
+  }
+
+  private trackIdleUnloadHold({ agentId, kind, ownerId = "unknown" }: IdleUnloadHold): () => void {
+    let owners = this.idleUnloadHoldOwners.get(agentId);
+    if (!owners) {
+      owners = new Map();
+      this.idleUnloadHoldOwners.set(agentId, owners);
+    }
+    let counts = owners.get(ownerId);
+    if (!counts) {
+      counts = { uses: 0, streams: 0 };
+      owners.set(ownerId, counts);
+    }
+    counts[kind] += 1;
+    const ownedCounts = counts;
+    const ownedOwners = owners;
+    return () => {
+      ownedCounts[kind] -= 1;
+      if (ownedCounts.uses === 0 && ownedCounts.streams === 0) ownedOwners.delete(ownerId);
+      if (ownedOwners.size === 0) this.idleUnloadHoldOwners.delete(agentId);
+    };
+  }
+
+  private idleUnloadOwners(
+    agentId: string | null,
+    kind: keyof IdleUnloadOwnerCounts,
+  ): IdleUnloadOwner[] {
+    const result: IdleUnloadOwner[] = [];
+    for (const [ownerId, counts] of this.idleUnloadHoldOwners.get(agentId) ?? []) {
+      if (counts[kind] > 0) result.push({ ownerId, count: counts[kind] });
+    }
+    return result.sort((a, b) => a.ownerId.localeCompare(b.ownerId));
+  }
+
+  private readIdleUnloadProviderOperands(session: AgentSession): IdleUnloadProviderOperands {
+    const result: IdleUnloadProviderOperands = {
+      providerPendingPermissions: null,
+      hasLiveTerminals: null,
+      unavailableOperands: [],
+    };
+    // These accessors read cached runtime state. Diagnostic failures cannot block a sweep.
+    try {
+      result.providerPendingPermissions = session.getPendingPermissions().length;
+    } catch {
+      result.unavailableOperands.push("providerPendingPermissions");
+    }
+    try {
+      result.hasLiveTerminals = session.hasLiveTerminals?.() ?? false;
+    } catch {
+      result.unavailableOperands.push("hasLiveTerminals");
+    }
+    return result;
+  }
+
+  private logIdleUnloadSkips(idleMs: number, now: number): void {
+    const flag = process.env.PASEO_IDLE_UNLOAD_DIAG?.trim().toLowerCase();
+    if (flag === "0" || flag === "false" || flag === "off") return;
+    for (const [agentId, agent] of this.agents) {
+      const residentLastUsedAt = this.residentLastUsedAt.get(agentId) ?? null;
+      const idleDurationMs = now - (residentLastUsedAt ?? now);
+      const runningSubagentIds = this.providerSubagents
+        .list(agentId)
+        .filter((child) => child.status === "running")
+        .map((child) => child.id)
+        .sort();
+      const operands = {
+        agentId,
+        provider: agent.provider,
+        lifecycle: agent.lifecycle,
+        hasPersistence: agent.persistence !== null,
+        pendingPermissions: agent.pendingPermissions.size,
+        ...this.readIdleUnloadProviderOperands(agent.session),
+        clientStreamHolds: this.clientStreamHolds.get(agentId) ?? 0,
+        globalClientStreamHolds: this.globalClientStreamHolds,
+        activeAgentUses: this.activeAgentUses.get(agentId) ?? 0,
+        foregroundMutationTails: this.foregroundMutationTails.has(agentId),
+        autonomousTurnPhases: this.autonomousTurnPhases.has(agentId),
+        hasInFlightRun: this.hasInFlightRun(agentId),
+        runningSubagentIds,
+        runningSubagentCount: runningSubagentIds.length,
+        inFlightPermissionResponses: agent.inFlightPermissionResponses.size,
+        pendingReplacement: agent.pendingReplacement,
+        inFlightAgentClose: this.inFlightAgentCloses.has(agentId),
+        lifecycleMutationTails: this.lifecycleMutationTails.has(agentId),
+        idleReapPending: this.idleReapPending.has(agentId),
+        residentLastUsedAt,
+        idleMs,
+        idleUnloadEnabled: idleMs > 0,
+        idleThresholdMet: idleDurationMs >= idleMs,
+        clientStreamOwners: this.idleUnloadOwners(agentId, "streams"),
+        globalClientStreamOwners: this.idleUnloadOwners(null, "streams"),
+        activeAgentUseOwners: this.idleUnloadOwners(agentId, "uses"),
+      };
+      // Scan time and elapsed duration change every pass; neither is an operand change.
+      const fingerprint = JSON.stringify(operands);
+      const previous = this.idleUnloadDiagnosticStamps.get(agentId);
+      const unchanged = previous?.fingerprint === fingerprint;
+      if (unchanged && now - previous.loggedAt < 10 * 60_000) continue;
+      this.idleUnloadDiagnosticStamps.set(agentId, { fingerprint, loggedAt: now });
+      this.logger.info({ ...operands, scanAt: now, idleDurationMs }, "Idle agent unload skipped");
+    }
   }
 
   private canUnloadIdleAgent(agentId: string, agent: LiveManagedAgent): boolean {
@@ -1457,7 +1596,10 @@ export class AgentManager {
 
   /** Close only sessions that remained idle through their lifecycle lane. */
   async unloadIdleAgents(idleMs: number, now = Date.now()): Promise<number> {
-    if (idleMs <= 0) return 0;
+    if (idleMs <= 0) {
+      this.logIdleUnloadSkips(idleMs, now);
+      return 0;
+    }
     let unloaded = 0;
     const attempts: Promise<void>[] = [];
     for (const agentId of this.agents.keys()) {
@@ -1525,6 +1667,7 @@ export class AgentManager {
       );
     }
     await Promise.all(attempts);
+    this.logIdleUnloadSkips(idleMs, now);
     return unloaded;
   }
 
@@ -4800,6 +4943,7 @@ export class AgentManager {
     this.refusedAutonomousTurns.delete(agent.id);
     this.agents.delete(agent.id);
     this.residentLastUsedAt.delete(agent.id);
+    this.idleUnloadDiagnosticStamps.delete(agent.id);
     this.previousStatuses.delete(agent.id);
     if (agent.unsubscribeSession) {
       agent.unsubscribeSession();
