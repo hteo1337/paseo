@@ -592,7 +592,13 @@ test("closed durable parents support one same-receipt child retry without resumi
   const client = new DaemonClient({ url: `ws://127.0.0.1:${daemon.port}/ws` });
   try {
     await client.connect();
-    const parent = await client.createAgent({ provider: "codex", cwd: root });
+    const workspace = await client.createWorkspace({ source: { kind: "directory", path: root } });
+    if (!workspace.workspace) throw new Error("Expected isolated durable-parent workspace");
+    const parent = await client.createAgent({
+      provider: "codex",
+      cwd: root,
+      workspaceId: workspace.workspace.id,
+    });
     await daemon.daemon.agentManager.closeAgent(parent.id);
     expect(daemon.daemon.agentManager.getAgent(parent.id)).toBeNull();
     const stored = await client.fetchAgent({ agentId: parent.id });
