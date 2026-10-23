@@ -1,3 +1,4 @@
+import pino from "pino";
 import {
   prepareAgentMessage,
   formatAgentMessage,
@@ -40,6 +41,7 @@ import type {
   AgentFeature,
   AgentLaunchContext,
   AgentPromptInput,
+  AgentPermissionRequest,
   AgentProvider,
   AgentPersistenceHandle,
   AgentRunOptions,
@@ -9973,6 +9975,412 @@ test("subscribe does not emit state events for internal agents to global subscri
   expect(receivedEvents.filter((id) => id === generatedAgentIds[1]).length).toBe(0);
 });
 
+test("idle unload diagnostics report skipped operands without changing residency or activity", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-diagnostics-"));
+  const entries: Record<string, unknown>[] = [];
+  const diagnosticLogger = pino(
+    { level: "info" },
+    {
+      write(line: string) {
+        entries.push(JSON.parse(line));
+      },
+    },
+  );
+  const client = new TestAgentClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: new AgentStorage(join(workdir, "agents"), diagnosticLogger),
+    logger: diagnosticLogger,
+  });
+  const skipped = (agentId: string) =>
+    entries.filter(
+      (entry) => entry.msg === "Idle agent unload skipped" && entry.agentId === agentId,
+    );
+  vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", "1");
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const control = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const releaseUse = manager.beginAgentUse(agent.id, "plugin:diagnostic-use");
+    const releaseStream = manager.holdClientStream(agent.id, "diagnostic-client");
+    const releaseGlobal = manager.holdGlobalClientStream("legacy-client");
+    const originalUpdatedAt = agent.updatedAt;
+    const beginUse = vi.spyOn(manager, "beginAgentUse");
+    const now = Date.now();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 60_001)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(1);
+    const first = skipped(agent.id)[0]!;
+    expect(first).toMatchObject({
+      lifecycle: "idle",
+      hasPersistence: true,
+      pendingPermissions: 0,
+      providerPendingPermissions: 0,
+      clientStreamHolds: 1,
+      globalClientStreamHolds: 1,
+      activeAgentUses: 1,
+      foregroundMutationTails: false,
+      autonomousTurnPhases: false,
+      hasInFlightRun: false,
+      hasLiveTerminals: false,
+      runningSubagentIds: [],
+      runningSubagentCount: 0,
+      inFlightPermissionResponses: 0,
+      pendingReplacement: false,
+      inFlightAgentClose: false,
+      lifecycleMutationTails: false,
+      idleReapPending: false,
+      residentLastUsedAt: expect.any(Number),
+      idleMs: 60_000,
+      idleThresholdMet: true,
+      clientStreamOwners: [{ ownerId: "diagnostic-client", count: 1 }],
+      globalClientStreamOwners: [{ ownerId: "legacy-client", count: 1 }],
+      activeAgentUseOwners: [{ ownerId: "plugin:diagnostic-use", count: 1 }],
+      unavailableOperands: [],
+    });
+    expect(skipped(control.id)).toHaveLength(1);
+    expect(await manager.unloadIdleAgents(60_000, now + 60_002)).toBe(0);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_000)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(1);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_001)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(2);
+    expect(skipped(agent.id)[1]!.residentLastUsedAt).toBe(first.residentLastUsedAt);
+    expect(manager.getAgent(agent.id)?.updatedAt).toEqual(originalUpdatedAt);
+    expect(beginUse).not.toHaveBeenCalled();
+    expect(client.resumeOverrides).toHaveLength(0);
+
+    releaseGlobal();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_002)).toBe(1);
+    expect(manager.getAgent(control.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(3);
+    expect(skipped(agent.id)[2]!.globalClientStreamHolds).toBe(0);
+    expect(skipped(agent.id)[2]!.globalClientStreamOwners).toEqual([]);
+    expect(manager.getAgent(agent.id)?.session).toBe(agent.session);
+
+    const disabledControl = await manager.createAgent(
+      { provider: "codex", cwd: workdir },
+      undefined,
+      {},
+    );
+    vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", "0");
+    releaseUse();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_003)).toBe(1);
+    expect(manager.getAgent(disabledControl.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(3);
+    vi.stubEnv("PASEO_IDLE_UNLOAD_DIAG", undefined);
+    expect(await manager.unloadIdleAgents(60_000, now + 660_004)).toBe(0);
+    expect(skipped(agent.id)).toHaveLength(4);
+    expect(skipped(agent.id)[3]!.activeAgentUseOwners).toEqual([]);
+    releaseStream();
+    expect(await manager.unloadIdleAgents(60_000, now + 660_005)).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(skipped(agent.id)).toHaveLength(4);
+    expect(client.resumeOverrides).toHaveLength(0);
+  } finally {
+    vi.unstubAllEnvs();
+    for (const agent of manager.listAgents()) await manager.closeAgent(agent.id);
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("per-minute subscriptions and resident loads do not postpone idle unload", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-observer-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async (snapshot) => snapshot.size,
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const startedAt = Date.now();
+    const idleMs = 15 * 60_000;
+    const create = () => manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const observed = await create();
+    const used = await create();
+    const prompted = await create();
+    const updated = await create();
+
+    for (let minute = 1; minute <= 15; minute++) {
+      vi.setSystemTime(startedAt + minute * 60_000);
+      const release = manager.holdClientStream(observed.id, "minute-observer");
+      const loaded = await ensureAgentLoaded(observed.id, {
+        agentManager: manager,
+        agentStorage: storage,
+        logger,
+        useOwnerId: "minute-observer",
+      });
+      expect(loaded.session).toBe(observed.session);
+      expect(loaded.updatedAt).toEqual(observed.updatedAt);
+      if (minute === 14) {
+        const releaseUse = manager.beginAgentUse(used.id);
+        await manager.runAgent(prompted.id, "Real prompt");
+        await manager.setAgentMode(updated.id, "default");
+        vi.setSystemTime(startedAt + minute * 60_000 + 1_000);
+        releaseUse();
+      }
+      // A subscription still protects its runtime even after the idle deadline.
+      expect(await manager.unloadIdleAgents(idleMs)).toBe(0);
+      release();
+      release();
+    }
+
+    expect(client.resumeOverrides).toHaveLength(0);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+    expect(manager.getAgent(observed.id)).toBeNull();
+    for (const control of [used, prompted, updated]) {
+      expect(manager.getAgent(control.id)).not.toBeNull();
+    }
+    vi.setSystemTime(startedAt + 29 * 60_000);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(2);
+    expect(manager.getAgent(used.id)).not.toBeNull();
+    vi.setSystemTime(startedAt + 29 * 60_000 + 1_000);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+  } finally {
+    vi.useRealTimers();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("idle runtime unloads after the threshold and the next access resumes it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-unload-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  let failReap = false;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async (snapshot) => {
+      if (failReap) throw new Error("descendants still alive");
+      return snapshot.size;
+    },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const originalSession = agent.session;
+    const close = vi.spyOn(originalSession!, "close");
+    const now = Date.now();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 30_000)).toBe(0);
+    expect(manager.getAgent(agent.id)?.session).toBe(originalSession);
+    expect(close).not.toHaveBeenCalled();
+
+    const releaseStream = manager.holdClientStream(agent.id);
+    expect(await manager.unloadIdleAgents(60_000, now + 60_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseStream();
+
+    const releaseLegacyStream = manager.holdGlobalClientStream();
+    expect(await manager.unloadIdleAgents(60_000, now + 90_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseLegacyStream();
+
+    let terminalActive = true;
+    Object.assign(originalSession!, { hasLiveTerminals: () => terminalActive });
+    expect(await manager.unloadIdleAgents(60_000, now + 100_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    terminalActive = false;
+
+    const pendingPermissions = vi
+      .spyOn(originalSession!, "getPendingPermissions")
+      .mockReturnValue([{} as AgentPermissionRequest]);
+    expect(await manager.unloadIdleAgents(60_000, now + 105_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    pendingPermissions.mockRestore();
+
+    const releaseQueuedPrompt = manager.beginAgentUse(agent.id);
+    expect(await manager.unloadIdleAgents(60_000, now + 110_001)).toBe(0);
+    expect(close).not.toHaveBeenCalled();
+    releaseQueuedPrompt();
+
+    expect(await manager.unloadIdleAgents(60_000, now + 120_001)).toBe(1);
+    expect(manager.getAgent(agent.id)).toBeNull();
+    expect(close).toHaveBeenCalledOnce();
+    expect((await storage.get(agent.id))?.lastStatus).toBe("closed");
+
+    const resumed = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(resumed.id).toBe(agent.id);
+    expect(resumed.session).not.toBe(originalSession);
+    expect(client.resumeOverrides).toHaveLength(1);
+
+    const closeStarted = deferred<void>();
+    const finishClose = deferred<void>();
+    const resumedSession = resumed.session!;
+    vi.spyOn(resumedSession, "close").mockImplementationOnce(async () => {
+      closeStarted.resolve();
+      await finishClose.promise;
+    });
+    const racingUnload = manager.unloadIdleAgents(60_000, now + 180_001);
+    await closeStarted.promise;
+    const racingAccess = ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    finishClose.resolve();
+    expect(await racingUnload).toBe(1);
+    const afterRace = await racingAccess;
+    expect(afterRace.session).not.toBe(resumedSession);
+    expect(client.resumeOverrides).toHaveLength(2);
+
+    const deadSession = afterRace.session!;
+    const deadClose = vi.spyOn(deadSession, "close");
+    failReap = true;
+    expect(await manager.unloadIdleAgents(60_000, now + 240_001)).toBe(0);
+    expect(deadClose).toHaveBeenCalledOnce();
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    expect(() => manager.streamAgent(agent.id, "must not reach a closed session")).toThrow(
+      "Provider process cleanup incomplete",
+    );
+    await expect(
+      ensureAgentLoaded(agent.id, { agentManager: manager, agentStorage: storage, logger }),
+    ).rejects.toThrow("descendants still alive");
+    expect(deadClose).toHaveBeenCalledTimes(2);
+
+    failReap = false;
+    const afterCleanup = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(afterCleanup.session).not.toBe(deadSession);
+    expect((await storage.get(agent.id))?.lastStatus).toBe("idle");
+    expect(client.resumeOverrides).toHaveLength(3);
+
+    const providerCleanup = vi
+      .spyOn(afterCleanup.session!, "close")
+      .mockRejectedValueOnce(new Error("provider-owned cleanup failed"));
+    expect(await manager.unloadIdleAgents(60_000, now + 300_001)).toBe(0);
+    expect(manager.getAgent(agent.id)?.lifecycle).toBe("error");
+    expect(() => manager.streamAgent(agent.id, "must wait for provider cleanup")).toThrow(
+      "Provider process cleanup incomplete",
+    );
+    const afterProviderCleanup = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(providerCleanup).toHaveBeenCalledTimes(2);
+    expect(afterProviderCleanup.session).not.toBe(afterCleanup.session);
+    expect(client.resumeOverrides).toHaveLength(4);
+  } finally {
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("Reload retries retained idle tree cleanup before resuming and clears it", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-reload-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  let failReap = true;
+  let reaps = 0;
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async () => {
+      reaps++;
+      if (failReap) throw new Error("retained tree alive");
+      return 0;
+    },
+  });
+  try {
+    const agent = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(0);
+    expect(reaps).toBe(1);
+    await expect(manager.reloadAgentSession(agent.id)).rejects.toThrow("retained tree alive");
+    expect(reaps).toBe(2);
+    expect(client.resumeOverrides).toHaveLength(0);
+    failReap = false;
+    const replacement = await manager.reloadAgentSession(agent.id);
+    expect(reaps).toBe(3);
+    expect(replacement.session).not.toBe(agent.session);
+    const loaded = await ensureAgentLoaded(agent.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    });
+    expect(loaded.session).toBe(replacement.session);
+    expect(reaps).toBe(3);
+    expect(client.resumeOverrides).toHaveLength(1);
+  } finally {
+    failReap = false;
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
+test("idle sweep deadlines preserve a stalled close while other agents and future sweeps finish", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-deadline-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const closeStarted = deferred<void>();
+  const releaseClose = deferred<void>();
+  class StalledSession extends TestAgentSession {
+    closes = 0;
+    override async close(): Promise<void> {
+      this.closes++;
+      closeStarted.resolve();
+      await releaseClose.promise;
+    }
+  }
+  class StalledClient extends TestAgentClient {
+    current: StalledSession | undefined;
+    override async createSession(config: AgentSessionConfig): Promise<AgentSession> {
+      this.current = new StalledSession(config);
+      return this.current;
+    }
+  }
+  const stalled = new StalledClient("codex");
+  const responsive = new TestAgentClient("claude");
+  const manager = new AgentManager({
+    clients: { codex: stalled, claude: responsive },
+    registry: storage,
+    logger,
+    rescueTimeouts: { idleSessionCloseMs: 20 },
+    processTreeReaper: async () => 0,
+  });
+  try {
+    const first = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const second = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+    const sweep = manager.unloadIdleAgents(1, Date.now() + 60_000);
+    await closeStarted.promise;
+    expect(await sweep).toBe(1);
+    expect(manager.getAgent(second.id)).toBeNull();
+    expect(manager.getAgent(first.id)?.session).toBe(stalled.current);
+    const third = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(1);
+    expect(manager.getAgent(third.id)).toBeNull();
+    expect(stalled.current?.closes).toBe(1);
+    let loaded = false;
+    const access = ensureAgentLoaded(first.id, {
+      agentManager: manager,
+      agentStorage: storage,
+      logger,
+    }).then((agent) => {
+      loaded = true;
+      return agent;
+    });
+    await manager.unloadIdleAgents(1, Date.now() + 60_000);
+    expect(loaded).toBe(false);
+    releaseClose.resolve();
+    const resumed = await access;
+    expect(resumed.session).not.toBe(stalled.current);
+    expect(stalled.resumeOverrides).toHaveLength(1);
+  } finally {
+    releaseClose.resolve();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("subscribe hides provider subagents of internal parents from global subscribers", async () => {
   const internalAgentId = "00000000-0000-4000-8000-000000000117";
   const workdir = mkdtempSync(join(tmpdir(), "agent-manager-internal-provider-child-"));
@@ -13877,7 +14285,6 @@ test.each([false, true])(
     }
   },
 );
-
 
 test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
