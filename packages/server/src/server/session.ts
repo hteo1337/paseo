@@ -8773,6 +8773,13 @@ export class Session {
     return (!onlySource || source === onlySource) && this.sourceUnderstandsEvent(message, source);
   }
 
+  private sourceObservesWorkspaceSetup(message: SessionOutboundMessage, source: object): boolean {
+    return (
+      message.type === "workspace_setup_progress" &&
+      this.supportsForSource(CLIENT_CAPS.workspaceSetupObservation, source)
+    );
+  }
+
   private emitSubscribedEvent(message: SessionOutboundMessage, onlySource?: object): boolean {
     const event = sessionEventCategory(message);
     if (!event) return false;
@@ -8782,11 +8789,7 @@ export class Session {
     for (const subscription of this.eventSubscriptions.values()) {
       if (
         !subscription.events.has(event) ||
-        (event === "workspace_setup_progress" &&
-          this.supportsForSource(
-            CLIENT_CAPS.workspaceSetupObservation,
-            subscription.owner.source,
-          )) ||
+        this.sourceObservesWorkspaceSetup(message, subscription.owner.source) ||
         !this.subscriptionSourceUnderstandsEvent(message, subscription.owner.source, onlySource)
       )
         continue;
