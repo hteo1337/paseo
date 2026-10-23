@@ -1,11 +1,9 @@
-# TH1-1767
+# TH1-1767 diagnostics (scope approved 2026-10-23)
 
-PASEO_AGENT_ID is unset; identifier verified through dispatcher issue_status (39ce913c-1814-4acd-a684-25cb45911b49).
+PASEO_AGENT_ID remains unset; own id was verified via dispatcher issue_status.
 
-- [x] Issue, TH1-1598 comments, repository contracts and source base inspected; branch starts at upstream main 59b01b33f.
-- [x] Installed v0.12 source reconciled with 70-entry replay; actual transcript replay and existing 268-test suite recorded in TH1-1767-evidence.md.
-- [ ] In progress: reproduce live import/resume difference with one failing regression and name the exact guard.
-- [ ] Minimal fix passes focused suite, real-path check, typecheck, lint and format.
-- [ ] Fork PR reviewed by latest Sol; actual diff judged by Jev/semif; upstream PR opened.
-- [ ] v0.12 fix exported from release source, scripts validate, separate PR opened.
-- [ ] Finished delivery: STATUS records install command, branches pushed, Linear updated, no installation/restart.
+- [x] Source implementation logs every skipped resident's operands and known owners, defaults on, throttles identical state for 10 minutes, without touching clocks or loading agents.
+- [x] One behavioural test fails without diagnostics and proves logging, throttle/disable controls and unchanged unload behaviour with diagnostics.
+- [x] Re-export source into v0.12 patch0059; full series replays; repo validation once; relevant typecheck/lint/format pass.
+- [ ] In progress: open one paseo-app-patches PR, obtain latest-Sol PR-ready review and required adversarial judgment/review; inspect artifacts and exact head.
+- [ ] STATUS/Linear reflect diagnostic scope, exact build+install command and verification; all branches pushed; no install/restart/upstream PR.
