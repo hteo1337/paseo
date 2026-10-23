@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { z } from "zod";
 import type { AgentManager } from "../../agent/agent-manager.js";
+import { createTestLogger } from "../../../test-utils/test-logger.js";
 import { createStub } from "../../test-utils/class-mocks.js";
 import {
   StructuredAgentFallbackError,
@@ -77,6 +78,7 @@ describe("createAgentStructuredTextGeneration", () => {
       agentManager: createStub<AgentManager>({}),
       providerSnapshotManager: { listProviders: async () => [] },
       readDaemonConfig: () => ({ metadataGeneration: { providers: [] } }),
+      logger: createTestLogger(),
       getFocusedSelection: (cwd) => {
         focusedCalls.push(cwd);
         throw new Error("focused selection consulted");
