@@ -1,9 +1,9 @@
-# TH1-1767 diagnostics (scope approved 2026-10-23)
+# TH1-1767 observer idle-clock fix
 
-PASEO_AGENT_ID remains unset; own id was verified via dispatcher issue_status.
+PASEO_AGENT_ID unset; dispatcher identifies this writer as39ce913c.
 
-- [x] Source implementation logs every skipped resident's operands and known owners, defaults on, throttles identical state for 10 minutes, without touching clocks or loading agents.
-- [x] One behavioural test fails without diagnostics and proves logging, throttle/disable controls and unchanged unload behaviour with diagnostics.
-- [x] Re-export source into v0.12 patch0059; full series replays; repo validation once; relevant typecheck/lint/format pass.
-- [x] Open one paseo-app-patches PR, obtain latest-Sol PR-ready review and required adversarial judgment/review; inspect artifacts and exact head.
-- [x] STATUS/Linear reflect diagnostic scope, exact build+install command and verification; all branches pushed; no install/restart/upstream PR.
+- [x] Read19:01Z evidence and identify the60-second all-agent observer from source plus ssh m5 daemon.log; preserve attribution in STATUS without changing that client.
+- [x] One regression fails before fix: per-minute subscribe/unsubscribe and resident loading still allow unload after idleMs; active holds block, real uses reset.
+- [x] Minimal source fix exported into existing v0.12 patch0059 on a new patch branch from main; full series apply, build, typecheck, lint, manager suite and patch validation verified.
+- [ ] In progress: new patch PR ready with latest Sol review and actual-diff risk decision/required adversarial review; exact head/artifacts inspected.
+- [ ] STATUS/Linear reflect fix, observer identity, verification and m5 install command; all work pushed, no installation/restart/native changes.

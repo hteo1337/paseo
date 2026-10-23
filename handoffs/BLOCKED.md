@@ -1,1 +1,1 @@
-No delivery blocker: dispatcher durable review rejected active-task/uncertain-stop continuity; authorized short read-only reviews completed. Operator installation/restart and original root-cause evidence remain pending.
+No implementation blocker: m5 SSH alias resolves as teo-mbp-m5; gathering observer ownership from the existing daemon log and code. Native installation/restart prohibited.
