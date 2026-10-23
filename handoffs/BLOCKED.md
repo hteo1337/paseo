@@ -1,1 +1,1 @@
-None: diagnostic source work is authorized; installation/restart remain for Teo.
+No delivery blocker: dispatcher durable review rejected active-task/uncertain-stop continuity; authorized short read-only reviews completed. Operator installation/restart and original root-cause evidence remain pending.

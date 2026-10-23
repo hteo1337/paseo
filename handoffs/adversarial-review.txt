@@ -1,0 +1,18 @@
+TH1-1767 — exactly one adversarial Sol review after standard PR-ready review.
+Decision: required by standing fallback because semif rejected actual diff+plan: 23664 input tokens exceed limit4096; no valid judgment. Concurrency/lifecycle bookkeeping independently matches rubric.
+Short read-only in-session exception; dispatcher continuity_conflict prevented a durable lane while the implementation task owns TH1-1767. Separate worktree: /Users/hteo/.paseo/worktrees/TH1-1767-adversarial.
+Reviewer: /root/sol_adversarial_review; requested and returned model gpt-6.1-sol.
+
+Verdict: CONFIRMED — PASS
+PR #29 initial head: 9a98d13d3bad05f5fd0cbabb4fd968d58e105b98
+Reviewer model: gpt-6.1-sol
+No confident material findings.
+Nothing found in close/concurrency races, diagnostic side effects, provider accessor failures, owner decrement bookkeeping, throttle cleanup, or guard operand coverage. Unload guards and activity clocks remain unchanged; provider reads use cached state and catch failures.
+Reviewed source b5fe3364c; inspected changed patch payload and verified the replay’s three differing intermediate patch blobs match reviewed final source.
+Read-only review. No tests rerun, files edited, comments posted, installation, or restart performed.
+
+Final-head confirmation (same reviewer; docs-only delta):
+Verdict: CONFIRMED — PASS
+Final PR head: 820cd7bc51cafcf39ffe5189ba3eb0752cd062e7
+Model: gpt-6.1-sol
+Inspected the sole delta: STATUS corrects the operator-only install command’s checkout path and host label. Source and patch payload are unchanged. Prior adversarial verdict stands; no material findings.
