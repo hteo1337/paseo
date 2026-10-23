@@ -7,3 +7,5 @@ Next: lead merges when appropriate; Teo builds/installs and restarts Paseo, then
 Source refs (hteo1337/paseo): diag/TH1-1767 b5fe3364c; p0059/TH1-1767 2c4523034; replay-diag/TH1-1767 de6a82b4c; validate/TH1-1767 d29ee8b1f; all pushed. Own throwaway deps/build artifacts removed.
 Build+install by Teo on this host ONLY (NOT RUN): git -C "$HOME/Work/GitHub/paseo-app-patches" fetch origin dispatch/TH1-1767 && git -C "$HOME/Work/GitHub/paseo-app-patches" worktree add --detach "$HOME/.paseo/worktrees/TH1-1767-diag-patches" origin/dispatch/TH1-1767 && PASEO_REPO="$HOME/Work/GitHub/hteo1337/paseo" PASEO_BUILD_WORKTREE="$HOME/.paseo/worktrees/TH1-1767-diag-v0.12.0" "$HOME/.paseo/worktrees/TH1-1767-diag-patches/paseo-patched-update.sh" --tag v0.12.0 --force --wait
 Limits: no install/restart/live mirror inspect/reload/archive/model turn/upstream PR/merge performed. Open questions: original runtime blocker awaits operator deployment; none block diagnostic delivery.
+
+Continuity stop ID: 8a2bda01e0c0459686b56bc2eefd74dd:6a46d5154ef54f56bf18a7815a3d3763:39ce913c-1814-4acd-a684-25cb45911b49
