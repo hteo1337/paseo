@@ -1,0 +1,65 @@
+diff --git a/packages/server/src/server/agent/prompt-suggestions/service.test.ts b/packages/server/src/server/agent/prompt-suggestions/service.test.ts
+index ee55d6de9..9449c4a6d 100644
+--- a/packages/server/src/server/agent/prompt-suggestions/service.test.ts
++++ b/packages/server/src/server/agent/prompt-suggestions/service.test.ts
+@@ -660,3 +660,60 @@ describe("PromptSuggestionService", () => {
+     });
+   });
+ });
++
++// Review-only reproduction; not proposed as a PR change.
++it("review: reserves concurrency slots while workspace context is pending", async () => {
++  let releaseRead: (value: NewChatWorkspaceContext) => void = () => {};
++  const workspace = new Promise<NewChatWorkspaceContext>((resolve) => { releaseRead = resolve; });
++  const harness = createHarness({
++    agents: Object.fromEntries(["a1", "a2", "a3"].map(id => [id, { id, cwd: "/repo", config: {} }])),
++    maxConcurrent: 2,
++    timeline: [],
++    readWorkspaceContext: () => workspace,
++  });
++  for (const id of ["a1", "a2", "a3"]) harness.service.requestFor(id);
++  await new Promise(resolve => setTimeout(resolve, 10));
++  expect(harness.pending).toHaveLength(0);
++  releaseRead({ branch: "feat/review", changedPaths: [], recentCommits: [], moreChangedPaths: 0 });
++  await new Promise(resolve => setTimeout(resolve, 30));
++  console.info("review evidence: maxConcurrent=2; pending provider requests=" + harness.pending.length);
++  harness.service.stop();
++  expect(harness.pending.length).toBeLessThanOrEqual(2);
++});
++
++// Review-only mixed workload; not proposed as a PR change.
++it("review: two agents and one draft share cap 2 and drain after failure", async () => {
++  let releaseRead: (value: NewChatWorkspaceContext) => void = () => {};
++  const workspace = new Promise<NewChatWorkspaceContext>((resolve) => { releaseRead = resolve; });
++  const reads: string[] = [];
++  const harness = createHarness({
++    agents: Object.fromEntries(["a1", "a2"].map(id => [id, { id, cwd: "/repo", config: {} }])),
++    maxConcurrent: 2,
++    timeline: [],
++    readWorkspaceContext: cwd => { reads.push(cwd); return workspace; },
++  });
++  try {
++    expect(harness.service.requestFor("a1").accepted).toBe(true);
++    expect(harness.service.requestFor("a2").accepted).toBe(true);
++    expect(harness.service.requestForDraft("draft:review", "/draft").accepted).toBe(true);
++    await vi.waitFor(() => expect(reads).toEqual(["/repo", "/repo"]));
++    expect(harness.pending).toHaveLength(0);
++    releaseRead({ branch: "feat/review", changedPaths: [], recentCommits: [], moreChangedPaths: 0 });
++    await vi.waitFor(() => expect(harness.pending).toHaveLength(2));
++    expect(reads).toHaveLength(2);
++    console.info("mixed evidence: 2 agents preparing/provider pending; draft waits; cap=2");
++    harness.pending[0].reject(new Error("review provider failure"));
++    await vi.waitFor(() => expect(harness.pending).toHaveLength(3));
++    expect(reads).toEqual(["/repo", "/repo", "/draft"]);
++    expect(harness.pending[2].cwd).toBe("/draft");
++    // One provider request has rejected: the two remaining calls still meet cap 2.
++    console.info("mixed evidence: one agent rejects; draft starts; active provider calls=2");
++    harness.pending[1].resolve({ suggestions: ["finish agent work"] });
++    harness.pending[2].resolve({ suggestions: ["start draft work"] });
++    await vi.waitFor(() => expect(harness.emitted).toHaveLength(2));
++    expect(harness.emitted.map(message => message.payload.agentId).sort()).toEqual(["a2", "draft:review"]);
++    console.info("mixed evidence: agent and draft complete; emitted=a2,draft:review");
++  } finally {
++    harness.service.stop();
++  }
++});

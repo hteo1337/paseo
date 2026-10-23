@@ -1,51 +1,22 @@
-Verdict: BLOCKING
+Fix confirmation for **Suggest prompts and drafted answers from the metadata model**, limited to the three findings from my earlier BLOCKING review. Exact head `3551ccb3c79a2fbfa30080016653d3f0e4f2c26b`, base `d6fa231894568e6ac9a11e8b2fb475343026eea6`; inspected in a separate detached review worktree. Runtime verified: codex-auto / gpt-6.1-sol (high).
 
-TH1-1798 — Suggest prompts and drafted answers from the metadata model
-PR: https://github.com/getpaseo/paseo/pull/7753
-Reviewed head: 95cee63a8edf6ea8560c2f471b91ffe50274fb87
-Reviewed base: d6fa231894568e6ac9a11e8b2fb475343026eea6
-Reviewer runtime inspected via paseo-dispatch status: codex-auto / gpt-6.1-sol, high.
-Separate detached review worktree: /Users/hteo/.paseo/worktrees/3eu1vvlp/TH1-1798-review.
-No PR-branch edits, readiness change, or merge.
+1. **[P1] Fixed** — [session-context.tsx:486](https://github.com/hteo1337/paseo/blob/3551ccb3c79a2fbfa30080016653d3f0e4f2c26b/packages/app/src/contexts/session-context.tsx#L486): the common event list at line 515 omits `agent_prompt_suggestions`; the separate feed is gated by `useHostFeature(serverId, "promptSuggestions")`, COMPAT-tagged, released on cleanup, and reruns when capability changes. The exact-base schema accepts the actual common event list; adding the new event back makes it reject the request.
+2. **[P2] Fixed** — [service.ts:348](https://github.com/hteo1337/paseo/blob/3551ccb3c79a2fbfa30080016653d3f0e4f2c26b/packages/server/src/server/agent/prompt-suggestions/service.ts#L348): `drain()` sets `entry.generating` and increments `inFlight` before calling async generation (361–363); `generate()` releases both in `finally` (450–457). Drafts enqueue at 223 and use the same counter at 374, released at 275. The saved suspended-workspace reproduction now starts only 2 calls for 3 agents at cap 2. In the mixed case, 2 agents occupy the slots, 1 draft waits, a rejected agent releases a slot, and the draft starts with 2 active calls; the remaining agent and draft both emit results.
+3. **[P2] Fixed** — [suggestion-model-section.tsx:67](https://github.com/hteo1337/paseo/blob/3551ccb3c79a2fbfa30080016653d3f0e4f2c26b/packages/app/src/screens/settings/suggestion-model-section.tsx#L67): rejected saves set `saveError`, rendered at 121 with `settingsStyles.rowError`, `accessibilityRole="alert"` and a polite live region. No `Alert.alert` call remains. Source confirmation only; no browser rendering claim.
 
-Blocking findings, severity ordered
+Commands and results, from the detached review worktree:
 
-1. [P1] Gate the shared event subscription for older daemons.
-   packages/app/src/contexts/session-context.tsx:489
-   The shared observeEvents call always includes agent_prompt_suggestions, even when the host lacks features.promptSuggestions. With an owned-subscription daemon from the base commit, the entire session.events.set_subscription.request fails enum validation at events[1]. This prevents the common feed from registering, including permission requests/resolutions and attention notifications. The feature gate in usePromptSuggestions protects only the dedicated suggestion RPC. Gate subscription membership too, restoring it when host features become known or change.
-   Evidence: loaded the actual messages.ts from d6fa23189 and parsed the event list extracted from the head's SessionProvider: without the new event=true; with the new event=false; head schema=true. Base websocket-server.ts advertises ownedSubscriptions:true, so the legacy filter does not protect this supported combination. See handoffs/TH1-1798/review-inspect.log.
+```text
+npm run build:protocol
+PASS (exit 0); exact-head protocol built locally.
+npx tsx handoffs/TH1-1798/confirmation-inspect.mts
+PASS (exit 0); actual shared feed accepted by base schema, unsafe control rejected; source gate/inline-alert checks passed.
+cd packages/server && npx vitest run src/server/agent/prompt-suggestions/service.test.ts --bail=1
+PASS (exit 0): 1 file, 32 tests; 30 existing + saved reproduction + one mixed-workload check, run once.
+git diff --check d6fa23189 3551ccb3c
+PASS (exit 0).
+```
 
-2. [P2] Reserve concurrency before asynchronous prompt preparation.
-   packages/server/src/server/agent/prompt-suggestions/service.ts:440
-   entry.generating and inFlight are set only after await preparePrompt (lines 457-458). While that awaits repository/config/context work, drain sees available capacity and requestFor sees an idle entry. A burst can start more metadata agents than maxConcurrent, including duplicate generation for the same agent. Separately, requestForDraft at line 221 calls generateDraft outside this queue, so draft requests also escape the limit. Reserve a slot and the per-agent running state before the first await, release both on every exit, and route drafts through the same budget.
-   Evidence: one review-only test in the existing service.test.ts holds readWorkspaceContext pending, requests three agents with maxConcurrent=2, then releases it. Three provider calls start; expected <=2 fails. Run: cd packages/server && npx vitest run src/server/agent/prompt-suggestions/service.test.ts --bail=1 -t 'review: reserves concurrency slots'. Result: 1 failed, 30 skipped. Patch and real output are in handoffs/TH1-1798/review-reproduction.patch and review-vitest.log. The pre-existing cap test uses immediately resolved preparation, so it misses this suspension point. The added test was removed from the review checkout after preserving the patch; the PR branch was never edited.
+Review-only test edits are preserved in `handoffs/TH1-1798/confirmation-reproduction.patch` on `dispatch/TH1-1798`; the PR branch was not edited. Nothing blocking remains in these three findings. No other areas re-reviewed; no full suites, PR-head full typecheck/lint, browser/native/Electron execution or CI success claimed. The previously completed adversarial review was not repeated. No readiness change or merge performed.
 
-3. [P2] Render a save error in the suggestion model settings.
-   packages/app/src/screens/settings/suggestion-model-section.tsx:67
-   A rejected patchConfig call clears draft mode and reports the error only through Alert.alert imported from react-native. React Native Web's Alert.alert is empty, so browser and Electron users see no error or retry explanation after a failed save. Use the app's rendered alert/error pattern and retain an actionable error in the section. This is required by docs/testing.md's fallible-user-actions contract. Static evidence: installed react-native-web/dist/exports/Alert/index.js defines static alert() {}. The new settings tests replace Alert with a spy and cover successful writes only; they do not establish visible failure feedback.
-
-Nothing found in these inspected areas
-
-- Wire additions: no narrowing/removal of existing wire fields; hello capability, feature flag, draftCwd, answer permission and question-index fields are additive/optional. New RPCs follow dotted request/response naming. COMPAT(promptSuggestions) is present. Dedicated request and settings gates are present. The unguarded shared subscription is finding 1.
-- Old-client event delivery: sourceUnderstandsEvent and legacyWantsEvent suppress suggestion events for clients lacking prompt_suggestions. Client capability defaults advertise the implemented feature. No separate outbound delivery finding.
-- Context privacy: prompt construction selects only user_message and assistant_message with external tool input disabled; tool calls, tool output, reasoning and sub-agent logs are excluded. New-chat context reads branch, commit subjects and changed paths, not file contents/diffs. Assistant/user text can itself quote sensitive material; this is not an additional tool-output channel.
-- Model selection/config: configured-only is threaded through both suggestion paths; built-in/default/current-agent model fallback is disabled for suggestions by design. Per-kind patch merging preserves unrelated configuration. No finding on intentional opt-in semantics.
-- Cancellation: turn start/failure/cancel bumps the token and stale completed results are dropped. Actual provider work is not aborted, and preparation is not covered by the slot reservation; see finding 2. No claim of hard cancellation.
-- Localization: all 9 locales contain all 9 new UI keys, with matching interpolation placeholders. No missing-key finding. Linguistic translation quality was not independently certified.
-- React/Unistyles: inspected new hooks, ghost/chip components, question-card wiring and settings components; no new useUnistyles call or unguarded DOM API found. No additional React/Unistyles blocker beyond the save-error handling above.
-
-Verification and limits
-
-- npm run build:protocol: exit 0 in the isolated review checkout; generated validators were regenerated through the npm script, not edited.
-- git diff --check d6fa23189 95cee63a8: exit 0.
-- Exact-base schema compatibility control and 9-locale resource inspection: exit 0; results above.
-- Exactly one new targeted behavioral test ran and failed as above. An earlier invocation before the test was added selected zero tests (30 skipped); it did not rerun existing tests.
-- Existing green suite/static-check claims in the PR and Linear were read, and the relevant test source was inspected. Those suites were not rerun, honoring the standing instruction against repeating already reported green runs. Independent full typecheck/lint, full suites, CI success, browser visual checks, iOS, Android and Electron execution are not claimed by this review.
-- Review evidence and continuity are on dispatch/TH1-1798, separate from the clean upstream PR branch. No handoff files were added to the upstream PR diff.
-
-Adversarial decision and completion
-
-Decided: required — semif rejected the full actual diff at 84037 tokens (4096 limit), so the fixed policy default applies. Exactly one short read-only in-session review with explicit gpt-6.1-sol/high override completed in a second detached worktree. Its inspected result agrees with these three blockers and reports no additional confident blockers in lifecycle/shutdown, authorization, capability routing, question handling or context filtering. See handoffs/TH1-1798/adversarial-review.txt. The original PR comment was updated; no second comment was posted.
-CI verification: upstream run 40007357408 is completed/action_required with zero jobs; no successful CI gate is claimed.
-
-Delivery checks: handoff commit 253ba66f7 was pushed and its remote SHA verified. Precommit formatting and full typecheck passed on the dispatch branch baseline, not the PR head. Targeted lint of the inspection artifact passed. Saved Vitest output has only trailing blank lines trimmed. Linear review outcome recorded under TH1-1798. Both temporary detached review worktrees were inspected clean and retired after preserving the evidence.
+Verdict: CONFIRMED

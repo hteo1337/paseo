@@ -1,0 +1,9 @@
+npm notice run paseo@0.13.0-beta.2 build:protocol
+npm notice run npm run build --workspace=@getpaseo/protocol
+npm notice run @getpaseo/protocol@0.13.0-beta.2 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.13.0-beta.2 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 236 session message validators
+npm notice run @getpaseo/protocol@0.13.0-beta.2 build
+npm notice run tsc -p tsconfig.json --incremental false

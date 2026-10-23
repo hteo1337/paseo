@@ -1,0 +1,18 @@
+npm notice run paseo@0.13.0-beta.2 npx
+npm notice run 'tsx' handoffs/TH1-1798/confirmation-inspect.mts
+{
+  "base": "d6fa23189",
+  "events": [
+    "agent_attention_required",
+    "terminal_attention_required",
+    "agent_permission_request",
+    "agent_permission_resolved",
+    "agent.provider_subagents.update",
+    "checkout_status_update",
+    "status.server_info"
+  ],
+  "actualSharedAccepted": true,
+  "unsafeControlAccepted": false,
+  "separateCompatGatedFeed": true
+}
+Source confirmed: save failure sets rendered rowError with accessibilityRole=alert; no Alert.alert call. No browser execution claimed.

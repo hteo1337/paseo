@@ -1,1 +1,1 @@
-PR #7753 at 95cee63a8 is BLOCKING: ungated old-host event subscription, concurrency cap bypass and invisible web model-save errors; author must fix before reviewer confirmation/readiness.
+None: the three earlier blockers are confirmed fixed at 3551ccb3c; scoped confirmation complete, lead owns PR readiness and delivery.

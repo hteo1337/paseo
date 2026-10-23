@@ -1,0 +1,3 @@
+npm notice run paseo@0.9.0-beta.1 format
+npm notice run oxfmt .
+Finished in 1034ms on 4575 files using 16 threads.

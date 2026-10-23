@@ -1,0 +1,10 @@
+npm notice run paseo@0.13.0-beta.2 npx
+npm notice run 'vitest' run src/server/agent/prompt-suggestions/service.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/TH1-1798-confirm/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  32 passed (32)
+   Start at  23:18:18
+   Duration  678ms (transform 186ms, setup 21ms, import 312ms, tests 268ms, environment 0ms)
