@@ -344,7 +344,7 @@ export async function sendPreparedPromptToAgent(
   const release = params.agentManager.beginAgentUse(params.agentId);
   try {
     const unarchive = params.unarchive ?? true;
-  
+
     const record = await params.agentStorage.get(params.agentId);
     let archivedAtToRestore: string | null = null;
     if (record?.archivedAt) {
@@ -355,7 +355,7 @@ export async function sendPreparedPromptToAgent(
         archivedAtToRestore = record.archivedAt;
       }
     }
-  
+
     try {
       await ensureAgentLoaded(params.agentId, {
         agentManager: params.agentManager,
@@ -370,11 +370,11 @@ export async function sendPreparedPromptToAgent(
       }
       throw error;
     }
-  
+
     if (params.sessionMode) {
       await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
     }
-  
+
     return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
       replaceRunning: true,
       onDispatch: params.onDispatch,

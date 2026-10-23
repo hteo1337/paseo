@@ -14309,7 +14309,6 @@ test("reads the last durable assistant response without loading a stored-only ch
   expect(manager.getAgent("stored-child")).toBeNull();
 });
 
-
 test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };
   const session = new TestAgentSession(config);
