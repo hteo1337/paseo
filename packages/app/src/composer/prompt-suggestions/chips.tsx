@@ -1,10 +1,10 @@
-import { PressHighlight } from "@/components/ui/press-highlight";
 import { memo, useCallback } from "react";
 import { ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import type { PromptSuggestion } from "@getpaseo/protocol/messages";
 import { composerPillStyles, resolveComposerPillClearance } from "@/composer/pill-styles";
+import { PressHighlight } from "@/components/ui/press-highlight";
 import { useIsCompactFormFactor } from "@/constants/layout";
 
 interface PromptSuggestionChipsProps {
