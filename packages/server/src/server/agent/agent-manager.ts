@@ -1425,8 +1425,12 @@ export class AgentManager {
   }
 
   /** Hold a resident session while an access is still loading or admitting work. */
-  beginAgentUse(agentId: string, ownerId?: string): () => void {
-    this.residentLastUsedAt.set(agentId, Date.now());
+  beginAgentUse(
+    agentId: string,
+    ownerId?: string,
+    { touchActivity = true }: { touchActivity?: boolean } = {},
+  ): () => void {
+    if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
     this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
     const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "uses", ownerId });
     let released = false;
@@ -1437,7 +1441,7 @@ export class AgentManager {
       const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
       if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
       else this.activeAgentUses.delete(agentId);
-      this.residentLastUsedAt.set(agentId, Date.now());
+      if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
     };
   }
 
@@ -1445,8 +1449,6 @@ export class AgentManager {
   holdClientStream(agentId: string, ownerId?: string): () => void {
     this.clientStreamHolds.set(agentId, (this.clientStreamHolds.get(agentId) ?? 0) + 1);
     const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "streams", ownerId });
-    const releaseUse = this.beginAgentUse(agentId);
-    releaseUse();
     let released = false;
     return () => {
       if (released) return;
@@ -1455,7 +1457,6 @@ export class AgentManager {
       const remaining = (this.clientStreamHolds.get(agentId) ?? 1) - 1;
       if (remaining > 0) this.clientStreamHolds.set(agentId, remaining);
       else this.clientStreamHolds.delete(agentId);
-      this.residentLastUsedAt.set(agentId, Date.now());
     };
   }
 

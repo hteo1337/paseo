@@ -10084,6 +10084,68 @@ test("idle unload diagnostics report skipped operands without changing residency
   }
 });
 
+test("per-minute subscriptions and resident loads do not postpone idle unload", async () => {
+  const workdir = mkdtempSync(join(tmpdir(), "agent-idle-observer-"));
+  const storage = new AgentStorage(join(workdir, "agents"), logger);
+  const client = new TestAgentClient();
+  const manager = new AgentManager({
+    clients: { codex: client },
+    registry: storage,
+    logger,
+    processTreeReaper: async (snapshot) => snapshot.size,
+  });
+  vi.useFakeTimers({ toFake: ["Date"] });
+  try {
+    const startedAt = Date.now();
+    const idleMs = 15 * 60_000;
+    const create = () => manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const observed = await create();
+    const used = await create();
+    const prompted = await create();
+    const updated = await create();
+
+    for (let minute = 1; minute <= 15; minute++) {
+      vi.setSystemTime(startedAt + minute * 60_000);
+      const release = manager.holdClientStream(observed.id, "minute-observer");
+      const loaded = await ensureAgentLoaded(observed.id, {
+        agentManager: manager,
+        agentStorage: storage,
+        logger,
+        useOwnerId: "minute-observer",
+      });
+      expect(loaded.session).toBe(observed.session);
+      expect(loaded.updatedAt).toEqual(observed.updatedAt);
+      if (minute === 14) {
+        const releaseUse = manager.beginAgentUse(used.id);
+        await manager.runAgent(prompted.id, "Real prompt");
+        await manager.setAgentMode(updated.id, "default");
+        vi.setSystemTime(startedAt + minute * 60_000 + 1_000);
+        releaseUse();
+      }
+      // A subscription still protects its runtime even after the idle deadline.
+      expect(await manager.unloadIdleAgents(idleMs)).toBe(0);
+      release();
+      release();
+    }
+
+    expect(client.resumeOverrides).toHaveLength(0);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+    expect(manager.getAgent(observed.id)).toBeNull();
+    for (const control of [used, prompted, updated]) {
+      expect(manager.getAgent(control.id)).not.toBeNull();
+    }
+    vi.setSystemTime(startedAt + 29 * 60_000);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(2);
+    expect(manager.getAgent(used.id)).not.toBeNull();
+    vi.setSystemTime(startedAt + 29 * 60_000 + 1_000);
+    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+  } finally {
+    vi.useRealTimers();
+    await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+    rmSync(workdir, { recursive: true, force: true });
+  }
+});
+
 test("idle runtime unloads after the threshold and the next access resumes it", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-idle-unload-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);

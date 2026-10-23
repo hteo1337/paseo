@@ -72,7 +72,10 @@ export async function ensureAgentLoaded(
   agentId: string,
   deps: EnsureAgentLoadedDeps,
 ): Promise<ManagedAgent> {
-  const release = deps.agentManager.beginAgentUse?.(agentId, deps.useOwnerId);
+  const release = deps.agentManager.beginAgentUse?.(agentId, deps.useOwnerId, {
+    // Observing a resident runtime needs a close barrier, not a fresh idle deadline.
+    touchActivity: !deps.agentManager.getAgent(agentId),
+  });
   try {
     return await ensureAgentLoadedInner(agentId, deps);
   } finally {

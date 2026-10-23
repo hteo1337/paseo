@@ -33,8 +33,10 @@ The daemon unloads a resident agent after 15 minutes without a turn, pending per
 prompt, in-flight resume, client timeline stream, or live ACP terminal. It closes the provider runtime and
 keeps the durable agent record for on-demand resume. Set `agents.idleUnloadMinutes` in the daemon
 config, or override it with `PASEO_AGENT_IDLE_UNLOAD_MINUTES`; `0` disables idle unloading. The
-daemon checks once a minute. Opening a chat or asking for prompt suggestions can resume it and reset
-the idle clock. If descendant cleanup fails after the provider closes, the runtime enters an error
+daemon checks once a minute. Timeline subscriptions and loading an already-resident agent do not
+reset the idle clock; an active subscription still prevents unloading. Actual turns, prompts and
+agent updates refresh activity. Loading a closed agent resumes its runtime with a fresh deadline.
+If descendant cleanup fails after the provider closes, the runtime enters an error
 state and rejects prompts. The next access retries cleanup before it can resume the durable session.
 
 Idle-unload diagnostics default on. Each pass reports resident agents that did not unload as
