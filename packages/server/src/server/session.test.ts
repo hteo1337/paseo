@@ -4036,12 +4036,16 @@ describe("session checkout status handling", () => {
 });
 
 describe("session workspace descriptors", () => {
-  test("fetch_workspaces_request includes project placement for a GitHub-backed workspace", async () => {
+  test("fetch_workspaces_request includes project placement for a GitHub-backed workspace", async ({
+    onTestFinished,
+  }) => {
     const messages: unknown[] = [];
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "session-workspace-descriptor-")));
+    onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
     const workspace = {
       workspaceId: "ws-gh",
       projectId: "prj_app",
-      cwd: "/repo/app",
+      cwd,
       kind: "local_checkout" as const,
       displayName: "app",
       branch: "app",
@@ -4050,7 +4054,7 @@ describe("session workspace descriptors", () => {
     const project = {
       projectId: "prj_app",
       projectKey: "remote:github.com/acme/app",
-      rootPath: "/repo/app",
+      rootPath: cwd,
       kind: "git" as const,
       displayName: "acme/app",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -4061,7 +4065,7 @@ describe("session workspace descriptors", () => {
       workspaceRuntimeStore: {
         ...createWorkspaceRuntimeStore(),
         get: vi.fn(() =>
-          createWorkspaceGitSnapshot("/repo/app", {
+          createWorkspaceGitSnapshot(cwd, {
             git: {
               remoteUrl: "https://github.com/acme/app.git",
               currentBranch: "main",
@@ -4102,11 +4106,11 @@ describe("session workspace descriptors", () => {
               projectName: "acme/app",
               workspaceName: "app",
               checkout: expect.objectContaining({
-                cwd: "/repo/app",
+                cwd,
                 isGit: true,
                 currentBranch: "app",
                 remoteUrl: null,
-                worktreeRoot: "/repo/app",
+                worktreeRoot: cwd,
                 isPaseoOwnedWorktree: false,
                 mainRepoRoot: null,
               }),
@@ -4117,20 +4121,24 @@ describe("session workspace descriptors", () => {
     });
   });
 
-  test("fetch_workspaces_request includes repo-root fallback placement for a workspace without remote", async () => {
+  test("fetch_workspaces_request includes repo-root fallback placement for a workspace without remote", async ({
+    onTestFinished,
+  }) => {
     const messages: unknown[] = [];
+    const cwd = realpathSync(mkdtempSync(join(tmpdir(), "session-workspace-descriptor-")));
+    onTestFinished(() => rmSync(cwd, { recursive: true, force: true }));
     const workspace = {
       workspaceId: "ws-local",
-      projectId: "/repo/local",
-      cwd: "/repo/local",
+      projectId: cwd,
+      cwd,
       kind: "local_checkout" as const,
       displayName: "local",
       branch: "local",
       archivedAt: null,
     };
     const project = {
-      projectId: "/repo/local",
-      rootPath: "/repo/local",
+      projectId: cwd,
+      rootPath: cwd,
       kind: "git" as const,
       displayName: "local",
       createdAt: "2026-01-01T00:00:00.000Z",
@@ -4141,7 +4149,7 @@ describe("session workspace descriptors", () => {
       workspaceRuntimeStore: {
         ...createWorkspaceRuntimeStore(),
         get: vi.fn(() =>
-          createWorkspaceGitSnapshot("/repo/local", {
+          createWorkspaceGitSnapshot(cwd, {
             git: {
               remoteUrl: null,
               currentBranch: "main",
@@ -4174,15 +4182,15 @@ describe("session workspace descriptors", () => {
           expect.objectContaining({
             id: "ws-local",
             project: expect.objectContaining({
-              projectKey: "/repo/local",
+              projectKey: cwd,
               projectName: "local",
               workspaceName: "local",
               checkout: expect.objectContaining({
-                cwd: "/repo/local",
+                cwd,
                 isGit: true,
                 currentBranch: "local",
                 remoteUrl: null,
-                worktreeRoot: "/repo/local",
+                worktreeRoot: cwd,
                 isPaseoOwnedWorktree: false,
                 mainRepoRoot: null,
               }),
@@ -5616,6 +5624,7 @@ describe("agent config setters", () => {
     [K in keyof SessionOptions["agentManager"]]?: unknown;
   } {
     return {
+      beginAgentUse: vi.fn(() => () => {}),
       waitForAgentClose: vi.fn().mockResolvedValue(undefined),
       getAgent: vi.fn(() => ({ id: "agent-1" })),
       ...overrides,
