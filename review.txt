@@ -47,3 +47,5 @@ Adversarial decision and completion
 
 Decided: required — semif rejected the full actual diff at 84037 tokens (4096 limit), so the fixed policy default applies. Exactly one short read-only in-session review with explicit gpt-6.1-sol/high override completed in a second detached worktree. Its inspected result agrees with these three blockers and reports no additional confident blockers in lifecycle/shutdown, authorization, capability routing, question handling or context filtering. See handoffs/TH1-1798/adversarial-review.txt. The original PR comment was updated; no second comment was posted.
 CI verification: upstream run 40007357408 is completed/action_required with zero jobs; no successful CI gate is claimed.
+
+Delivery checks: handoff commit 253ba66f7 was pushed and its remote SHA verified. Precommit formatting and full typecheck passed on the dispatch branch baseline, not the PR head. Targeted lint of the inspection artifact passed. Saved Vitest output has only trailing blank lines trimmed. Linear review outcome recorded under TH1-1798. Both temporary detached review worktrees were inspected clean and retired after preserving the evidence.
