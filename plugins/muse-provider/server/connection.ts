@@ -155,7 +155,10 @@ export class MspConnection {
   close(): Promise<void> {
     if (this.closeResult) return this.closeResult;
     this.closing = true;
-    this.closeResult = this.finishClose();
+    this.closeResult = this.finishClose().catch((error) => {
+      this.closeResult = null;
+      throw error;
+    });
     return this.closeResult;
   }
   private async finishClose(): Promise<void> {
