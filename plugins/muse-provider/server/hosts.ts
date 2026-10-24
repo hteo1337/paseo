@@ -146,8 +146,9 @@ export class Hosts {
       users: 0,
       retired: false,
     };
-    shared.ready.catch(() => this.discard(shared));
-    host.onExit(() => void this.discard(shared));
+    // Background cleanup may fail; keep ownership so explicit disposal can retry and report it.
+    shared.ready.catch(() => this.discard(shared)).catch(() => {});
+    host.onExit(() => void this.discard(shared).catch(() => {}));
     this.hosts.set(key, shared);
     this.owned.add(shared);
     return shared;
@@ -159,7 +160,7 @@ export class Hosts {
     this.notify();
     if (shared.users > 0) return;
     if (shared.retired) {
-      void this.shut(shared);
+      void this.shut(shared).catch(() => {});
       return;
     }
     shared.idle = setTimeout(() => this.retire(shared), idleMs);
@@ -171,7 +172,7 @@ export class Hosts {
     if (this.hosts.get(shared.launch) === shared) this.hosts.delete(shared.launch);
     shared.retired = true;
     clearTimeout(shared.idle);
-    if (shared.users === 0) void this.shut(shared);
+    if (shared.users === 0) void this.shut(shared).catch(() => {});
   }
 
   private discard(shared: SharedHost): Promise<void> {
@@ -182,10 +183,13 @@ export class Hosts {
   private shut(shared: SharedHost): Promise<void> {
     shared.closing ??= shared.host
       .close()
-      .catch(() => {})
-      .finally(() => {
+      .then(() => {
         this.owned.delete(shared);
-        this.notify();
+        return this.notify();
+      })
+      .catch((error) => {
+        shared.closing = undefined;
+        throw error;
       });
     return shared.closing;
   }
