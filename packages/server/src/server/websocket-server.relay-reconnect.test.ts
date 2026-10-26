@@ -1,9 +1,12 @@
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { SessionDelivery } from "./session/owned-subscriptions/index.js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
+import { stripTypeScriptTypes } from "node:module";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { fileURLToPath, pathToFileURL } from "node:url";
+import * as buildIdentity from "./build-identity.js";
 import type { KeeperControl } from "./keeper/keeper-control.js";
 import type { Server as HTTPServer } from "http";
 import type pino from "pino";
@@ -606,7 +609,9 @@ describe("relay external socket reconnect behavior", () => {
   });
 
   test("reports only readable local build identity and enabled keeper control", async () => {
-    const resourcesPath = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
+    const fixtureRoot = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
+    const resourcesPath = join(fixtureRoot, "Paseo.app", "Contents", "Resources");
+    mkdirSync(resourcesPath, { recursive: true });
     const originalResourcesPath = Object.getOwnPropertyDescriptor(process, "resourcesPath");
     const markerPath = join(resourcesPath, "local-build.json");
     const marker = {
@@ -616,7 +621,37 @@ describe("relay external socket reconnect behavior", () => {
       head: "1234567890abcdef1234567890abcdef12345678",
     };
     Object.defineProperty(process, "resourcesPath", { configurable: true, value: resourcesPath });
+    const identityReader = vi.spyOn(buildIdentity, "readLocalBuildIdentity");
     try {
+      writeFileSync(markerPath, JSON.stringify(marker));
+      const sourceServer = createServer();
+      try {
+        const socket = new MockSocket();
+        const serverInfo = await attachRelayAndHello({
+          server: sourceServer,
+          socket,
+          clientId: "foreign-source-build",
+        });
+        expect(parseSentEnvelope(socket.sent[0]).message?.payload).not.toHaveProperty(
+          "buildIdentity",
+        );
+        expect(serverInfo).not.toHaveProperty("buildIdentity");
+      } finally {
+        await sourceServer.close();
+      }
+      const modulePath = join(resourcesPath, "app.asar", "build-identity.mjs");
+      mkdirSync(join(resourcesPath, "app.asar"));
+      symlinkSync(
+        fileURLToPath(new URL("../../../../node_modules", import.meta.url)),
+        join(resourcesPath, "node_modules"),
+        "dir",
+      );
+      writeFileSync(
+        modulePath,
+        stripTypeScriptTypes(readFileSync(new URL("./build-identity.ts", import.meta.url), "utf8")),
+      );
+      const packagedHelper: typeof buildIdentity = await import(pathToFileURL(modulePath).href);
+      identityReader.mockImplementation(packagedHelper.readLocalBuildIdentity);
       for (const enabled of [true, false]) {
         writeFileSync(markerPath, JSON.stringify(marker));
         const server = createServer({ keeperControl: createStub<KeeperControl>({ enabled }) });
@@ -676,7 +711,8 @@ describe("relay external socket reconnect behavior", () => {
       if (originalResourcesPath)
         Object.defineProperty(process, "resourcesPath", originalResourcesPath);
       else Reflect.deleteProperty(process, "resourcesPath");
-      rmSync(resourcesPath, { recursive: true, force: true });
+      identityReader.mockRestore();
+      rmSync(fixtureRoot, { recursive: true, force: true });
     }
   });
 
