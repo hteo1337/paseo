@@ -291,6 +291,7 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
     !Array.isArray(output)
   ) {
     const request = input as PluginWireBeforeRequests["agent.open.before"];
+
     output = { model: request.model, title: request.title, ...output };
   }
   const result = validateBeforeRequest(name, output);
