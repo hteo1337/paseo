@@ -1,0 +1,8 @@
+remote:
+remote: Create a pull request for 'review/TH1-1802-ac2ee9209f61' on GitHub by visiting:
+remote:      https://github.com/hteo1337/paseo/pull/new/review/TH1-1802-ac2ee9209f61
+remote:
+To https://github.com/hteo1337/paseo.git
+ * [new branch]          HEAD -> review/TH1-1802-ac2ee9209f61
+
+EXIT_CODE=0
