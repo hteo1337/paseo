@@ -1,0 +1,1 @@
+PR #5030 is blocked by P2 per-pixel Unistyles CSS accumulation at sidebar-nav-rows.tsx:101; adversarial review defaults to required after semif rejected the full diff (18,026 tokens > 4,096), and the lead must schedule it after this worker stops under the no-extra-lanes cap.

@@ -1,0 +1,5 @@
+
+> paseo@0.13.0-beta.2 format:files
+> oxfmt packages/app/e2e/browser/sidebar-nav-review.spec.ts packages/app/e2e/support/global-setup.ts
+
+Finished in 59ms on 2 files using 18 threads.

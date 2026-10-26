@@ -1,0 +1,6 @@
+
+> paseo@0.13.0-beta.2 lint
+> oxlint --threads=2 packages/app/src/components/left-sidebar.tsx packages/app/src/components/sidebar/sidebar-nav-resize-handle.tsx packages/app/src/components/sidebar/sidebar-nav-rows.tsx packages/app/src/components/sidebar/sidebar-section-header.tsx packages/app/src/sidebar-nav/group-layout.ts packages/app/src/sidebar-nav/group-layout.test.ts packages/app/src/stores/panel-store/index.ts packages/app/src/stores/panel-store/state.ts packages/app/src/stores/sidebar-view-store.ts packages/app/src/stores/sidebar-view-store.test.ts packages/app/e2e/browser/sidebar-nav-settings.spec.ts packages/app/e2e/browser/sidebar-workspace.spec.ts packages/app/e2e/support/helpers/sidebar-nav-group.ts
+
+Found 0 warnings and 0 errors.
+Finished in 645ms on 13 files with 177 rules using 2 threads.

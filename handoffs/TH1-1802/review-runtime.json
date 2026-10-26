@@ -1,0 +1,14 @@
+{
+  "dispatcher_task_id": "69de786f06dd4f09b1915f79234ec74f",
+  "agent_id": "0be69ae7-b7e8-4c61-bdc0-0476ffd8b1b4",
+  "run_id": "e84f6de001cb4d738e59dea857d80165",
+  "verified_run_provider": "codex-auto",
+  "verified_run_model": "gpt-6.1-sol",
+  "head": "18dd03ab7d11b268a487e4cbf9c6e219ef04c4dd",
+  "fetched_main": "d0fd2e532059eeaec4c9e9e510fd65e1a3c6e1ed",
+  "merge_base": "d6fa231894568e6ac9a11e8b2fb475343026eea6",
+  "ci_run": "https://github.com/getpaseo/paseo/actions/runs/40007363598",
+  "ci_conclusion": "action_required",
+  "adversarial_decision": "required by default; semif rejected full actual diff: 18026 input tokens exceed limit 4096; no truncation allowed",
+  "adversarial_followup": "Lead schedules after this worker stops; no extra lanes permitted in this dispatched task"
+}

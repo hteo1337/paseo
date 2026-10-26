@@ -1,0 +1,43 @@
+{
+  "beforeHeight": 118,
+  "controlHeight": 118,
+  "draggedHeight": 238,
+  "beforeControl": {
+    "bytes": 66614,
+    "rules": 67
+  },
+  "afterControl": {
+    "bytes": 66614,
+    "rules": 67
+  },
+  "afterDrag": {
+    "bytes": 74117,
+    "rules": 187
+  },
+  "dividerAccessibility": {
+    "role": "separator",
+    "tabindex": null,
+    "value": null,
+    "orientation": "horizontal"
+  },
+  "compact": {
+    "header": {
+      "x": 0,
+      "y": 8,
+      "width": 94.125,
+      "height": 44
+    },
+    "close": {
+      "x": 346,
+      "y": 14,
+      "width": 32,
+      "height": 32
+    },
+    "firstRow": {
+      "x": 8,
+      "y": 54,
+      "width": 374,
+      "height": 36
+    }
+  }
+}

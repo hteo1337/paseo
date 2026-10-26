@@ -1,0 +1,31 @@
+Verdict: BLOCKING
+
+PR: https://github.com/getpaseo/paseo/pull/5030 — feat(app): let the sidebar navigation group be dragged
+Reviewed source head: 18dd03ab7d11b268a487e4cbf9c6e219ef04c4dd (hteo1337/paseo, feat/sidebar-nav-group-resize).
+Scope: all 23 changed files against fetched getpaseo/paseo main d0fd2e532059eeaec4c9e9e510fd65e1a3c6e1ed; merge base d6fa231894568e6ac9a11e8b2fb475343026eea6. This is the PR diff, not changes introduced later on main.
+Reviewer: codex-auto / gpt-6.1-sol, verified in dispatcher task 69de786f06dd4f09b1915f79234ec74f run metadata.
+
+Blocking findings (severity order)
+
+[P2] Keep pointer-driven heights out of the Unistyles CSS registry.
+packages/app/src/components/sidebar/sidebar-nav-rows.tsx:100-103 (particularly line 101).
+rowsStyle sends a fresh ordinary { height } object to a Unistyles-managed ScrollView for every distinct dragged pixel. The web runtime retains a new CSS rule for each value for the page lifetime. This violates docs/unistyles.md's Dynamic Pixel Styles On Web rule and adds avoidable CSS growth to an interaction that runs continuously.
+Real headless Chromium reproduction on the pinned head, 1200x800: moving the pointer through the same 120px path without pressing left height 118px and #unistyles-web at 67 rules / 66,614 bytes. Pressing and dragging the divider through 120 distinct pixel positions changed height to 238px and the registry to 187 rules / 74,117 bytes (+120 rules, +7,503 bytes). Reload restored 238px, so persistence works but does not prevent the stylesheet growth during use. Use inlineUnistylesStyle from @/styles/unistyles-inline-style for the changing geometry, preserving styles.rows as a separate style entry. Keep coverage that observes the actual rendered web path rather than only the pure height clamp.
+
+Nothing found
+- Correctness of default cap, responsive minimum, footer-aware clamp, optional persisted fields and collapse state: no additional blocking issue found in the diff. Existing clamp/store tests were inspected.
+- Cross-platform gating: raw DOM access is reachable only through isWeb && finePointer; native/coarse input uses Gesture.Pan. No new useUnistyles call or hover-only native control was introduced.
+- Fold accessibility: web aria-expanded and native accessibilityState are set; keyboard Space/Enter folded/unfolded the group in the headless probe.
+- Compact integration: close is a sibling action in SidebarSectionHeader's trailing slot. At 390x844 it remained reachable after folding and closed the overlay. Its bottom (46px) was above the first row (54px), and its x (346px) was past the toggle's right edge (94.125px).
+- No authentication, permission, server, wire-protocol or credential changes found.
+
+Test adequacy and limits
+- The existing tests cover folding/reload, capped scroll reachability, mouse/touch growth/reload, height math and collapse migration. They do not cover stylesheet growth, gesture cancellation or unmount during a drag. Native gesture execution is not established by the browser touch test.
+- The separator has a label/orientation but no keyboard focus, value attributes or keyboard resizing. This matches the PR's explicit keyboard non-goal; it is an accessibility limitation, not an additional blocker in this review.
+- Ran npm run typecheck --workspace=@getpaseo/app: exit 0. Ran npm run lint -- --threads=2 on the 13 changed non-i18n app/source/test files: 0 warnings, 0 errors.
+- Ran one new diagnostic Playwright test through the existing fixture/isolated-daemon path, Chromium headless, one Playwright worker and one Metro worker. Keyboard fold, mouse resize/reload and compact close assertions passed; the final stylesheet-growth assertion failed (expected <10 new rules, observed 120). The failure teardown also reported a 60-second timeout. Raw evidence and runnable probe are on review/TH1-1802-7c27b75cd305 under handoffs/TH1-1802/.
+- The issue reports 3 files / 50 unit tests passing and 13 browser scenarios passing, with 2 known macOS Ctrl-vs-Command label failures; earlier PR discussion links the baseline report to #6433. Those green suites were not rerun. Their raw exact-head artifacts were not available here, so these remain attributed lead reports.
+- Exact-head GitHub CI run 40007363598 is action_required, not green. No full test suite, native device/simulator, packaged Electron or merge was run.
+
+Adversarial gate
+- decided: required by default — semif rejected the full actual diff (18,026 input tokens exceed its 4,096-token limit; no judgment returned). Per the standing rule, invalid judgment defaults to yes. No extra reviewer lane was launched under this task's explicit worker cap; lead must schedule exactly one adversarial Sol review after this worker stops.

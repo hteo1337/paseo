@@ -1,0 +1,172 @@
+
+> @getpaseo/app@0.13.0-beta.2 test:e2e
+> playwright test --project=browser e2e/browser/sidebar-nav-review.spec.ts --workers=1
+
+(node:22145) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(Use `node --trace-deprecation ...` to show where the warning was created)
+[metro] Skipping web setup: EXPO_NO_WEB_SETUP is enabled.
+[metro] Using src/app as the root directory for Expo Router.
+[metro] Waiting on http://localhost:61043
+[metro] Logs for your project will appear below.
+[metro] Web Bundled 5140ms packages/app/index.ts (5697 modules)
+[e2e] Metro warmed on port 61043
+
+Running 1 test using 1 worker
+
+(node:25087) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+(node:25087) [DEP0205] DeprecationWarning: `module.register()` is deprecated. Use `module.registerHooks()` instead.
+(node:25087) Warning: The 'NO_COLOR' env is ignored due to the 'FORCE_COLOR' env being set.
+(Use `node --trace-warnings ...` to show where the warning was created)
+[e2e] Worker 0 daemon started on port 61226, home: /var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/paseo-e2e-worker-0-W1EGme
+[metro] Web Bundled 141ms packages/app/index.ts (1 module)
+[metro] Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[metro] Web  LOG  Running application "main" with appParams:
+[metro]  {"hydrate": undefined, "rootTag": "#root"}
+[metro] Development-level warnings: ON.
+[metro] Performance optimizations: OFF.
+[metro] Web  WARN  Require cycle: src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/runtime/host-runtime.ts -> src/desktop/browser/automation/handler.ts -> src/stores/workspace-layout-store.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/runtime/host-runtime.ts -> src/runtime/directory-sync/index.ts -> src/runtime/directory-sync/agent-replica.ts -> src/hooks/use-archive-agent.ts -> src/runtime/host-runtime.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/actions.ts -> src/plugins/workspace-panels/locations.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/stores/navigation-active-workspace-store/index.ts -> src/workspace-tabs/navigation.ts -> src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/navigation.ts -> src/stores/navigation-active-workspace-store/index.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/navigation.ts -> src/stores/workspace-layout-store.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/plugins/registry.ts -> src/plugins/evaluate.ts -> src/plugins/themes/index.ts -> src/plugins/registry.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/components/sidebar-workspace-list.tsx -> src/components/sidebar/sidebar-status-list.tsx -> src/components/sidebar/sidebar-workspace-row-content.tsx -> src/components/workspace-hover-card.tsx -> src/components/sidebar-workspace-list.tsx
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/panels/register-panels.ts -> src/panels/agent-panel.tsx -> src/panels/agent-tracks.tsx -> src/subagents/track.tsx -> src/screens/workspace/workspace-tab-presentation.tsx -> src/panels/register-panels.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/panels/register-panels.ts -> src/panels/new-tab-panel.tsx -> src/workspace-tabs/launcher/index.tsx -> src/panels/register-panels.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+[metro] Web Bundled 37ms packages/app/src/attachments/web/indexeddb-attachment-store.ts (1 module)
+[metro] Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+[metro] Web  ERROR
+[metro] Code: sidebar-menu-toggle.tsx
+[metro]   84 |       accessibilityState={accessibilityState}
+[metro]   85 |     >
+[metro] > 86 |       {isMobile ? (
+[metro]      |        ^
+[metro]   87 |         <MobileMenuIcon extraMuted={extraMutedIdleIcon} />
+[metro]   88 |       ) : (
+[metro]   89 |         <ThemedPanelLeft
+[metro] Call Stack
+[metro]   SidebarMenuToggleButton (packages/app/src/components/headers/sidebar-menu-toggle.tsx:86:8)
+[metro]   SidebarMenuToggle (packages/app/src/components/headers/sidebar-menu-toggle.tsx:121:10)
+[metro]   MenuHeader (packages/app/src/components/headers/menu-header.tsx:24:11)
+[metro]   OpenProjectScreen (packages/app/src/screens/open-project-screen.tsx:64:7)
+[metro]   OpenProjectRoute (packages/app/src/app/open-project.tsx:7:7)
+[metro]   ThemedStackBase (packages/app/src/navigation/themed-stack.tsx:64:5)
+[metro]   RootStack (packages/app/src/app/_layout.tsx:793:5)
+[metro]   AppShell (packages/app/src/app/_layout.tsx:839:11)
+[metro]   RootAppTree (packages/app/src/app/_layout.tsx:893:15)
+[metro]   RootLayout (packages/app/src/app/_layout.tsx:913:10)
+[metro]   RootRouter (packages/app/src/root-app.tsx:35:15)
+[metro]   RootApp (packages/app/src/root-app.tsx:19:7)
+[metro] Web Bundled 85ms packages/app/index.ts (1 module)
+[metro] Web Bundled 3ms packages/app/src/attachments/web/indexeddb-attachment-store.ts (1 module)
+[metro] Web  INFO  %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+[metro] Web  LOG  Running application "main" with appParams:
+[metro]  {"hydrate": undefined, "rootTag": "#root"}
+[metro] Development-level warnings: ON.
+[metro] Performance optimizations: OFF.
+[metro] Web  WARN  Require cycle: src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/runtime/host-runtime.ts -> src/desktop/browser/automation/handler.ts -> src/stores/workspace-layout-store.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/runtime/host-runtime.ts -> src/runtime/directory-sync/index.ts -> src/runtime/directory-sync/agent-replica.ts -> src/hooks/use-archive-agent.ts -> src/runtime/host-runtime.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/actions.ts -> src/plugins/workspace-panels/locations.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/stores/navigation-active-workspace-store/index.ts -> src/workspace-tabs/navigation.ts -> src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/navigation.ts -> src/stores/navigation-active-workspace-store/index.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/stores/workspace-layout-store.ts -> src/plugins/workspace-panels/locations.ts -> src/plugins/registry.ts -> src/plugins/client-runtime.ts -> src/plugins/navigation.ts -> src/stores/workspace-layout-store.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/plugins/registry.ts -> src/plugins/evaluate.ts -> src/plugins/themes/index.ts -> src/plugins/registry.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/components/sidebar-workspace-list.tsx -> src/components/sidebar/sidebar-status-list.tsx -> src/components/sidebar/sidebar-workspace-row-content.tsx -> src/components/workspace-hover-card.tsx -> src/components/sidebar-workspace-list.tsx
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/panels/register-panels.ts -> src/panels/agent-panel.tsx -> src/panels/agent-tracks.tsx -> src/subagents/track.tsx -> src/screens/workspace/workspace-tab-presentation.tsx -> src/panels/register-panels.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  Require cycle: src/panels/register-panels.ts -> src/panels/new-tab-panel.tsx -> src/workspace-tabs/launcher/index.tsx -> src/panels/register-panels.ts
+[metro] Require cycles are allowed, but can result in uninitialized values. Consider refactoring to remove the need for a cycle.
+[metro] Web  WARN  props.pointerEvents is deprecated. Use style.pointerEvents
+[metro] Web  WARN  Animated: `useNativeDriver` is not supported because the native animated module is missing. Falling back to JS-based animation. To resolve this, add `RCTAnimation` module to this app, or remove `useNativeDriver`. Make sure to run `bundle exec pod install` first. Read more about autolinking: https://github.com/react-native-community/cli/blob/master/docs/autolinking.md
+[metro] Web  ERROR
+[metro] Code: sidebar-menu-toggle.tsx
+[metro]   84 |       accessibilityState={accessibilityState}
+[metro]   85 |     >
+[metro] > 86 |       {isMobile ? (
+[metro]      |        ^
+[metro]   87 |         <MobileMenuIcon extraMuted={extraMutedIdleIcon} />
+[metro]   88 |       ) : (
+[metro]   89 |         <ThemedPanelLeft
+[metro] Call Stack
+[metro]   SidebarMenuToggleButton (packages/app/src/components/headers/sidebar-menu-toggle.tsx:86:8)
+[metro]   SidebarMenuToggle (packages/app/src/components/headers/sidebar-menu-toggle.tsx:121:10)
+[metro]   MenuHeader (packages/app/src/components/headers/menu-header.tsx:24:11)
+[metro]   OpenProjectScreen (packages/app/src/screens/open-project-screen.tsx:64:7)
+[metro]   OpenProjectRoute (packages/app/src/app/open-project.tsx:7:7)
+[metro]   ThemedStackBase (packages/app/src/navigation/themed-stack.tsx:64:5)
+[metro]   RootStack (packages/app/src/app/_layout.tsx:793:5)
+[metro]   AppShell (packages/app/src/app/_layout.tsx:839:11)
+[metro]   RootAppTree (packages/app/src/app/_layout.tsx:893:15)
+[metro]   RootLayout (packages/app/src/app/_layout.tsx:913:10)
+[metro]   RootRouter (packages/app/src/root-app.tsx:35:15)
+[metro]   RootApp (packages/app/src/root-app.tsx:19:7)
+REVIEW_EVIDENCE {"beforeHeight":118,"controlHeight":118,"draggedHeight":238,"beforeControl":{"bytes":66614,"rules":67},"afterControl":{"bytes":66614,"rules":67},"afterDrag":{"bytes":74117,"rules":187},"dividerAccessibility":{"role":"separator","tabindex":null,"value":null,"orientation":"horizontal"},"compact":{"header":{"x":0,"y":8,"width":94.125,"height":44},"close":{"x":346,"y":14,"width":32,"height":32},"firstRow":{"x":8,"y":54,"width":374,"height":36}}}
+[e2e] Worker 0 daemon stopped
+  ✘  1 [browser] › e2e/browser/sidebar-nav-review.spec.ts:8:5 › review probe: resize stylesheet growth and compact header (9.1s)
+[e2e] Metro stopped
+
+
+  1) [browser] › e2e/browser/sidebar-nav-review.spec.ts:8:5 › review probe: resize stylesheet growth and compact header
+
+    Error: dragging should not retain per-pixel CSS rules
+
+    expect(received).toBeLessThan(expected)
+
+    Expected: < 10
+    Received:   120
+
+      90 |     afterDrag.rules - afterControl.rules,
+      91 |     "dragging should not retain per-pixel CSS rules",
+    > 92 |   ).toBeLessThan(10);
+         |     ^
+      93 | });
+      94 |
+        at /Users/hteo/.paseo/worktrees/35a69bia/5083b054996e/packages/app/e2e/browser/sidebar-nav-review.spec.ts:92:5
+
+    Test timeout of 60000ms exceeded.
+
+    attachment #2: screenshot (image/png) ──────────────────────────────────────────────────────────
+    test-results/sidebar-nav-review-review--791e9-t-growth-and-compact-header-browser/test-failed-1.png
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #3: browser-console (text/plain) ────────────────────────────────────────────────────
+    [console:info] %cDownload the React DevTools for a better development experience: https://react.dev/link/react-devtools font-weight:bold
+    [console:log] Running application "main" with appParams:
+     {rootTag: #root, hydrate: undefined}
+    Development-level warnings: ON.
+    Performance optimizations: OFF.
+    [co...
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    attachment #4: video (video/webm) ──────────────────────────────────────────────────────────────
+    test-results/sidebar-nav-review-review--791e9-t-growth-and-compact-header-browser/video.webm
+    ────────────────────────────────────────────────────────────────────────────────────────────────
+
+    Error Context: test-results/sidebar-nav-review-review--791e9-t-growth-and-compact-header-browser/error-context.md
+
+  1 failed
+    [browser] › e2e/browser/sidebar-nav-review.spec.ts:8:5 › review probe: resize stylesheet growth and compact header
+npm error Lifecycle script `test:e2e` failed with error:
+npm error code 1
+npm error path /Users/hteo/.paseo/worktrees/35a69bia/5083b054996e/packages/app
+npm error workspace @getpaseo/app@0.13.0-beta.2
+npm error location /Users/hteo/.paseo/worktrees/35a69bia/5083b054996e/packages/app
+npm error command failed
+npm error command sh -c playwright test --project=browser e2e/browser/sidebar-nav-review.spec.ts --workers=1
