@@ -939,6 +939,7 @@ export class AgentManager {
   private readonly idleReapPending = new Set<string>();
   private readonly processTreeReaper: typeof reapProcessTree;
   private readonly activeAgentUses = new Map<string, number>();
+  private readonly observationAgentUses = new Map<string, number>();
   private readonly clientStreamHolds = new Map<string, number>();
   private globalClientStreamHolds = 0;
   private readonly idleUnloadHoldOwners = new Map<
@@ -1511,6 +1512,9 @@ export class AgentManager {
   ): () => void {
     if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
     this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
+    if (!touchActivity) {
+      this.observationAgentUses.set(agentId, (this.observationAgentUses.get(agentId) ?? 0) + 1);
+    }
     const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "uses", ownerId });
     let released = false;
     return () => {
@@ -1520,6 +1524,11 @@ export class AgentManager {
       const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
       if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
       else this.activeAgentUses.delete(agentId);
+      if (!touchActivity) {
+        const observations = (this.observationAgentUses.get(agentId) ?? 1) - 1;
+        if (observations > 0) this.observationAgentUses.set(agentId, observations);
+        else this.observationAgentUses.delete(agentId);
+      }
       if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
     };
   }
@@ -1606,7 +1615,7 @@ export class AgentManager {
     return result;
   }
 
-  private logIdleUnloadSkips(idleMs: number, now: number): void {
+  logIdleUnloadSkips(idleMs: number, now: number): void {
     const flag = process.env.PASEO_IDLE_UNLOAD_DIAG?.trim().toLowerCase();
     if (flag === "0" || flag === "false" || flag === "off") return;
     for (const [agentId, agent] of this.agents) {
@@ -1655,7 +1664,19 @@ export class AgentManager {
     }
   }
 
-  private canUnloadIdleAgent(agentId: string, agent: LiveManagedAgent): boolean {
+  private hasIdleUnloadHold(agentId: string, ignoreObservation: boolean): boolean {
+    const uses = this.activeAgentUses.get(agentId) ?? 0;
+    const observations = ignoreObservation ? (this.observationAgentUses.get(agentId) ?? 0) : 0;
+    return (
+      uses > observations || (!ignoreObservation && (this.clientStreamHolds.get(agentId) ?? 0) > 0)
+    );
+  }
+
+  private canUnloadIdleAgent(
+    agentId: string,
+    agent: LiveManagedAgent,
+    ignoreObservation = false,
+  ): boolean {
     return (
       agent.lifecycle === "idle" &&
       agent.persistence !== null &&
@@ -1668,8 +1689,7 @@ export class AgentManager {
       !agent.session.hasLiveTerminals?.() &&
       agent.inFlightPermissionResponses.size === 0 &&
       !agent.pendingReplacement &&
-      (this.activeAgentUses.get(agentId) ?? 0) === 0 &&
-      (this.clientStreamHolds.get(agentId) ?? 0) === 0 &&
+      !this.hasIdleUnloadHold(agentId, ignoreObservation) &&
       this.globalClientStreamHolds === 0
     );
   }
@@ -1866,6 +1886,7 @@ export class AgentManager {
         workspaceId: nullableHookValue(options.workspaceId),
         model: nullableHookValue(storedConfig.model),
         title: storedConfig.title ?? nullableHookValue(options.initialTitle),
+
         labels: options.labels ?? {},
       },
     );
@@ -2427,7 +2448,7 @@ export class AgentManager {
     if (!this.registry) return [];
     const candidates: RuntimeCleanupCandidate[] = [];
     for (const agent of this.agents.values()) {
-      const updatedAt = agent.updatedAt;
+      const lastUsedAt = this.residentLastUsedAt.get(agent.id) ?? agent.updatedAt.getTime();
       let identity = this.runtimeCleanupIdentities.get(agent.session);
       if (!identity) {
         identity = Object.freeze({});
@@ -2435,16 +2456,21 @@ export class AgentManager {
       }
       const isEligible = () =>
         this.agents.get(agent.id) === agent &&
-        agent.updatedAt === updatedAt &&
-        this.runtimeHasNoPendingWork(agent);
+        (this.residentLastUsedAt.get(agent.id) ?? agent.updatedAt.getTime()) === lastUsedAt &&
+        this.runtimeHasNoPendingWork(agent) &&
+        this.canUnloadIdleAgent(agent.id, agent, true);
       candidates.push({
         identity,
         agentId: agent.id,
         parentAgentId: getParentAgentIdFromLabels(agent.labels) ?? undefined,
         provider: agent.provider,
         sessionId: agent.persistence?.sessionId ?? null,
-        lastActivityAt: updatedAt.getTime(),
+        lastActivityAt: lastUsedAt,
+        idleSessionCloseMs: this.rescueTimeouts.idleSessionCloseMs,
         isEligible,
+        isObservationProtected: () =>
+          (this.clientStreamHolds.get(agent.id) ?? 0) > 0 ||
+          (this.observationAgentUses.get(agent.id) ?? 0) > 0,
         canStopRuntime: agent.session.canStopRuntime?.bind(agent.session),
         closeIfEligible: async (revalidate) => {
           if (!agent.persistence?.sessionId) return false;
@@ -2452,9 +2478,19 @@ export class AgentManager {
           // releases this barrier, so the waiting prompt keeps the existing runtime.
           this.collectingRuntimes.add(agent.id);
           try {
+            const ownedProcesses = this.idleProcessSnapshots.get(agent.id) ?? new Map();
+            for (const [pid, started] of await snapshotProcessTree(
+              agent.session.getOwnedProcessIds?.() ?? [],
+            )) {
+              if (!ownedProcesses.has(pid)) ownedProcesses.set(pid, started);
+            }
+            this.idleProcessSnapshots.set(agent.id, ownedProcesses);
             return (
               (await this.runLifecycleMutation(agent.id, () =>
-                this.closeAgentRuntime(agent.id, () => isEligible() && revalidate()),
+                this.closeAgentRuntime(
+                  agent.id,
+                  () => isEligible() && this.canUnloadIdleAgent(agent.id, agent) && revalidate(),
+                ),
               )) !== false
             );
           } finally {
