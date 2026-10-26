@@ -1,6 +1,10 @@
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { SessionDelivery } from "./session/owned-subscriptions/index.js";
 import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import type { KeeperControl } from "./keeper/keeper-control.js";
 import type { Server as HTTPServer } from "http";
 import type pino from "pino";
 import type { AgentManager } from "./agent/agent-manager.js";
@@ -256,6 +260,7 @@ function createServer(options?: {
   logger?: ReturnType<typeof createLogger>;
   startPaused?: boolean;
   auth?: { password: string; localCredential: () => string | null };
+  keeperControl?: KeeperControl;
 }) {
   const speechReadiness = options?.speechReadiness ?? null;
   const daemonConfigStore = {
@@ -284,7 +289,11 @@ function createServer(options?: {
     "/tmp/paseo-test",
     createStub<DaemonConfigStore>(daemonConfigStore),
     null,
-    { allowedOrigins: new Set(), startPaused: options?.startPaused },
+    {
+      allowedOrigins: new Set(),
+      startPaused: options?.startPaused,
+      keeperControl: options?.keeperControl,
+    },
     createWorkspaceAutoNameStub(),
     createWorkspaceRuntimeStore(),
     options?.auth,
@@ -594,6 +603,81 @@ describe("relay external socket reconnect behavior", () => {
 
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  test("reports only readable local build identity and enabled keeper control", async () => {
+    const resourcesPath = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
+    const originalResourcesPath = Object.getOwnPropertyDescriptor(process, "resourcesPath");
+    const markerPath = join(resourcesPath, "local-build.json");
+    const marker = {
+      localBuild: true,
+      baseTag: `v${TEST_DAEMON_VERSION}`,
+      seriesHash: "0123456789abcdef",
+      head: "1234567890abcdef1234567890abcdef12345678",
+    };
+    Object.defineProperty(process, "resourcesPath", { configurable: true, value: resourcesPath });
+    try {
+      for (const enabled of [true, false]) {
+        writeFileSync(markerPath, JSON.stringify(marker));
+        const server = createServer({ keeperControl: createStub<KeeperControl>({ enabled }) });
+        try {
+          const socket = new MockSocket();
+          const serverInfo = await attachRelayAndHello({
+            server,
+            socket,
+            clientId: `build-${enabled}`,
+          });
+          const expectedIdentity = {
+            version: TEST_DAEMON_VERSION,
+            seriesHash: marker.seriesHash,
+            sourceHead: marker.head,
+          };
+          expect(parseSentEnvelope(socket.sent[0]).message?.payload).toEqual(
+            expect.objectContaining({ buildIdentity: expectedIdentity }),
+          );
+          expect(serverInfo).toEqual(expect.objectContaining({ buildIdentity: expectedIdentity }));
+          expect(serverInfo.features?.keeperControl).toBe(enabled ? true : undefined);
+        } finally {
+          await server.close();
+        }
+      }
+      const invalidMarkers = [
+        null,
+        "{broken",
+        JSON.stringify({ ...marker, localBuild: false }),
+        JSON.stringify({ ...marker, baseTag: "v9.9.9" }),
+        JSON.stringify({ ...marker, head: undefined }),
+        JSON.stringify({ ...marker, head: "not-a-source-head" }),
+        JSON.stringify({ ...marker, seriesHash: "not-a-series-hash" }),
+        "directory",
+      ];
+      for (const [index, invalidMarker] of invalidMarkers.entries()) {
+        rmSync(markerPath, { recursive: true, force: true });
+        if (invalidMarker === "directory") mkdirSync(markerPath);
+        else if (invalidMarker !== null) writeFileSync(markerPath, invalidMarker);
+        const server = createServer();
+        try {
+          const socket = new MockSocket();
+          const serverInfo = await attachRelayAndHello({
+            server,
+            socket,
+            clientId: `invalid-${index}`,
+          });
+          expect(parseSentEnvelope(socket.sent[0]).message?.payload).not.toHaveProperty(
+            "buildIdentity",
+          );
+          expect(serverInfo).not.toHaveProperty("buildIdentity");
+          expect(serverInfo.features).not.toHaveProperty("keeperControl");
+        } finally {
+          await server.close();
+        }
+      }
+    } finally {
+      if (originalResourcesPath)
+        Object.defineProperty(process, "resourcesPath", originalResourcesPath);
+      else Reflect.deleteProperty(process, "resourcesPath");
+      rmSync(resourcesPath, { recursive: true, force: true });
+    }
   });
 
   test("keeps the same session when relay reconnects within grace window", async () => {

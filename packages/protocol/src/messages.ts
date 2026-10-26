@@ -3801,6 +3801,13 @@ export const ServerInfoStatusPayloadSchema = z
     serverId: z.string().trim().min(1),
     hostname: ServerInfoHostnameSchema.optional(),
     version: ServerInfoVersionSchema.optional(),
+    buildIdentity: z
+      .object({
+        version: z.string().min(1),
+        seriesHash: z.string().regex(/^[0-9a-f]{16}$/),
+        sourceHead: z.string().regex(/^[0-9a-f]{40}$/),
+      })
+      .optional(),
     // Authenticated producer for host registration ownership, separate from admission authority.
     sourceId: z.string().optional(),
     // COMPAT(sessionPermissions): optional while clients support older daemons.
