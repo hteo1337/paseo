@@ -41,7 +41,7 @@ class Runtime {
     };
   }
 }
-function scenario(enabled = true) {
+function scenario(enabled = true, idlePeriodMs?: () => number) {
   const runtime = new Runtime();
   const runtimes = [runtime];
   let time = 0;
@@ -49,6 +49,7 @@ function scenario(enabled = true) {
   let tick!: () => void;
   const cleanup = createIdleRuntimeCleanup({
     enabled,
+    idlePeriodMs,
     logger: createTestLogger(),
     now: () => time,
     runtimes: () => runtimes.filter((item) => !item.closed).map((item) => item.capture()),
@@ -81,6 +82,21 @@ test("a runtime without a provider check is collected at exactly one hour", asyn
   expect((await s.sweep(60)).collected).toEqual([
     { agentId: "agent", provider: "test", sessionId: "agent" },
   ]);
+});
+
+test("the port uses one collector with a configurable period, zero opt-out and provider veto", async () => {
+  let minutes = 0;
+  const s = scenario(true, () => minutes * 60_000);
+  expect((await s.sweep(60)).collected).toEqual([]);
+  minutes = 15;
+  s.runtime.activity = 60 * 60_000;
+  expect((await s.sweep(74)).collected).toEqual([]);
+  s.runtime.probe = async () => false;
+  expect((await s.sweep(75)).collected).toEqual([]);
+  s.runtime.probe = async () => true;
+  expect((await s.sweep(76)).collected).toEqual([]);
+  expect((await s.sweep(90)).collected).toEqual([]);
+  expect((await s.sweep(91)).collected).toHaveLength(1);
 });
 
 test("activity restarts the single one-hour idle period", async () => {

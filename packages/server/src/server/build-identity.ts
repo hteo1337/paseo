@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, realpathSync } from "node:fs";
 import { basename, dirname, join } from "node:path";
 import { fileURLToPath } from "node:url";
 import { z } from "zod";
@@ -12,22 +12,30 @@ const LocalBuildMarkerSchema = z.object({
 });
 
 export function readLocalBuildIdentity(version: string): ServerInfoStatusPayload["buildIdentity"] {
-  const processResourcesPath = "resourcesPath" in process ? process.resourcesPath : undefined;
-  let resourcesPath: string;
-  if (typeof processResourcesPath === "string" && processResourcesPath) {
-    resourcesPath = processResourcesPath;
-  } else {
-    let directory = dirname(fileURLToPath(import.meta.url));
+  try {
+    let directory = dirname(realpathSync(fileURLToPath(import.meta.url)));
     while (basename(directory) !== "app.asar" && basename(directory) !== "app.asar.unpacked") {
       const parent = dirname(directory);
       if (parent === directory) return undefined;
       directory = parent;
     }
-    resourcesPath = dirname(directory);
-  }
-  try {
+    const moduleResourcesPath = dirname(directory);
+    const processResourcesPath = "resourcesPath" in process ? process.resourcesPath : undefined;
+    const resourcesPath =
+      typeof processResourcesPath === "string" && processResourcesPath
+        ? processResourcesPath
+        : moduleResourcesPath;
+    const canonicalResourcesPath = realpathSync(resourcesPath);
+    if (
+      canonicalResourcesPath !== moduleResourcesPath ||
+      canonicalResourcesPath !== join(realpathSync(dirname(resourcesPath)), "Resources") ||
+      basename(dirname(canonicalResourcesPath)) !== "Contents" ||
+      !basename(dirname(dirname(canonicalResourcesPath))).endsWith(".app")
+    ) {
+      return undefined;
+    }
     const marker = LocalBuildMarkerSchema.safeParse(
-      JSON.parse(readFileSync(join(resourcesPath, "local-build.json"), "utf8")),
+      JSON.parse(readFileSync(join(canonicalResourcesPath, "local-build.json"), "utf8")),
     );
     if (!marker.success || marker.data.baseTag !== `v${version}`) return undefined;
     return {
