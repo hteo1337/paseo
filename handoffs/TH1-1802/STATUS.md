@@ -1,11 +1,10 @@
-# TH1-1802 — PR-ready review of sidebar navigation group resize
+# TH1-1802 — sidebar resize review and local fix
 
-Issue: https://linear.app/th1337/issue/TH1-1802/pr-ready-review-sidebar-navigation-group-resize-getpaseopaseo5030 (project paseo-ops).
-Branch: review/TH1-1802-7c27b75cd305; source hteo1337/paseo feat/sidebar-nav-group-resize @18dd03ab7d11b268a487e4cbf9c6e219ef04c4dd.
-Done: full 23-file diff reviewed against fetched upstream main; review.txt is BLOCKING with one P2 at sidebar-nav-rows.tsx:101.
-Posted: https://github.com/getpaseo/paseo/pull/5030#issuecomment-6405685557; fetched comment matches review.txt; runtime codex-auto/gpt-6.1-sol verified.
-Verification: one headless probe: inert control 67 rules unchanged; 120px drag 67→187 rules (+7,503 bytes); keyboard fold, persistence and compact close passed. Final CSS assertion failed; teardown also timed out at60s.
-Checks: app typecheck exit0; scoped lint13 files0 errors; commit hook full workspace typecheck/lint/format passed; no full/green suite rerun. Exact-head CI40007363598 action_required, not green; known macOS shortcut-label failures remain lead reports.
-Decided: adversarial required by default — semif rejected the full actual diff (18,026>4,096 tokens); lead schedules exactly one after this worker stops, respecting no-extra-lanes cap.
-Next: author fixes only P2 via inlineUnistylesStyle; same reviewer confirms that fix briefly; lead owns CI/adversarial/delivery. Probe source/raw evidence retained here; temporary app harness edits and generated test/.expo artifacts removed.
-Open questions: none; BLOCKED.md records PR follow-up. Review and handoff pushed at067c892d5 (remote verified); Linear review task Done. Production source unchanged; this final continuity update follows.
+Issue: https://linear.app/th1337/issue/TH1-1802/pr-ready-review-sidebar-navigation-group-resize-getpaseopaseo5030; branch review/TH1-1802-7c27b75cd305; PR source remains18dd03ab7d11b268a487e4cbf9c6e219ef04c4dd.
+Done: BLOCKING review posted once at https://github.com/getpaseo/paseo/pull/5030#issuecomment-6405685557; published review artifacts at302fd8a8d; PR branch unchanged.
+Decided: prepare and validate the minimal inlineUnistylesStyle patch locally — reversible and preserves review/PR writer ownership; Hermes escalated new patch/evidence publication beyond review-only scope.
+Verification: same headless probe1 passed27.8s with1 Playwright/1 Metro worker; drag118→238px, CSS67→67 rules and0 bytes growth (original +120 rules/+7,503 bytes); keyboard fold/persistence/compact close passed; app typecheck/lint0.
+Local artifacts: sidebar-nav-inline-height.patch plus local-fix-{evidence.json,probe.txt,typecheck.txt,lint.txt} here; apply check passes; production source restored; temporary harness/test/.expo artifacts removed.
+Pending: structured operator question asks publish verified patch/evidence on review branch (recommended) or keep local; neither PR takeover nor publication is inferred from Hermes escalation.
+Next: honor answer; author/lead applies patch to PR, same reviewer briefly confirms exact fix; lead schedules required adversarial (prior semif full-diff rejection) and owns CI/delivery. Exact-head CI remains action_required.
+Open questions: publication choice only; new patch/evidence stay untracked/local while pending; this authorized status/checklist/blocker update is committed and pushed separately.

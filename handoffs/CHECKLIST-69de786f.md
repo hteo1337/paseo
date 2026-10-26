@@ -7,3 +7,9 @@ PASEO_AGENT_ID is unset (checked in session); filename uses dispatcher task 69de
 - [x] Write review.txt with verdict, file:line findings and explicit nothing-found areas; post exactly one PR comment. Evidence: comment 6405685557 fetched and body equals review.txt.
 - [x] Evaluate adversarial rubric using actual diff; record result or dispatch blocker. Evidence: semif rejected 18,026 tokens >4,096; default-required decision recorded in review-runtime.json and BLOCKED.md; no extra lane under user cap.
 - [x] Update issue handoff and Linear, commit and push review branch; verify delivery. Evidence: review artifacts committed at067c892d5, remote ls-remote equals HEAD; TH1-1802 updated Done with result, branch and PR links; final continuity update follows.
+
+## Reversible blocker follow-up
+
+- [x] Resolve continuation scope through Hermes and record decision without claiming implementation-branch authority. Evidence: Hermes permits local preparation/validation advice, escalates patch publication; publication stays pending.
+- [x] Prepare a minimal applyable fix patch and validate the existing failing probe once with bounded workers; restore reviewed source afterward. Evidence: local-fix-evidence.json registry67→67 vs original67→187; one probe passed27.8s; app typecheck/lint0; git apply --check passes; production source restored.
+- [ ] Resolve publication approval, then publish patch/evidence if approved or preserve locally if declined; keep authorized issue handoff pushed. (in progress; structured question pending)
