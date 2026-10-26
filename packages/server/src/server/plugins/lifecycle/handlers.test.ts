@@ -123,7 +123,6 @@ test("session-open hooks reject changes to session identity instead of silently 
         model: "opus",
         title: "Fix x",
         env: {},
-        title: null,
         labels: {},
         tools: [],
         mcpServers: {},

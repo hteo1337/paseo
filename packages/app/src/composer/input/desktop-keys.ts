@@ -25,7 +25,12 @@ export interface GhostSuggestion {
 export interface DesktopKeyPressContext<TInput, TPayload> {
   ghostSuggestion: GhostSuggestion | null;
   onKeyPressCallback:
-    | ((event: { key: string; hasModifier: boolean; preventDefault: () => void; input: TInput }) => boolean)
+    | ((event: {
+        key: string;
+        hasModifier: boolean;
+        preventDefault: () => void;
+        input: TInput;
+      }) => boolean)
     | undefined;
   input: TInput;
   submitOnEnter: boolean;
@@ -48,7 +53,12 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
   if (ctx.onKeyPressCallback) {
     const handled = ctx.onKeyPressCallback({
       key: event.nativeEvent.key,
-      hasModifier: Boolean(event.nativeEvent.shiftKey || event.nativeEvent.metaKey || event.nativeEvent.ctrlKey || event.nativeEvent.altKey),
+      hasModifier: Boolean(
+        event.nativeEvent.shiftKey ||
+        event.nativeEvent.metaKey ||
+        event.nativeEvent.ctrlKey ||
+        event.nativeEvent.altKey,
+      ),
       preventDefault: () => event.preventDefault(),
       input: ctx.input,
     });
@@ -61,10 +71,22 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
   // its Enter answers to the same guard as an ordinary send.
   if (ctx.ghostSuggestion && !metaKey && !ctrlKey && !shiftKey) {
     const canSubmit =
-      ctx.submitOnEnter && ctx.sendShortcut !== "mod-enter" && !ctx.isSubmitDisabled && !ctx.isSubmitLoading && !ctx.disabled;
+      ctx.submitOnEnter &&
+      ctx.sendShortcut !== "mod-enter" &&
+      !ctx.isSubmitDisabled &&
+      !ctx.isSubmitLoading &&
+      !ctx.disabled;
     if (handleGhostKey(event, ctx.ghostSuggestion, canSubmit)) return;
   }
 
+  handleEnter(event, ctx);
+}
+
+function handleEnter<TInput, TPayload>(
+  event: DesktopKeyEvent,
+  ctx: DesktopKeyPressContext<TInput, TPayload>,
+): void {
+  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
   if (event.nativeEvent.key !== "Enter") return;
   const action = resolveMessageInputEnterAction({
     submitOnEnter: ctx.submitOnEnter,
@@ -73,7 +95,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
     metaKey: metaKey ?? false,
     ctrlKey: ctrlKey ?? false,
     isAgentRunning: ctx.isAgentRunning,
-    onQueue: ctx.onQueue,
+    onQueue: ctx.onQueue ? () => {} : undefined,
   });
   if (action === null || ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
   event.preventDefault();

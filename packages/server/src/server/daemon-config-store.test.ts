@@ -1584,7 +1584,7 @@ describe("DaemonConfigStore speech settings", () => {
     const { paseoHome, store, applied } = createSpeechStore();
 
     await expect(
-      await store.patch({ features: { voiceMode: { tts: { provider: "local", model: "nope" } } } }),
+      store.patch({ features: { voiceMode: { tts: { provider: "local", model: "nope" } } } }),
     ).rejects.toThrow("Unknown local voice model: nope");
     expect(loadPersistedConfig(paseoHome).features?.voiceMode).toBeUndefined();
     expect(applied).toEqual([]);
