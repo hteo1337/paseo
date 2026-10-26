@@ -1,7 +1,7 @@
 ╭───────────────────────────────────╮
 │ lefthook v2.1.6  hook: pre-commit │
 ╰───────────────────────────────────╯
-┃  format ❯ 
+┃  format ❯
 
 npm notice run paseo@0.13.0-beta.2 format:check:files
 npm notice run oxfmt --check --threads=2 handoffs/CHECKLIST-0c0b0df9.md handoffs/TH1-1802/BLOCKED.md handoffs/TH1-1802/STATUS.md handoffs/TH1-1802/adversarial-evidence.json handoffs/TH1-1802/adversarial-pr-comment.md handoffs/TH1-1802/adversarial-results/adversarial-adversarial-ca-81e54--close-and-empty-navigation-browser/error-context.md
@@ -13,7 +13,7 @@ Format issues found in above 1 files. Run without `--check` to fix.
 Finished in 77ms on 6 files using 2 threads.
 
 exit status 1│  lint (skip) no files for inspection
-┃  typecheck ❯ 
+┃  typecheck ❯
 
 npm notice run paseo@0.13.0-beta.2 typecheck
 npm notice run npm run typecheck --workspaces --if-present
@@ -44,8 +44,8 @@ npm notice run @getpaseo/desktop@0.13.0-beta.2 typecheck
 npm notice run tsgo --noEmit -p tsconfig.json
 npm notice run @getpaseo/cli@0.13.0-beta.2 typecheck
 
-                                      
+
   ────────────────────────────────────
-summary: (done in 18.03 seconds)      
+summary: (done in 18.03 seconds)
 ✓ typecheck (17.74 seconds)
 ✗ format (0.25 seconds)

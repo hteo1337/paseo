@@ -1,0 +1,7 @@
+remote:
+remote: Create a pull request for 'review/TH1-1802-bc3a1106a360' on GitHub by visiting:
+remote:      https://github.com/hteo1337/paseo/pull/new/review/TH1-1802-bc3a1106a360
+remote:
+To https://github.com/hteo1337/paseo.git
+ * [new branch]          HEAD -> review/TH1-1802-bc3a1106a360
+branch 'review/TH1-1802-bc3a1106a360' set up to track 'fork/review/TH1-1802-bc3a1106a360'.
