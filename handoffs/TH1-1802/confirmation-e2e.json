@@ -1,0 +1,148 @@
+{
+  "config": {
+    "configFile": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/playwright.config.ts",
+    "rootDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/e2e/browser",
+    "forbidOnly": false,
+    "fullyParallel": false,
+    "globalSetup": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/e2e/support/global-setup.ts",
+    "globalTeardown": null,
+    "globalTimeout": 0,
+    "grep": {},
+    "grepInvert": null,
+    "maxFailures": 0,
+    "metadata": {
+      "actualWorkers": 1
+    },
+    "preserveOutput": "always",
+    "projects": [
+      {
+        "outputDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "browser",
+        "name": "browser",
+        "testDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/e2e/browser",
+        "testIgnore": ["**/*.real.spec.ts"],
+        "testMatch": ["**/*.@(spec|test).?(c|m)[jt]s?(x)"],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "real-provider",
+        "name": "real-provider",
+        "testDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/e2e/browser",
+        "testIgnore": ["**/relay-deployment-reconnect.real.spec.ts"],
+        "testMatch": ["**/*.real.spec.ts"],
+        "timeout": 60000
+      },
+      {
+        "outputDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/test-results",
+        "repeatEach": 1,
+        "retries": 0,
+        "metadata": {
+          "actualWorkers": 1
+        },
+        "id": "relay-deployment",
+        "name": "relay-deployment",
+        "testDir": "/Users/hteo/.paseo/worktrees/3eu1vvlp/2bf9431ffde8/packages/app/e2e/browser",
+        "testIgnore": [],
+        "testMatch": ["**/relay-deployment-reconnect.real.spec.ts"],
+        "timeout": 60000
+      }
+    ],
+    "quiet": false,
+    "reporter": [["list"], ["json"]],
+    "reportSlowTests": {
+      "max": 5,
+      "threshold": 300000
+    },
+    "runAgents": "none",
+    "shard": null,
+    "tags": [],
+    "updateSnapshots": "missing",
+    "updateSourceMethod": "patch",
+    "version": "1.58.2",
+    "workers": 1,
+    "webServer": null
+  },
+  "suites": [
+    {
+      "title": "sidebar-nav-settings.spec.ts",
+      "file": "sidebar-nav-settings.spec.ts",
+      "column": 0,
+      "line": 0,
+      "specs": [],
+      "suites": [
+        {
+          "title": "The sidebar items group",
+          "file": "sidebar-nav-settings.spec.ts",
+          "line": 217,
+          "column": 6,
+          "specs": [
+            {
+              "title": "owner drags the navigation group taller and finds it that tall next time",
+              "ok": true,
+              "tags": [],
+              "tests": [
+                {
+                  "timeout": 60000,
+                  "annotations": [],
+                  "expectedStatus": "passed",
+                  "projectId": "browser",
+                  "projectName": "browser",
+                  "results": [
+                    {
+                      "workerIndex": 0,
+                      "parallelIndex": 0,
+                      "status": "passed",
+                      "duration": 3634,
+                      "errors": [],
+                      "stdout": [
+                        {
+                          "text": "[e2e] Worker 0 daemon started on port 63683, home: /var/folders/9z/jtl3ybm970jbvhs_tkn0f1_w0000gn/T/paseo-e2e-worker-0-m7oooj\n"
+                        }
+                      ],
+                      "stderr": [],
+                      "retry": 0,
+                      "startTime": "2026-10-26T09:43:58.758Z",
+                      "annotations": [],
+                      "attachments": [
+                        {
+                          "name": "navigation-resize-stylesheet",
+                          "contentType": "application/json",
+                          "body": "eyJzdGFydEhlaWdodCI6MTE5LCJyZXNpemVkSGVpZ2h0IjoxOTksInJ1bGVzQmVmb3JlRHJhZyI6NjcsInJ1bGVzQWZ0ZXJEcmFnIjo2N30="
+                        }
+                      ]
+                    }
+                  ],
+                  "status": "expected"
+                }
+              ],
+              "id": "5ed20de1b1d6f281077a-0ed3d1bcdf2c589ea83b",
+              "file": "sidebar-nav-settings.spec.ts",
+              "line": 240,
+              "column": 7
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "errors": [],
+  "stats": {
+    "startTime": "2026-10-26T09:43:54.505Z",
+    "duration": 27993,
+    "expected": 1,
+    "skipped": 0,
+    "unexpected": 0,
+    "flaky": 0
+  }
+}

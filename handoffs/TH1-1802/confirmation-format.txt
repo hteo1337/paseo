@@ -1,0 +1,5 @@
+npm notice run paseo@0.13.0-beta.2 format
+npm notice run oxfmt . --threads=2
+Finished in 2492ms on 5370 files using 2 threads.
+
+EXIT_CODE=0

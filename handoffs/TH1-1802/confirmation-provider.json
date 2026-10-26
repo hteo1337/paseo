@@ -1,0 +1,9 @@
+{
+  "agentId": "505ac2db-57d0-4081-9e45-a14630005869",
+  "provider": "codex-auto",
+  "model": "gpt-6.1-sol",
+  "dispatchTaskId": "be0404a677af4838829335e91bf00f5a",
+  "dispatchRunId": "a41b7dc2fee3405990fafc750e87a35a",
+  "observedVia": "mcp__paseo.list_agents in this session",
+  "sourceHead": "cbd0d373b070c9ee17441895d0863b3849f4fd8a"
+}

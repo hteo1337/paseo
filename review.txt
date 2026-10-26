@@ -1,0 +1,16 @@
+Confirmation: CONFIRMED
+
+PR: getpaseo/paseo#5030 — feat(app): let the sidebar navigation group be dragged.
+Reviewed source head: cbd0d373b070c9ee17441895d0863b3849f4fd8a (source fix 8efa9f2dd86dff4cfcc10baf99630a6744fcfe30).
+Scope: only git diff 18dd03ab7 cbd0d373b -- packages/app, confirming the single P2 in original comment 6405685557. This is not a new PR-wide or adversarial review.
+Reviewer: codex-auto / gpt-6.1-sol; verified via Paseo agent metadata for 505ac2db-57d0-4081-9e45-a14630005869, dispatch task be0404a677af4838829335e91bf00f5a.
+
+Evidence
+- packages/app/src/components/sidebar/sidebar-nav-rows.tsx:104 now marks both dynamic maxHeight and height with inlineUnistylesStyle, preserving styles.rows as a separate array entry at line 103. This is the escape hatch required by docs/unistyles.md:87. The maxHeight-vs-height choice, clamp, drag callbacks and persistence are unchanged.
+- packages/app/src/styles/unistyles-inline-style.web.ts:16 supplies the existing inline/animated-style marker; packages/app/src/styles/unistyles-inline-style.native.ts:7 returns the geometry unchanged. No additional platform branching or style flattening is introduced.
+- packages/app/e2e/browser/sidebar-nav-settings.spec.ts:246 warms the first drag before taking a CSS baseline; lines 252–259 perform a real 80px drag, assert increased rendered height and unchanged #unistyles-web rule count. Lines 261–262 still assert reload persistence. The assertion cannot pass merely by disabling resize because height growth is separately required.
+- Independent exact-head spot-check: ran only the existing mouse-drag/persistence scenario in sidebar-nav-settings.spec.ts, with env -u PASEO_PASSWORD -u PASEO_OWNER_UNIX_SOCKET, headless Chromium and one worker. Exit 0, 1 passed (28.0s): 119→199px, CSS rules 67→67; reload passed. Full command/results are in handoffs/TH1-1802/confirmation-e2e.json/txt. Log confirms isolated daemon and Metro stopped.
+- Inspected writer artifacts: before-resize.json plus before-e2e.txt show this same assertion failing without the production fix (119→199px, rules 69→79). after-e2e.json/txt show 7 passed / 2 failed, including passing resize, reload and touch scenarios. baseline-shortcuts.txt reproduces the two Ctrl+O/Ctrl+N label failures on original production source. Those are not attributed to this fix; no full-spec rerun was needed.
+
+Nothing found: no remaining blocker or regression in the two-file correction or its regression assertion. The original stylesheet-growth P2 is resolved.
+Limits: no full suite, native/device, packaged Electron or CI verification in this confirmation. Scoped lint passes (0 warnings/errors). This does not clear the already-required adversarial review or CI/finalization gate; the lead owns those. No source changes, PR-branch pushes, merge or ready-state transition.
