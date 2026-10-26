@@ -1,0 +1,115 @@
+╭───────────────────────────────────╮
+│ lefthook v2.1.6  hook: pre-commit │
+╰───────────────────────────────────╯
+┃  lint ❯
+
+
+> paseo@0.13.0-beta.2 lint
+> oxlint handoffs/TH1-1802/sidebar-nav-review.spec.ts
+
+Found 0 warnings and 0 errors.
+Finished in 173ms on 1 file with 177 rules using 18 threads.
+
+┃  format ❯
+
+
+> paseo@0.13.0-beta.2 format:check:files
+> oxfmt --check handoffs/CHECKLIST-69de786f.md handoffs/TH1-1802/BLOCKED.md handoffs/TH1-1802/STATUS.md handoffs/TH1-1802/headless-evidence.json handoffs/TH1-1802/review-runtime.json handoffs/TH1-1802/sidebar-nav-review.spec.ts
+
+Checking formatting...
+
+All matched files use the correct format.
+Finished in 373ms on 6 files using 18 threads.
+
+┃  typecheck ❯
+
+
+> paseo@0.13.0-beta.2 typecheck
+> npm run typecheck --workspaces --if-present
+
+
+> @getpaseo/builtin-plugins@0.13.0-beta.2 typecheck
+> tsgo -p tsconfig.json --noEmit
+
+
+> @getpaseo/expo-two-way-audio@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/highlight@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/plugin@0.13.0-beta.2 typecheck
+> tsgo --noEmit && npm run typecheck:examples
+
+
+> @getpaseo/plugin@0.13.0-beta.2 typecheck:examples
+> npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+
+added 22 packages in 492ms
+
+> @getpaseo/protocol@0.13.0-beta.2 pretypecheck
+> npm run generate:validators
+
+
+> @getpaseo/protocol@0.13.0-beta.2 generate:validators
+> node scripts/generate-validation-aot.mjs
+
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 234 session message validators
+
+> @getpaseo/protocol@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/client@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/server@0.13.0-beta.2 typecheck
+> tsgo -p tsconfig.server.typecheck.json --noEmit
+
+
+> @getpaseo/app@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/relay@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/website@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+> @getpaseo/desktop@0.13.0-beta.2 typecheck
+> tsgo --noEmit -p tsconfig.json
+
+
+> @getpaseo/cli@0.13.0-beta.2 typecheck
+> tsgo --noEmit
+
+
+
+  ────────────────────────────────────
+summary: (done in 26.28 seconds)
+✓ lint (0.67 seconds)
+✓ format (0.87 seconds)
+✓ typecheck (26.23 seconds)
+[review/TH1-1802-7c27b75cd305 067c892d5] docs(TH1-1802): record blocking sidebar resize review
+ 14 files changed, 404 insertions(+)
+ create mode 100644 handoffs/CHECKLIST-69de786f.md
+ create mode 100644 handoffs/TH1-1802/BLOCKED.md
+ create mode 100644 handoffs/TH1-1802/STATUS.md
+ create mode 100644 handoffs/TH1-1802/evidence-format.txt
+ create mode 100644 handoffs/TH1-1802/format.txt
+ create mode 100644 handoffs/TH1-1802/headless-evidence.json
+ create mode 100644 handoffs/TH1-1802/headless-probe.txt
+ create mode 100644 handoffs/TH1-1802/lint.txt
+ create mode 100644 handoffs/TH1-1802/probe-format.txt
+ create mode 100644 handoffs/TH1-1802/probe-lint.txt
+ create mode 100644 handoffs/TH1-1802/review-runtime.json
+ create mode 100644 handoffs/TH1-1802/sidebar-nav-review.spec.ts
+ create mode 100644 handoffs/TH1-1802/typecheck.txt
+ create mode 100644 review.txt
