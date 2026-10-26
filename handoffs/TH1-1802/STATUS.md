@@ -8,3 +8,5 @@ Local artifacts: sidebar-nav-inline-height.patch plus local-fix-{evidence.json,p
 Ownership: lead assigns a dispatched TH1-1802 writer to apply the fix to feat/sidebar-nav-group-resize; this reviewer stops and waits for a brief-confirmation request.
 Next: dispatched writer applies fix; reviewer confirms briefly only when asked. Lead owns adversarial/CI/delivery; original reviewed-head CI is action_required.
 Open questions: none; publication decision resolved. Patch/evidence remain untracked/local; only handoff updates are committed/pushed. Reviewer stopped per lead instruction.
+
+Continuity stop ID: 69de786f06dd4f09b1915f79234ec74f:e84f6de001cb4d738e59dea857d80165:0be69ae7-b7e8-4c61-bdc0-0476ffd8b1b4
