@@ -1,3 +1,7 @@
 {
-  "localBuild": true
+  "localBuild": true,
+  "baseTag": "v0.11.2",
+  "seriesHash": "b7b14f4aab4bec7f",
+  "head": "46d8a1bd5639cd47d6d7e0518a824bc533d77b15",
+  "builtAt": "2026-10-11T18:00:04+03:00"
 }
