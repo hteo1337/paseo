@@ -94,6 +94,8 @@
           "error",
           {
             "allow": {
+              // Packaged identity is captured once during construction, before accepting connections.
+              "server/build-identity.ts": ["readFileSync", "realpathSync"],
               // TODO: literal executableExists is a synchronous public capability; move its callers and Windows existence predicates to async together.
               "executable-resolution/executable-resolution.ts": ["existsSync"],
               // TODO: winget enumeration shares synchronous existence predicates with literal lookup; convert the executable-resolution boundary together.
