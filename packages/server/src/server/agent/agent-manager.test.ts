@@ -5903,6 +5903,8 @@ test("importProviderSession imports the selected session without listing and pub
   expect(client.importInput).toEqual({ providerHandleId: "thread-selected", cwd: workdir });
   expect(client.importLaunchContext).toEqual({
     agentId: imported.id,
+    mcpServers: {},
+    mcpServerOwners: undefined,
     env: {
       PASEO_AGENT_ID: imported.id,
       PASEO_AGENT_CWD: workdir,
@@ -6786,7 +6788,9 @@ test.each([false, true])(
         "effective opus refused",
       );
       expect(steerCalls).toBe(0);
-      expect(() => manager.tryRunOutOfBand(created.id, "/steer")).toThrow("effective opus refused");
+      await expect(manager.tryRunOutOfBand(created.id, "/steer")).rejects.toThrow(
+        "effective opus refused",
+      );
       expect(outOfBandCalls).toBe(0);
     } else {
       expect(manager.getAgent(created.id)).toBeNull();
@@ -10161,13 +10165,25 @@ test("per-minute subscriptions and resident loads do not postpone idle unload", 
     const idleMs = 15 * 60_000;
     const create = () => manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
     const observed = await create();
+    const unobserved = await create();
+    const cleanup = createIdleRuntimeCleanup({
+      enabled: true,
+      idlePeriodMs: () => idleMs,
+      runtimes: () => manager.getRuntimeCleanupCandidates(),
+      logger,
+      schedule: () => () => {},
+    });
+    onTestFinished(() => cleanup.close());
     const used = await create();
     const prompted = await create();
     const updated = await create();
 
     for (let minute = 1; minute <= 15; minute++) {
       vi.setSystemTime(startedAt + minute * 60_000);
-      const release = manager.holdClientStream(observed.id, "minute-observer");
+      const release =
+        minute % 2 === 1
+          ? manager.holdClientStream(observed.id, "minute-observer")
+          : manager.beginAgentUse(observed.id, "minute-observer", { touchActivity: false });
       const loaded = await ensureAgentLoaded(observed.id, {
         agentManager: manager,
         agentStorage: storage,
@@ -10184,22 +10200,30 @@ test("per-minute subscriptions and resident loads do not postpone idle unload", 
         releaseUse();
       }
       // A subscription still protects its runtime even after the idle deadline.
-      expect(await manager.unloadIdleAgents(idleMs)).toBe(0);
+      const held = await cleanup.sweep();
+      expect(held.collected.map((entry) => entry.agentId)).toEqual(
+        minute === 15 ? [unobserved.id] : [],
+      );
+      expect(manager.getAgent(observed.id)).not.toBeNull();
       release();
       release();
+      const released = await cleanup.sweep();
+      expect(released.collected.map((entry) => entry.agentId)).toEqual(
+        minute === 15 ? [observed.id] : [],
+      );
     }
 
     expect(client.resumeOverrides).toHaveLength(0);
-    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+    expect((await cleanup.sweep()).collected).toHaveLength(0);
     expect(manager.getAgent(observed.id)).toBeNull();
     for (const control of [used, prompted, updated]) {
       expect(manager.getAgent(control.id)).not.toBeNull();
     }
     vi.setSystemTime(startedAt + 29 * 60_000);
-    expect(await manager.unloadIdleAgents(idleMs)).toBe(2);
+    expect((await cleanup.sweep()).collected).toHaveLength(2);
     expect(manager.getAgent(used.id)).not.toBeNull();
     vi.setSystemTime(startedAt + 29 * 60_000 + 1_000);
-    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
+    expect((await cleanup.sweep()).collected).toHaveLength(1);
   } finally {
     vi.useRealTimers();
     await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
@@ -10384,8 +10408,8 @@ test("Reload retries retained idle tree cleanup before resuming and clears it", 
 test("idle sweep deadlines preserve a stalled close while other agents and future sweeps finish", async () => {
   const workdir = mkdtempSync(join(tmpdir(), "agent-idle-deadline-"));
   const storage = new AgentStorage(join(workdir, "agents"), logger);
-  const closeStarted = deferred<void>();
-  const releaseClose = deferred<void>();
+  let closeStarted = deferred<void>();
+  let releaseClose = deferred<void>();
   class StalledSession extends TestAgentSession {
     closes = 0;
     override async close(): Promise<void> {
@@ -10410,16 +10434,41 @@ test("idle sweep deadlines preserve a stalled close while other agents and futur
     rescueTimeouts: { idleSessionCloseMs: 20 },
     processTreeReaper: async () => 0,
   });
+  const outcomes: string[] = [];
+  const cleanup = createIdleRuntimeCleanup({
+    enabled: true,
+    runtimes: () => manager.getRuntimeCleanupCandidates(),
+    logger: {
+      debug: logger.debug.bind(logger),
+      warn: logger.warn.bind(logger),
+      info: (entry: { agentId: string }) => {
+        outcomes.push(entry.agentId);
+      },
+    },
+    now: () => Date.now() + 61 * 60_000,
+    schedule: () => () => {},
+  });
+  const bounded = <T>(promise: Promise<T>) =>
+    Promise.race([
+      promise,
+      new Promise<never>((_, reject) => {
+        const timer = setTimeout(() => reject(new Error("collector deadline missed")), 250);
+        timer.unref();
+        promise.finally(() => clearTimeout(timer)).catch(() => {});
+      }),
+    ]);
   try {
     const first = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
     const second = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
-    const sweep = manager.unloadIdleAgents(1, Date.now() + 60_000);
+    const sweep = cleanup.sweep();
     await closeStarted.promise;
-    expect(await sweep).toBe(1);
+    expect((await bounded(sweep)).collected.map((entry) => entry.agentId)).toEqual([second.id]);
     expect(manager.getAgent(second.id)).toBeNull();
     expect(manager.getAgent(first.id)?.session).toBe(stalled.current);
     const third = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
-    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(1);
+    expect((await bounded(cleanup.sweep())).collected.map((entry) => entry.agentId)).toEqual([
+      third.id,
+    ]);
     expect(manager.getAgent(third.id)).toBeNull();
     expect(stalled.current?.closes).toBe(1);
     let loaded = false;
@@ -10431,14 +10480,29 @@ test("idle sweep deadlines preserve a stalled close while other agents and futur
       loaded = true;
       return agent;
     });
-    await manager.unloadIdleAgents(1, Date.now() + 60_000);
+    await bounded(cleanup.sweep());
+    expect(stalled.current?.closes).toBe(1);
     expect(loaded).toBe(false);
     releaseClose.resolve();
     const resumed = await access;
     expect(resumed.session).not.toBe(stalled.current);
     expect(stalled.resumeOverrides).toHaveLength(1);
+    expect(outcomes.filter((id) => id === first.id)).toHaveLength(1);
+    expect((await sweep).collected.filter((entry) => entry.agentId === first.id)).toHaveLength(1);
+    closeStarted = deferred<void>();
+    releaseClose = deferred<void>();
+    const fourth = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+    const finalSweep = cleanup.sweep();
+    await closeStarted.promise;
+    await bounded(cleanup.close());
+    expect(manager.getAgent(fourth.id)?.session).toBe(stalled.current);
+    expect(stalled.current?.closes).toBe(1);
+    releaseClose.resolve();
+    await finalSweep;
+    await expect.poll(() => outcomes.filter((id) => id === fourth.id).length).toBe(1);
   } finally {
     releaseClose.resolve();
+    await cleanup.close();
     await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
     rmSync(workdir, { recursive: true, force: true });
   }
@@ -14759,7 +14823,6 @@ test("an out-of-band command racing idle cleanup waits for the resumed runtime",
   expect(h.commands).toEqual(["/maintenance"]);
   expect(h.prompts).toEqual([]);
 });
-
 
 test("provider refusal: PROMPT_RACE never starts a pre-admitted lazy prompt", async () => {
   const config = { provider: "codex" as const, cwd: tmpdir(), model: "sonnet" };

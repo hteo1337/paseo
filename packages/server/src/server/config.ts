@@ -656,6 +656,7 @@ export function resolveConfigFromPersisted(
   };
 }
 
+// eslint-disable-next-line complexity
 export function resolveReloadableConfig(
   persisted: PersistedConfig,
   options?: ResolveConfigFromPersistedOptions,

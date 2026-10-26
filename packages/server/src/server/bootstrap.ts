@@ -205,6 +205,7 @@ import type {
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
 import {
+  loadPersistedConfigAsync,
   type MetadataGenerationConfig,
   type PersistedConfig,
 } from "./persisted-config.js";
@@ -572,7 +573,9 @@ function resolveReloadEnv(config: PaseoDaemonConfig): NodeJS.ProcessEnv {
   return config.configReload?.env ?? process.env;
 }
 
-function resolvePromptSuggestionsConfig(config: PaseoDaemonConfig): { enabled: boolean } {
+function resolvePromptSuggestionsConfig(config: Pick<PaseoDaemonConfig, "promptSuggestions">): {
+  enabled: boolean;
+} {
   return { enabled: config.promptSuggestions?.enabled ?? true };
 }
 
@@ -618,49 +621,6 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
   }
 
   return initialConfig;
-}
-
-function startIdleAgentUnload(
-  config: PaseoDaemonConfig,
-  agentManager: AgentManager,
-  logger: Logger,
-): NodeJS.Timeout {
-  const idleUnloadEnvValue =
-    config.configReload?.env?.PASEO_AGENT_IDLE_UNLOAD_MINUTES ??
-    process.env.PASEO_AGENT_IDLE_UNLOAD_MINUTES;
-  const parsedIdleUnloadEnv = idleUnloadEnvValue === undefined ? null : Number(idleUnloadEnvValue);
-  const idleUnloadEnvMinutes =
-    parsedIdleUnloadEnv !== null &&
-    Number.isInteger(parsedIdleUnloadEnv) &&
-    parsedIdleUnloadEnv >= 0 &&
-    parsedIdleUnloadEnv <= 2_147_483
-      ? parsedIdleUnloadEnv
-      : null;
-  if (idleUnloadEnvValue !== undefined && idleUnloadEnvMinutes === null) {
-    logger.warn("Ignoring invalid PASEO_AGENT_IDLE_UNLOAD_MINUTES value");
-  }
-  let idleUnloadScanRunning = false;
-  const idleUnloadTimer = setInterval(() => {
-    if (idleUnloadScanRunning) return;
-    try {
-      const configured = loadPersistedConfig(config.paseoHome).agents?.idleUnloadMinutes ?? 15;
-      const minutes = idleUnloadEnvMinutes ?? configured;
-      if (minutes === 0) return;
-      idleUnloadScanRunning = true;
-      void agentManager
-        .unloadIdleAgents(minutes * 60_000)
-        .catch((error) => {
-          logger.warn({ err: error }, "Idle agent unload scan failed");
-        })
-        .finally(() => {
-          idleUnloadScanRunning = false;
-        });
-    } catch (error) {
-      logger.warn({ err: error }, "Idle agent unload scan could not read configuration");
-    }
-  }, 60_000);
-  idleUnloadTimer.unref();
-  return idleUnloadTimer;
 }
 
 export async function createPaseoDaemon(
@@ -1071,7 +1031,6 @@ export async function createPaseoDaemon(
       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
     logger,
   });
-  const idleUnloadTimer = startIdleAgentUnload(config, agentManager, logger);
   const syncPluginProviders = () => {
     agentManager.updateProviderRegistry(
       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
@@ -1556,9 +1515,27 @@ export async function createPaseoDaemon(
     }),
   });
 
+  let idleUnloadPeriodMs = 15 * 60_000;
   const idleRuntimeCleanup = createIdleRuntimeCleanup({
     enabled: daemonConfigStore.get().idleRuntimeCleanup !== false,
-    runtimes: () => agentManager.getRuntimeCleanupCandidates(),
+    idlePeriodMs: async () => {
+      const env =
+        config.configReload?.env?.PASEO_AGENT_IDLE_UNLOAD_MINUTES ??
+        process.env.PASEO_AGENT_IDLE_UNLOAD_MINUTES;
+      const value = env === undefined ? undefined : Number(env);
+      const configured =
+        (await loadPersistedConfigAsync(config.paseoHome)).agents?.idleUnloadMinutes ?? 15;
+      const minutes =
+        value !== undefined && Number.isInteger(value) && value >= 0 && value <= 2_147_483
+          ? value
+          : configured;
+      idleUnloadPeriodMs = minutes * 60_000;
+      return idleUnloadPeriodMs;
+    },
+    runtimes: () => {
+      agentManager.logIdleUnloadSkips(idleUnloadPeriodMs, Date.now());
+      return agentManager.getRuntimeCleanupCandidates();
+    },
     isProtected: (agentId) =>
       finishSubscriptions.hasPendingForCaller(agentId) ||
       (wsServer?.agentMessages.hasPending(agentId) ?? false),
@@ -2030,7 +2007,6 @@ export async function createPaseoDaemon(
       scriptHealthMonitor.start();
     } catch (error) {
       await stopOwnerUnix?.();
-      clearInterval(idleUnloadTimer);
       localCredential = null;
       await deleteLocalCredential(config.paseoHome);
       unsubscribePluginProviders();
@@ -2048,7 +2024,6 @@ export async function createPaseoDaemon(
 
   const stop = async () => {
     await stopOwnerUnix?.();
-    clearInterval(idleUnloadTimer);
     localCredential = null;
     await deleteLocalCredential(config.paseoHome);
     promptSuggestions.stop();

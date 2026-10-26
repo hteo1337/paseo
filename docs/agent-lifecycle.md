@@ -25,7 +25,7 @@ Reload releases the old runtime before resuming its durable session: an idle pro
 still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
 replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
 
-Idle resumable runtimes are collected after one hour without activity, checked once a minute.
+Idle resumable runtimes are collected after the configured idle period without activity, checked once a minute.
 Collection releases the process and preserves the agent record, conversation, relationships, and
 provider session. The next prompt resumes that session. Set `agents.idleRuntimeCleanup: false` in
 host config to disable automatic collection. The host setting applies immediately; config-file edits
@@ -39,8 +39,8 @@ An idle managed child can still own background work.
 
 The daemon baseline always applies. An optional provider `canStopRuntime()` adds a veto: false,
 errors and timeouts retain ownership, while true cannot override daemon blockers. Without a provider
-check, the baseline decides collection after the same one-hour idle period. Once protected work
-finishes, a fresh idle hour starts. There is no deadline that overrides a veto.
+check, the baseline decides collection after the same configured idle period. Once protected work
+finishes, a fresh idle period starts. There is no deadline that overrides a veto.
 
 The `idle-runtime-cleanup/` module owns the clocks, eligibility policy and sweep lifetime.
 AgentManager supplies captured runtime capabilities and owns atomic revalidation and shutdown.
@@ -77,7 +77,6 @@ extensions. A provider plugin adds its own veto through the [runtime safety cont
 Child creation can use an unarchived closed parent from durable storage. Resolving
 parentage does not resume the parent's provider or start a turn. Archived parents
 remain unavailable.
-
 
 The daemon unloads a resident agent after 15 minutes without a turn, pending permission, queued
 prompt, in-flight resume, client timeline stream, or live ACP terminal. It closes the provider runtime and

@@ -249,7 +249,7 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
     typeof output === "object" &&
     !Array.isArray(output)
   ) {
-    const request = input as PluginBeforeRequests["agent.session_open"];
+    const request = input as PluginWireBeforeRequests["agent.session_open"];
     output = { model: request.model, title: request.title, ...output };
   }
   const result = validateBeforeRequest(name, output);
@@ -286,7 +286,7 @@ export function validateBeforeResult<Name extends keyof PluginWireBeforeRequests
     return validateAgentCreateResult(
       beforeSchemas["agent.create"].parse(input),
       beforeSchemas["agent.create"].parse(result),
-    ) as PluginBeforeRequests[Name];
+    ) as PluginWireBeforeRequests[Name];
   }
   return result;
 }

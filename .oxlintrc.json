@@ -94,6 +94,25 @@
           "error",
           {
             "allow": {
+              // Packaged identity is captured once during construction, before accepting connections.
+              "server/build-identity.ts": ["readFileSync", "realpathSync"],
+              // Owner socket inode checks and descriptor disposal must complete atomically at bind/close.
+              "server/owner-unix-origin.ts": ["closeSync"],
+              "server/owner-unix-listener.ts": [
+                "chmodSync",
+                "fstatSync",
+                "lstatSync",
+                "realpathSync",
+                "unlinkSync"
+              ],
+              // TODO: migrate guarded workspace identity capabilities together with their synchronous admission callers.
+              "server/session/workspace-provisioning/workspace-provisioning-service.ts": [
+                "existsSync",
+                "realpathSync"
+              ],
+              "server/auto-archive-on-merge/archive-if-safe.ts": ["realpathSync"],
+              // Account routing is checked immediately before session launch; keep the check at the launch boundary.
+              "server/agent/providers/codex/mcp-selection.ts": ["realpathSync"],
               // TODO: literal executableExists is a synchronous public capability; move its callers and Windows existence predicates to async together.
               "executable-resolution/executable-resolution.ts": ["existsSync"],
               // TODO: winget enumeration shares synchronous existence predicates with literal lookup; convert the executable-resolution boundary together.

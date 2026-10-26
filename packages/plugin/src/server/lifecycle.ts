@@ -45,7 +45,10 @@ export interface PluginSessionOpenRequest {
   mcpServers: NonNullable<AgentSessionConfig["mcpServers"]>;
 }
 
-export type PluginSessionOpenedRequest = Omit<PluginSessionOpenRequest, "env"> & {
+export type PluginSessionOpenedRequest = Omit<
+  PluginSessionOpenRequest,
+  "env" | "labels" | "tools" | "mcpServers"
+> & {
   requestedModel: string | null;
 };
 
