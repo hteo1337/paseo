@@ -54,6 +54,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
     const handled = ctx.onKeyPressCallback({
       key: event.nativeEvent.key,
       hasModifier: hasKeyModifier(event),
+
       preventDefault: () => event.preventDefault(),
       input: ctx.input,
     });
@@ -66,9 +67,18 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
   // its Enter answers to the same guard as an ordinary send.
   if (ctx.ghostSuggestion && !metaKey && !ctrlKey && !shiftKey) {
     const canSubmit = canSubmitGhost(ctx);
+
     if (handleGhostKey(event, ctx.ghostSuggestion, canSubmit)) return;
   }
 
+  handleEnter(event, ctx);
+}
+
+function handleEnter<TInput, TPayload>(
+  event: DesktopKeyEvent,
+  ctx: DesktopKeyPressContext<TInput, TPayload>,
+): void {
+  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
   if (event.nativeEvent.key !== "Enter") return;
   const action = resolveMessageInputEnterAction({
     submitOnEnter: ctx.submitOnEnter,
