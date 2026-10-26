@@ -1,0 +1,64 @@
+# Page snapshot
+
+```yaml
+- generic [ref=e12]:
+    - generic [ref=e15]:
+        - button "Navigation" [ref=e19] [cursor=pointer]:
+            - generic [ref=e20]: Navigation
+            - img [ref=e22]
+        - generic [ref=e27]:
+            - generic [ref=e28]:
+                - generic [ref=e29]: No projects yet
+                - generic [ref=e30]: Add a project to get started
+            - generic [ref=e31]:
+                - button "Add project" [ref=e32] [cursor=pointer]:
+                    - img [ref=e35]
+                    - generic [ref=e36]: Add project
+                - button "Import session" [ref=e37] [cursor=pointer]:
+                    - img [ref=e40]
+                    - generic [ref=e43]: Import session
+        - generic [ref=e45]:
+            - button "Add project" [ref=e46] [cursor=pointer]:
+                - img [ref=e48]
+            - button "Usage" [ref=e50] [cursor=pointer]:
+                - img [ref=e52]
+            - button "Hosts" [ref=e56] [cursor=pointer]:
+                - img [ref=e58]
+            - button "Help and support" [ref=e62] [cursor=pointer]:
+                - img [ref=e64]
+            - button "Settings" [ref=e67] [cursor=pointer]:
+                - img [ref=e69]
+        - separator [ref=e73]
+    - generic [ref=e83]:
+        - button "Close menu" [expanded] [ref=e88] [cursor=pointer]:
+            - img [ref=e90]
+        - generic [ref=e93]:
+            - generic [ref=e94]:
+                - img [ref=e96]
+                - generic [ref=e98]:
+                    - generic [ref=e99] [cursor=pointer]:
+                        - img [ref=e100]
+                        - generic [ref=e102]:
+                            - generic [ref=e103]: Add a project
+                            - generic [ref=e104]: Open a folder on your machine
+                    - generic [ref=e105] [cursor=pointer]:
+                        - img [ref=e106]
+                        - generic [ref=e109]:
+                            - generic [ref=e110]: Import session
+                            - generic [ref=e111]: Open a Claude Code, Codex or other session you started in a terminal
+                    - generic [ref=e112] [cursor=pointer]:
+                        - img [ref=e113]
+                        - generic [ref=e115]:
+                            - generic [ref=e116]: Setup providers
+                            - generic [ref=e117]: Configure Claude Code, Codex, and more
+            - generic [ref=e119]:
+                - button "Star" [ref=e120] [cursor=pointer]:
+                    - img [ref=e123]
+                    - generic [ref=e125]: Star
+                - button "Sponsor" [ref=e126] [cursor=pointer]:
+                    - img [ref=e129]
+                    - generic [ref=e131]: Sponsor
+                - button "Community" [ref=e132] [cursor=pointer]:
+                    - img [ref=e135]
+                    - generic [ref=e137]: Community
+```

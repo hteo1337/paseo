@@ -1,0 +1,40 @@
+Verdict: CONFIRMED
+
+Adversarial review of getpaseo/paseo#5030 — feat(app): let the sidebar navigation group be dragged.
+Source head: cbd0d373b070c9ee17441895d0863b3849f4fd8a, hteo1337/paseo feat/sidebar-nav-group-resize.
+Full 23-file PR diff: git diff d6fa231894568e6ac9a11e8b2fb475343026eea6 cbd0d373b -- . ':!handoffs'.
+Fetched getpaseo/paseo main: 902b0c7a1637cc7a6c2ee268dca8161965a35def; merge base is d6fa231894568e6ac9a11e8b2fb475343026eea6.
+Reviewer: codex-auto / gpt-6.1-sol, high; verified through Paseo's current-agent record a6671fd1-76eb-4382-8420-1895bffd70e5, dispatcher task 0c0b0df92b9c457c81d9d3a6838d4b88.
+This is the single requested adversarial review, not a repetition of the PR-ready review or its brief P2 confirmation.
+
+Findings, severity order
+
+No new confirmed blocking findings. The previous inline-height P2 was already fixed and confirmed; it is not raised again.
+
+Nothing found — exercised paths
+
+- Touch cancellation and persistence: sidebar-nav-resize-handle.tsx:85-104 and sidebar-nav-rows.tsx:112-125. In headless Chromium with a real coarse pointer, a no-motion canceled gesture left 118px and stored null. A moving canceled gesture changed 118→174px and committed 174; folding/unfolding and reloading both retained 174. This disproved the suspected orphaned-preview failure on this web path. A subsequent normal touch drag committed 230px and restored 230px after reload.
+- Clamp and scroll: sidebar-nav/group-layout.ts:55-87. Extreme touch drags rendered 36px minimum and 400px maximum in an 800px viewport. Shrinking the viewport to 240px reduced the group to 120px. The last navigation item remained reachable inside the scroller at both the minimum and short-window sizes. The existing pure tests also cover nonfinite inputs and footer/compact-row reserves.
+- Folded compact close: left-sidebar.tsx:561-571, sidebar-nav-rows.tsx:129-147, sidebar-section-header.tsx:61-79. At 390×844, the Navigation toggle was 44px high and the close action was a separate 32×32 header-island button at (346,14), with tabindex=0. Tab from the folded header focused sidebar-close, and tapping it closed the overlay. With all nav items hidden, the compact close remained visible and usable; the desktop nav group disappeared. The 32px close control is unchanged by this PR; no new tap-target regression found.
+- Expanded state: sidebar-section-header.tsx:56-65. The real folded/unfolded DOM reported aria-expanded=false/true. Native accessibilityState remains present; no native runtime claim is made.
+
+Nothing found — source and existing coverage inspected
+
+- Cross-platform gating and styles: sidebar-nav-resize-handle.tsx:108-138 gates the DOM-only handler through isWeb && finePointer and uses Gesture.Pan elsewhere. No newly added onPointerEnter/onPointerLeave or useUnistyles call, and no additional per-pixel Unistyles object found in this diff. sidebar-nav-rows.tsx:100-106 preserves styles.rows separately from inlineUnistylesStyle.
+- Store upgrade compatibility: panel-store/state.ts:99-102 accepts absent/null/numeric height; state.ts:162-164 normalizes missing legacy height when migration runs, and panel-store/index.ts:125 supplies null on same-version shallow hydration. sidebar-view-store.ts keeps navCollapsed optional with an unfolded default and retains setWorkspaceSort. No server persistence or wire protocol changed. Downgrading to an older strict schema is not established by this review.
+- Test adequacy: the existing drag test observes CSS registry growth and reload, not merely helper arithmetic; the inspected writer control fails with 69→79 rules and the fixed result holds at 67→67. Fold, normal touch persistence and overflow tests exercise rendered behavior. Missing coverage remains for held-pointer unmount/multi-pointer interleaving and native cancellation. No defect is claimed solely from those gaps.
+- Keyboard resize is absent: the divider is not keyboard-focusable and has no key handler. The PR explicitly declares keyboard resize a non-goal, so this is not raised as an implementation regression. Header keyboard semantics and close focus order are separate from divider keyboard support.
+- No auth, permission, credentials, migrations requiring a data rewrite, daemon lifecycle, or protocol change found.
+
+Verification and limits
+
+One new diagnostic test only, one headless browser/Metro worker, no extra lanes, no full suite:
+env -u PASEO_PASSWORD -u PASEO_OWNER_UNIX_SOCKET NODE_OPTIONS="--require $PWD/handoffs/TH1-1802/worker-cap.cjs" E2E_WORKERS=1 GOMAXPROCS=2 npm --prefix packages/app run test:e2e -- --config ../../handoffs/TH1-1802/adversarial.config.ts --workers=1
+
+Exit 1, 1 failed (test body 16.1s): the final one-row/legacy-hydration phase expected visible rows after intentionally persisting navCollapsed=true in the preceding compact phase. The captured DOM shows the folded Navigation header, not a product crash. All preceding checks above completed and are recorded in handoffs/TH1-1802/adversarial-evidence.json. The one-row legacy runtime check and final cancellation assertion were not reached; cancellation values were captured before the failure. No rerun was made to stay within the test cap. The two-frame settling helper was subsequently simplified for lint only; the failing one-row setup is preserved. This diagnostic run is not reported green.
+
+Existing exact-source results inspected rather than rerun per docs/testing.md: sidebar-nav-settings 7 passed/2 known macOS Ctrl-versus-Command label failures; writer's unchanged-source controls reproduced those same two failures. The exact-head mouse/reload confirmation comment was inspected. Prior group-layout/store passes were reported in the issue; their source tests were read, not rerun or independently re-certified. These are prior evidence, not newly executed tests.
+
+No runtime native iOS/Android, packaged Electron, plugin-many-row installation, live persistence writes from a second component mid-drag, or held-pointer responsive-unmount test. Ordinary pointer listeners and those interleavings received source review, not fresh runtime certification. CI is not claimed green. Production packages/ and docs/ remain byte-identical to the reviewed source head. No code fix, PR-branch push, merge or ready-state change.
+
+Artifacts: review.txt; handoffs/TH1-1802/adversarial-full.diff, adversarial.spec.ts, adversarial.config.ts, adversarial-evidence.json and adversarial-run.txt. Review handoff is on review/TH1-1802-bc3a1106a360 only. Exactly one PR comment posted: 6413439027; readback matches adversarial-pr-comment.md.

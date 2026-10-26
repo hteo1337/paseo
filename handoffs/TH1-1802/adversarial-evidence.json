@@ -1,0 +1,55 @@
+{
+  "media": {
+    "fine": false,
+    "coarse": true
+  },
+  "cancellation": {
+    "initial": 118,
+    "cancelControl": {
+      "preview": 118,
+      "afterCancel": 118,
+      "stored": null
+    },
+    "cancelTreatment": {
+      "preview": 174,
+      "afterCancel": 174,
+      "stored": 174
+    },
+    "afterFold": 174,
+    "afterReload": 174
+  },
+  "normalTouch": {
+    "committed": 230,
+    "stored": 230
+  },
+  "clamps": {
+    "minimum": 36,
+    "maximum": 400,
+    "shortWindow": 120
+  },
+  "compact": {
+    "closeBox": {
+      "x": 346,
+      "y": 14,
+      "width": 32,
+      "height": 32
+    },
+    "toggleBox": {
+      "x": 0,
+      "y": 8,
+      "width": 94.125,
+      "height": 44
+    },
+    "closeTabIndex": "0"
+  },
+  "compactFocusedAfterHeader": "sidebar-close",
+  "emptyCompact": {
+    "closeBox": {
+      "x": 247.662841796875,
+      "y": 14,
+      "width": 32,
+      "height": 32
+    },
+    "rows": 0
+  }
+}

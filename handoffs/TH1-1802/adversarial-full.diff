@@ -1,0 +1,1164 @@
+diff --git a/docs/glossary.md b/docs/glossary.md
+index d2c871f74..6f5e163a8 100644
+--- a/docs/glossary.md
++++ b/docs/glossary.md
+@@ -22 +22 @@ Authoritative terminology. UI label wins. Don't invent synonyms; use what's here
+-- **Sidebar items** — The configurable entries of the app sidebar, in two sections. Header: the rows at the head of the sidebar — New workspace, History, Search, Schedules, and plugin header items. Footer: the full-width rows between Add project and the footer icon row — Usage and plugin footer items. Add project and the icon row (Hosts, Help and support, Settings) are fixed and are not sidebar items. A plugin item may render several rows, such as one per bot; it is still one item that moves and hides as a block. Each section's order and visibility is one per-device preference (`AppSettings.sidebarNavItems`, `AppSettings.sidebarFooterItems`); every item may be off. UI: the Header and Footer cards on the Sidebar settings page. Code: `packages/app/src/sidebar-nav/model.ts` resolves a section, and the sidebar (`components/sidebar/sidebar-nav-rows.tsx`, the footer in `components/left-sidebar.tsx`) and the settings page (`screens/settings/sidebar/sidebar-nav-section.tsx`) read it through `useSidebarNavItems(section)`. Never hardcode one of these entries or add a second place that decides which ones show. Don't confuse with **Explorer sidebar**.
++- **Sidebar items** — The configurable entries of the app sidebar, in two sections. Header: the rows at the head of the sidebar — New workspace, History, Search, Schedules, and plugin header items. Footer: the full-width rows between Add project and the footer icon row — Usage and plugin footer items. Add project and the icon row (Hosts, Help and support, Settings) are fixed and are not sidebar items. The header group collapses from its own header, and its rows scroll within a bounded share of the window; `sidebar-nav/group-layout.ts` owns the bound. A plugin item may render several rows, such as one per bot; it is still one item that moves and hides as a block. Each section's order and visibility is one per-device preference (`AppSettings.sidebarNavItems`, `AppSettings.sidebarFooterItems`); every item may be off. UI: the Header and Footer cards on the Sidebar settings page. Code: `packages/app/src/sidebar-nav/model.ts` resolves a section, and the sidebar (`components/sidebar/sidebar-nav-rows.tsx`, the footer in `components/left-sidebar.tsx`) and the settings page (`screens/settings/sidebar/sidebar-nav-section.tsx`) read it through `useSidebarNavItems(section)`. Never hardcode one of these entries or add a second place that decides which ones show. Don't confuse with **Explorer sidebar**.
+diff --git a/packages/app/e2e/browser/sidebar-nav-settings.spec.ts b/packages/app/e2e/browser/sidebar-nav-settings.spec.ts
+index b557b73cc..55da4bc82 100644
+--- a/packages/app/e2e/browser/sidebar-nav-settings.spec.ts
++++ b/packages/app/e2e/browser/sidebar-nav-settings.spec.ts
+@@ -34,0 +35,17 @@ import {
++import {
++  dragNavigationDivider,
++  expectLastNavigationItemReachable,
++  expectNavigationGroupFoldedAway,
++  expectNavigationGroupHeight,
++  expectNavigationGroupScrollsWithinItsShare,
++  expectNavigationGroupShowsItems,
++  expectNavigationGroupTaller,
++  expectTouchNavigationDivider,
++  navigationGroupHeight,
++  toggleNavigationGroup,
++  touchDragNavigationDivider,
++} from "../support/helpers/sidebar-nav-group";
++
++// Short enough that the group's share sits well under the rows' natural height, so the
++// overflow assertion does not ride on a couple of pixels of row padding.
++const SHORT_WINDOW = { width: 1200, height: 240 };
+@@ -106 +123 @@ test("fixed footer line keeps its five icons, Help and Settings at the end", asy
+-test.describe("Sidebar items in Appearance settings", () => {
++test.describe("Sidebar items in settings", () => {
+@@ -199,0 +217,68 @@ test.describe("Sidebar items in Appearance settings", () => {
++test.describe("The sidebar items group", () => {
++  test("owner folds the navigation group away and finds it folded next time", async ({ page }) => {
++    await gotoAppShell(page);
++    await expectNavigationGroupShowsItems(page);
++
++    await toggleNavigationGroup(page);
++    await expectNavigationGroupFoldedAway(page);
++
++    await page.reload();
++    await expectNavigationGroupFoldedAway(page);
++
++    await toggleNavigationGroup(page);
++    await expectNavigationGroupShowsItems(page);
++  });
++
++  test("navigation items scroll in place on a short window", async ({ page }) => {
++    await page.setViewportSize(SHORT_WINDOW);
++    await gotoAppShell(page);
++
++    await expectNavigationGroupScrollsWithinItsShare(page, SHORT_WINDOW.height);
++    await expectLastNavigationItemReachable(page);
++  });
++
++  test("owner drags the navigation group taller and finds it that tall next time", async ({
++    page,
++  }) => {
++    await gotoAppShell(page);
++    await expectNavigationGroupShowsItems(page);
++
++    const startHeight = await dragNavigationDivider(page, 1);
++    const stylesheetRuleCount = () =>
++      page
++        .locator("#unistyles-web")
++        .evaluate((element: HTMLStyleElement) => element.sheet!.cssRules.length);
++    const rulesBeforeDrag = await stylesheetRuleCount();
++    const resizedHeight = await dragNavigationDivider(page, 80);
++    await expectNavigationGroupTaller(page, startHeight);
++    const rulesAfterDrag = await stylesheetRuleCount();
++    await test.info().attach("navigation-resize-stylesheet", {
++      body: JSON.stringify({ startHeight, resizedHeight, rulesBeforeDrag, rulesAfterDrag }),
++      contentType: "application/json",
++    });
++    expect(rulesAfterDrag, "dragging must not retain per-pixel CSS rules").toBe(rulesBeforeDrag);
++
++    await page.reload();
++    await expectNavigationGroupHeight(page, resizedHeight);
++  });
++
++  // A wide window with a coarse pointer: the desktop sidebar, driven by a finger.
++  test.describe("on a touch screen", () => {
++    test.use({ viewport: { width: 1200, height: 800 }, isMobile: true, hasTouch: true });
++
++    test("owner drags the navigation group taller with a finger", async ({ page }) => {
++      await gotoAppShell(page);
++      await expectNavigationGroupShowsItems(page);
++      await expectTouchNavigationDivider(page);
++
++      const startHeight = await navigationGroupHeight(page);
++      await touchDragNavigationDivider(page, 80);
++      await expectNavigationGroupTaller(page, startHeight);
++
++      const resizedHeight = await navigationGroupHeight(page);
++      await page.reload();
++      await expectNavigationGroupHeight(page, resizedHeight);
++    });
++  });
++});
++
+diff --git a/packages/app/e2e/browser/sidebar-workspace.spec.ts b/packages/app/e2e/browser/sidebar-workspace.spec.ts
+index d96f68580..67290d5d8 100644
+--- a/packages/app/e2e/browser/sidebar-workspace.spec.ts
++++ b/packages/app/e2e/browser/sidebar-workspace.spec.ts
+@@ -507 +507,3 @@ test.describe("Mobile sidebar panelState transition", () => {
+-  test("places the close button beside the first nav row instead of over it", async ({ page }) => {
++  test("places the close button in the nav group header instead of over the first row", async ({
++    page,
++  }) => {
+@@ -511,0 +514 @@ test.describe("Mobile sidebar panelState transition", () => {
++    const header = await page.getByTestId("sidebar-nav-group-header").boundingBox();
+@@ -514,2 +517,5 @@ test.describe("Mobile sidebar panelState transition", () => {
+-    if (!firstRow || !closeButton) throw new Error("first nav row and close button must render");
+-    expect(closeButton.x).toBeGreaterThanOrEqual(firstRow.x + firstRow.width);
++    if (!header || !firstRow || !closeButton) {
++      throw new Error("nav header, first nav row and close button must render");
++    }
++    expect(closeButton.x).toBeGreaterThanOrEqual(header.x + header.width);
++    expect(closeButton.y + closeButton.height).toBeLessThanOrEqual(firstRow.y);
+diff --git a/packages/app/e2e/support/helpers/sidebar-nav-group.ts b/packages/app/e2e/support/helpers/sidebar-nav-group.ts
+new file mode 100644
+index 000000000..95caad3ee
+--- /dev/null
++++ b/packages/app/e2e/support/helpers/sidebar-nav-group.ts
+@@ -0,0 +1,133 @@
++import { expect, type Locator, type Page } from "@playwright/test";
++
++// The shell keeps a compact copy of the sidebar mounted, so every lookup takes the
++// visible group and reads the control by its role and name, as a person would.
++function navGroup(page: Page): Locator {
++  return page.locator('[data-testid="sidebar-nav-group"]:visible').first();
++}
++
++function navHeader(page: Page): Locator {
++  return navGroup(page).getByRole("button", { name: "Navigation", exact: true });
++}
++
++function navRows(page: Page): Locator {
++  return navGroup(page).getByTestId("sidebar-nav-group-rows");
++}
++
++export async function toggleNavigationGroup(page: Page): Promise<void> {
++  await navHeader(page).click();
++}
++
++export async function expectNavigationGroupShowsItems(page: Page): Promise<void> {
++  await expect(navHeader(page)).toBeVisible({ timeout: 30_000 });
++  await expect(navHeader(page)).toHaveAttribute("aria-expanded", "true");
++  await expect(
++    page.getByRole("button", { name: "New workspace", exact: true }).first(),
++  ).toBeVisible();
++}
++
++export async function expectNavigationGroupFoldedAway(page: Page): Promise<void> {
++  await expect(navHeader(page)).toBeVisible({ timeout: 30_000 });
++  await expect(navHeader(page)).toHaveAttribute("aria-expanded", "false");
++  await expect(page.locator('[data-testid="sidebar-global-new-workspace"]:visible')).toHaveCount(0);
++}
++
++/** The group scrolls its own rows instead of growing past its share of the window. */
++export async function expectNavigationGroupScrollsWithinItsShare(
++  page: Page,
++  viewportHeight: number,
++): Promise<void> {
++  await expect(navRows(page)).toBeVisible({ timeout: 30_000 });
++  const rows = await navRows(page).evaluate((element) => ({
++    height: element.getBoundingClientRect().height,
++    scrollHeight: element.scrollHeight,
++    clientHeight: element.clientHeight,
++  }));
++  expect(rows.height).toBeLessThanOrEqual(Math.round(viewportHeight / 3));
++  expect(rows.scrollHeight).toBeGreaterThan(rows.clientHeight);
++}
++
++/** The last item is reachable by scrolling, and never escapes the group to do it. */
++export async function expectLastNavigationItemReachable(page: Page): Promise<void> {
++  const lastItem = page.getByRole("button", { name: "Schedules", exact: true }).first();
++  await lastItem.scrollIntoViewIfNeeded();
++  const [itemBox, rowsBox] = await Promise.all([
++    lastItem.boundingBox(),
++    navRows(page).boundingBox(),
++  ]);
++  expect(itemBox).not.toBeNull();
++  expect(rowsBox).not.toBeNull();
++  expect(itemBox!.y + itemBox!.height).toBeLessThanOrEqual(rowsBox!.y + rowsBox!.height + 1);
++}
++
++function navDivider(page: Page): Locator {
++  return navGroup(page).getByRole("separator", { name: "Resize navigation" });
++}
++
++export async function navigationGroupHeight(page: Page): Promise<number> {
++  const box = await navRows(page).boundingBox();
++  expect(box).not.toBeNull();
++  return box!.height;
++}
++
++/** The touch build offers a grab strip rather than the fine pointer's hairline. */
++export async function expectTouchNavigationDivider(page: Page): Promise<void> {
++  const divider = navDivider(page);
++  await expect(divider).toBeVisible({ timeout: 30_000 });
++  const box = await divider.boundingBox();
++  expect(box).not.toBeNull();
++  expect(box!.height).toBeGreaterThan(10);
++}
++
++async function navDividerCentre(page: Page): Promise<{ x: number; y: number }> {
++  const divider = navDivider(page);
++  await expect(divider).toBeVisible({ timeout: 30_000 });
++  const box = await divider.boundingBox();
++  expect(box).not.toBeNull();
++  return { x: box!.x + box!.width / 2, y: box!.y + box!.height / 2 };
++}
++
++/** Drags the divider by `offset` points and answers the height the group ends up at. */
++export async function dragNavigationDivider(page: Page, offset: number): Promise<number> {
++  const startHeight = await navigationGroupHeight(page);
++  const { x, y } = await navDividerCentre(page);
++  await page.mouse.move(x, y);
++  await page.mouse.down();
++  // Several steps: a single jump is one pointermove, which some drag implementations drop.
++  await page.mouse.move(x, y + offset, { steps: 10 });
++  await page.mouse.up();
++  if (offset !== 0) {
++    await expect.poll(() => navigationGroupHeight(page)).not.toBe(startHeight);
++  }
++  return navigationGroupHeight(page);
++}
++
++/** The same drag as a finger makes it: the touch build's Pan sees touch events only. */
++export async function touchDragNavigationDivider(page: Page, offset: number): Promise<void> {
++  const { x, y } = await navDividerCentre(page);
++  const steps = 10;
++  const cdp = await page.context().newCDPSession(page);
++  try {
++    await cdp.send("Input.dispatchTouchEvent", { type: "touchStart", touchPoints: [{ x, y }] });
++    for (let step = 1; step <= steps; step += 1) {
++      await cdp.send("Input.dispatchTouchEvent", {
++        type: "touchMove",
++        touchPoints: [{ x, y: y + (offset * step) / steps }],
++      });
++    }
++    await cdp.send("Input.dispatchTouchEvent", { type: "touchEnd", touchPoints: [] });
++  } finally {
++    await cdp.detach();
++  }
++}
++
++export async function expectNavigationGroupTaller(
++  page: Page,
++  previousHeight: number,
++): Promise<void> {
++  await expect.poll(() => navigationGroupHeight(page)).toBeGreaterThan(previousHeight);
++}
++
++export async function expectNavigationGroupHeight(page: Page, height: number): Promise<void> {
++  await expect.poll(() => navigationGroupHeight(page)).toBeCloseTo(height, 0);
++}
+diff --git a/packages/app/src/components/left-sidebar.tsx b/packages/app/src/components/left-sidebar.tsx
+index 3f5d21815..6f70ee2dc 100644
+--- a/packages/app/src/components/left-sidebar.tsx
++++ b/packages/app/src/components/left-sidebar.tsx
+@@ -407,8 +407 @@ function IconTooltipContent({
+-function SidebarFooter({
+-  handleOpenProject,
+-  handleSettings,
+-  labels,
+-  handleAddHost,
+-  handleOpenHostSettings,
+-  onBeforeNavigate,
+-}: {
++interface SidebarFooterProps {
+@@ -427 +420,12 @@ function SidebarFooter({
+-}) {
++  onHeightChange?: (height: number) => void;
++}
++
++function SidebarFooter({
++  handleOpenProject,
++  handleSettings,
++  labels,
++  handleAddHost,
++  handleOpenHostSettings,
++  onBeforeNavigate,
++  onHeightChange,
++}: SidebarFooterProps) {
+@@ -429,0 +434,10 @@ function SidebarFooter({
++  const lastHeightRef = useRef<number | null>(null);
++  const handleLayout = useCallback(
++    (event: { nativeEvent: { layout: { height: number } } }) => {
++      const height = event.nativeEvent.layout.height;
++      if (!Number.isFinite(height) || height <= 0 || height === lastHeightRef.current) return;
++      lastHeightRef.current = height;
++      onHeightChange?.(height);
++    },
++    [onHeightChange],
++  );
+@@ -434 +448 @@ function SidebarFooter({
+-      <View style={styles.footerContainer} testID="sidebar-footer">
++      <View style={styles.footerContainer} testID="sidebar-footer" onLayout={handleLayout}>
+@@ -540,0 +555 @@ function MobileSidebar({
++  const [footerHeight, setFooterHeight] = useState<number | null>(null);
+@@ -579 +594,2 @@ function MobileSidebar({
+-          firstRowTrailing={closeButton}
++          footerHeight={footerHeight}
++          headerTrailing={closeButton}
+@@ -614,0 +631 @@ function MobileSidebar({
++          onHeightChange={setFooterHeight}
+@@ -648,0 +666 @@ function DesktopSidebar({
++  const [footerHeight, setFooterHeight] = useState<number | null>(null);
+@@ -758 +776 @@ function DesktopSidebar({
+-          <SidebarNavRows style={sidebarHeaderGroupStyle} />
++          <SidebarNavRows style={sidebarHeaderGroupStyle} footerHeight={footerHeight} />
+@@ -791,0 +810 @@ function DesktopSidebar({
++          onHeightChange={setFooterHeight}
+diff --git a/packages/app/src/components/sidebar/sidebar-nav-resize-handle.tsx b/packages/app/src/components/sidebar/sidebar-nav-resize-handle.tsx
+new file mode 100644
+index 000000000..9b00b8d32
+--- /dev/null
++++ b/packages/app/src/components/sidebar/sidebar-nav-resize-handle.tsx
+@@ -0,0 +1,184 @@
++import { useCallback, useMemo, useRef, useState } from "react";
++import { useTranslation } from "react-i18next";
++import { View, type PointerEvent as RNPointerEvent } from "react-native";
++import { Gesture, GestureDetector } from "react-native-gesture-handler";
++import { StyleSheet } from "react-native-unistyles";
++import { isWeb } from "@/constants/platform";
++import { useHasFinePointer } from "@/hooks/use-fine-pointer";
++
++interface SidebarNavResizeHandleProps {
++  height: number;
++  onPreviewHeight: (height: number) => void;
++  onCommitHeight: (height: number) => void;
++}
++
++// Unistyles ViewStyle has no typed cursor; see sidebar-resize-handle.tsx.
++const webRowResizeCursorStyle = { cursor: "row-resize" } as object;
++
++/**
++ * The divider between the sidebar's navigation group and the workspace list.
++ *
++ * A fine pointer drives it with raw pointer events, as the pane splitter does: the
++ * Gesture Handler pan that the sidebar's width handle uses drops a mouse drag that
++ * leaves its 10px strip on the first move. Touch keeps the pan, which is the input it
++ * was written for.
++ */
++export function SidebarNavResizeHandle({
++  height,
++  onPreviewHeight,
++  onCommitHeight,
++}: SidebarNavResizeHandleProps) {
++  const { t } = useTranslation();
++  const finePointer = useHasFinePointer();
++  const startRef = useRef({ pointerY: 0, height: 0 });
++  const pendingRef = useRef<number | null>(null);
++  const [dragging, setDragging] = useState(false);
++  const label = t("sidebar.nav.resize");
++
++  const handlePointerDown = useCallback(
++    (event: RNPointerEvent) => {
++      const target: unknown = event.currentTarget;
++      if (!(target instanceof HTMLElement)) return;
++
++      const pointerId = event.nativeEvent.pointerId;
++      startRef.current = { pointerY: event.nativeEvent.clientY, height };
++      pendingRef.current = null;
++      setDragging(true);
++      event.preventDefault();
++      event.stopPropagation();
++      target.setPointerCapture?.(pointerId);
++
++      const cleanup = () => {
++        setDragging(false);
++        if (target.hasPointerCapture?.(pointerId)) {
++          target.releasePointerCapture(pointerId);
++        }
++        window.removeEventListener("pointermove", handlePointerMove);
++        window.removeEventListener("pointerup", handlePointerUp);
++        window.removeEventListener("pointercancel", handlePointerUp);
++      };
++
++      function handlePointerMove(moveEvent: PointerEvent) {
++        if (moveEvent.pointerId !== pointerId) return;
++        moveEvent.preventDefault();
++        const next = startRef.current.height + (moveEvent.clientY - startRef.current.pointerY);
++        pendingRef.current = next;
++        onPreviewHeight(next);
++      }
++
++      function handlePointerUp(upEvent: PointerEvent) {
++        if (upEvent.pointerId !== pointerId) return;
++        if (pendingRef.current !== null) {
++          onCommitHeight(pendingRef.current);
++          pendingRef.current = null;
++        }
++        cleanup();
++      }
++
++      window.addEventListener("pointermove", handlePointerMove);
++      window.addEventListener("pointerup", handlePointerUp);
++      window.addEventListener("pointercancel", handlePointerUp);
++    },
++    [height, onCommitHeight, onPreviewHeight],
++  );
++
++  const touchGesture = useMemo(
++    () =>
++      Gesture.Pan()
++        .runOnJS(true)
++        .onBegin(() => {
++          startRef.current = { pointerY: 0, height };
++          setDragging(true);
++        })
++        .onUpdate((event) => {
++          const next = startRef.current.height + event.translationY;
++          pendingRef.current = next;
++          onPreviewHeight(next);
++        })
++        .onEnd(() => {
++          if (pendingRef.current !== null) {
++            onCommitHeight(pendingRef.current);
++            pendingRef.current = null;
++          }
++        })
++        .onFinalize(() => setDragging(false)),
++    [height, onCommitHeight, onPreviewHeight],
++  );
++
++  // The pointer path reads `window` and captures on a DOM node, so it is gated on web
++  // rather than on `finePointer` alone.
++  if (isWeb && finePointer) {
++    return (
++      <View
++        role="separator"
++        aria-orientation="horizontal"
++        aria-label={label}
++        testID="sidebar-nav-group-resize-handle"
++        style={[styles.hitArea, webRowResizeCursorStyle]}
++        onPointerDown={handlePointerDown}
++      >
++        {dragging ? <View pointerEvents="none" style={styles.activeLine} /> : null}
++      </View>
++    );
++  }
++
++  return (
++    <GestureDetector gesture={touchGesture}>
++      <View
++        role="separator"
++        aria-orientation="horizontal"
++        aria-label={label}
++        collapsable={false}
++        testID="sidebar-nav-group-resize-handle"
++        style={styles.touchHitArea}
++      >
++        <View pointerEvents="none" style={dragging ? styles.visibleGrip : styles.grip} />
++      </View>
++    </GestureDetector>
++  );
++}
++
++const styles = StyleSheet.create((theme) => ({
++  // Straddles the group's bottom border so the whole edge is the target.
++  hitArea: {
++    position: "absolute",
++    left: 0,
++    right: 0,
++    bottom: -5,
++    height: 10,
++    zIndex: 10,
++    touchAction: "none",
++  },
++  activeLine: {
++    position: "absolute",
++    left: 0,
++    right: 0,
++    top: 4,
++    height: 2,
++    backgroundColor: theme.colors.accent,
++  },
++  touchHitArea: {
++    position: "absolute",
++    left: 0,
++    right: 0,
++    bottom: -12,
++    height: 24,
++    zIndex: 10,
++    alignItems: "center",
++    justifyContent: "center",
++  },
++  grip: {
++    width: 36,
++    height: 4,
++    borderRadius: 2,
++    backgroundColor: theme.colors.foreground,
++    opacity: 0.12,
++  },
++  visibleGrip: {
++    width: 36,
++    height: 4,
++    borderRadius: 2,
++    backgroundColor: theme.colors.foreground,
++    opacity: 0.3,
++  },
++}));
+diff --git a/packages/app/src/components/sidebar/sidebar-nav-rows.tsx b/packages/app/src/components/sidebar/sidebar-nav-rows.tsx
+index 0f7e8c24c..ee9f32e3e 100644
+--- a/packages/app/src/components/sidebar/sidebar-nav-rows.tsx
++++ b/packages/app/src/components/sidebar/sidebar-nav-rows.tsx
+@@ -3 +3,9 @@ import { CalendarClock, History, Plus, Search } from "lucide-react-native";
+-import { memo, useCallback, useMemo, useRef, type ComponentType, type ReactNode } from "react";
++import {
++  memo,
++  useCallback,
++  useMemo,
++  useRef,
++  useState,
++  type ComponentType,
++  type ReactNode,
++} from "react";
+@@ -5 +13,7 @@ import { useTranslation } from "react-i18next";
+-import { View, type StyleProp, type ViewStyle } from "react-native";
++import {
++  ScrollView,
++  useWindowDimensions,
++  View,
++  type StyleProp,
++  type ViewStyle,
++} from "react-native";
+@@ -7,0 +22,3 @@ import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
++import { SidebarNavResizeHandle } from "@/components/sidebar/sidebar-nav-resize-handle";
++import { SidebarSectionHeader } from "@/components/sidebar/sidebar-section-header";
++import { useIsCompactFormFactor } from "@/constants/layout";
+@@ -16,0 +34,4 @@ import {
++import {
++  SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++  resolveSidebarNavGroupHeight,
++} from "@/sidebar-nav/group-layout";
+@@ -20,0 +42,4 @@ import { useWorkspace } from "@/stores/session-store-hooks";
++import { usePanelStore } from "@/stores/panel-store";
++import { density } from "@/styles/density";
++import { inlineUnistylesStyle } from "@/styles/unistyles-inline-style";
++import { useSidebarViewStore } from "@/stores/sidebar-view-store";
+@@ -34,2 +59,3 @@ interface SidebarNavRowsProps extends SidebarNavRowProps {
+-  /** Sits to the right of the first row, which shrinks to make room. */
+-  firstRowTrailing?: ReactNode;
++  footerHeight: number | null;
++  /** Sits at the trailing edge of the group's header, which stays visible when the rows fold or scroll. */
++  headerTrailing?: ReactNode;
+@@ -41 +67,4 @@ interface SidebarNavRowsProps extends SidebarNavRowProps {
+- * wrapper — when every item is hidden and there is no `firstRowTrailing`.
++ * wrapper — when every item is hidden and there is no `headerTrailing`.
++ *
++ * The group folds down to its header on demand and its rows scroll inside a cap,
++ * so plugin contributions never push the workspace list off the sidebar.
+@@ -43 +72,10 @@ interface SidebarNavRowsProps extends SidebarNavRowProps {
+-export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: SidebarNavRowsProps) {
++export function SidebarNavRows({
++  style,
++  onBeforeNavigate,
++  footerHeight,
++  headerTrailing,
++}: SidebarNavRowsProps) {
++  const { t } = useTranslation();
++  const isCompact = useIsCompactFormFactor();
++  const rowHeight = isCompact ? density.rowHeight.xs : density.rowHeight.md;
++  const navigationRowHeight = isCompact ? density.tightRowHeight.xs : density.tightRowHeight.md;
+@@ -45,0 +84,5 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
++  const collapsed = useSidebarViewStore((state) => state.navCollapsed);
++  const toggleCollapsed = useSidebarViewStore((state) => state.toggleNavCollapsed);
++  const storedHeight = usePanelStore((state) => state.sidebarNavHeight);
++  const setStoredHeight = usePanelStore((state) => state.setSidebarNavHeight);
++  const { height: viewportHeight } = useWindowDimensions();
+@@ -47,17 +90,9 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
+-
+-  if (visibleItems.length === 0 && !firstRowTrailing) return null;
+-
+-  const [firstRow, ...restRows] = visibleItems.map((item) => {
+-    if (item.kind === "plugin") {
+-      return (
+-        <PluginSidebarItem
+-          key={item.key}
+-          group={item.group}
+-          section="header"
+-          fallbackAnchorRef={groupRef}
+-          onBeforeNavigate={onBeforeNavigate}
+-        />
+-      );
+-    }
+-    const Row = BUILTIN_ROWS[item.id];
+-    return <Row key={item.key} onBeforeNavigate={onBeforeNavigate} />;
++  const [draggedHeight, setDraggedHeight] = useState<number | null>(null);
++  const requestedHeight = draggedHeight ?? storedHeight;
++  const resolvedFooterHeight = footerHeight ?? SIDEBAR_FOOTER_DEFAULT_HEIGHT;
++  const height = resolveSidebarNavGroupHeight({
++    requestedHeight,
++    viewportHeight,
++    footerHeight: resolvedFooterHeight,
++    rowHeight,
++    navigationRowHeight,
+@@ -64,0 +100,31 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
++  const [measuredHeight, setMeasuredHeight] = useState<number | null>(null);
++  const rowsStyle = useMemo(
++    () => [
++      styles.rows,
++      inlineUnistylesStyle(requestedHeight === null ? { maxHeight: height } : { height }),
++    ],
++    [height, requestedHeight],
++  );
++  const handleRowsLayout = useCallback(
++    (event: { nativeEvent: { layout: { height: number } } }) =>
++      setMeasuredHeight(event.nativeEvent.layout.height),
++    [],
++  );
++  const commitHeight = useCallback(
++    (nextHeight: number) => {
++      setStoredHeight(
++        resolveSidebarNavGroupHeight({
++          requestedHeight: nextHeight,
++          viewportHeight,
++          footerHeight: resolvedFooterHeight,
++          rowHeight,
++          navigationRowHeight,
++        }),
++      );
++      setDraggedHeight(null);
++    },
++    [navigationRowHeight, resolvedFooterHeight, rowHeight, setStoredHeight, viewportHeight],
++  );
++
++  if (visibleItems.length === 0 && !headerTrailing) return null;
++  const showRows = !collapsed && visibleItems.length > 0;
+@@ -67,10 +133,41 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
+-    <View ref={groupRef} collapsable={false} style={style}>
+-      {firstRowTrailing ? (
+-        <View style={styles.firstRow}>
+-          <View style={styles.firstRowItem}>{firstRow}</View>
+-          {firstRowTrailing}
+-        </View>
+-      ) : (
+-        firstRow
+-      )}
+-      {restRows}
++    <View ref={groupRef} collapsable={false} style={style} testID="sidebar-nav-group">
++      <SidebarSectionHeader
++        title={t("sidebar.nav.title")}
++        collapsed={collapsed}
++        onToggle={toggleCollapsed}
++        testID="sidebar-nav-group-header"
++      >
++        {headerTrailing}
++      </SidebarSectionHeader>
++      {showRows ? (
++        <SidebarNavResizeHandle
++          height={measuredHeight ?? height}
++          onPreviewHeight={setDraggedHeight}
++          onCommitHeight={commitHeight}
++        />
++      ) : null}
++      {showRows ? (
++        <ScrollView
++          style={rowsStyle}
++          onLayout={handleRowsLayout}
++          contentContainerStyle={styles.rowsContent}
++          showsVerticalScrollIndicator={false}
++          testID="sidebar-nav-group-rows"
++        >
++          {visibleItems.map((item) => {
++            if (item.kind === "plugin") {
++              return (
++                <PluginSidebarItem
++                  key={item.key}
++                  group={item.group}
++                  section="header"
++                  fallbackAnchorRef={groupRef}
++                  onBeforeNavigate={onBeforeNavigate}
++                />
++              );
++            }
++            const Row = BUILTIN_ROWS[item.id];
++            return <Row key={item.key} onBeforeNavigate={onBeforeNavigate} />;
++          })}
++        </ScrollView>
++      ) : null}
+@@ -195,4 +292,4 @@ const BUILTIN_ROWS: Record<BuiltinSidebarNavId, ComponentType<SidebarNavRowProps
+-const styles = StyleSheet.create({
+-  firstRow: {
+-    flexDirection: "row",
+-    alignItems: "center",
++const styles = StyleSheet.create(() => ({
++  rows: {
++    flexGrow: 0,
++    flexShrink: 1,
+@@ -200,3 +297,3 @@ const styles = StyleSheet.create({
+-  firstRowItem: {
+-    flex: 1,
+-    minWidth: 0,
++  // Same row rhythm the wrapper used before the rows moved inside the scroller.
++  rowsContent: {
++    gap: 2,
+@@ -204 +301 @@ const styles = StyleSheet.create({
+-});
++}));
+diff --git a/packages/app/src/components/sidebar/sidebar-section-header.tsx b/packages/app/src/components/sidebar/sidebar-section-header.tsx
+index 7a959435b..4d82955c2 100644
+--- a/packages/app/src/components/sidebar/sidebar-section-header.tsx
++++ b/packages/app/src/components/sidebar/sidebar-section-header.tsx
+@@ -7 +7 @@ import { useIsCompactFormFactor } from "@/constants/layout";
+-import { isNative } from "@/constants/platform";
++import { isNative, isWeb } from "@/constants/platform";
+@@ -56,0 +57,3 @@ function CollapsibleTitle({
++  // react-native-web does not carry `accessibilityState.expanded` through to the DOM,
++  // so the attribute a screen reader and the e2e suite read is set here.
++  const ariaExpandedProps = isWeb ? ({ "aria-expanded": !collapsed } as const) : null;
+@@ -61,0 +65 @@ function CollapsibleTitle({
++      {...ariaExpandedProps}
+diff --git a/packages/app/src/i18n/resources/ar.ts b/packages/app/src/i18n/resources/ar.ts
+index 16779d95e..ddcaa72de 100644
+--- a/packages/app/src/i18n/resources/ar.ts
++++ b/packages/app/src/i18n/resources/ar.ts
+@@ -1219,0 +1220,4 @@ export const ar: TranslationResources = {
++    nav: {
++      title: "التنقل",
++      resize: "تغيير حجم التنقل",
++    },
+diff --git a/packages/app/src/i18n/resources/en.ts b/packages/app/src/i18n/resources/en.ts
+index 6471b03f6..62c7470b5 100644
+--- a/packages/app/src/i18n/resources/en.ts
++++ b/packages/app/src/i18n/resources/en.ts
+@@ -1227,0 +1228,4 @@ export const en = {
++    nav: {
++      title: "Navigation",
++      resize: "Resize navigation",
++    },
+diff --git a/packages/app/src/i18n/resources/es.ts b/packages/app/src/i18n/resources/es.ts
+index 82ab9e697..32d225395 100644
+--- a/packages/app/src/i18n/resources/es.ts
++++ b/packages/app/src/i18n/resources/es.ts
+@@ -1255,0 +1256,4 @@ export const es: TranslationResources = {
++    nav: {
++      title: "Navegación",
++      resize: "Redimensionar navegación",
++    },
+diff --git a/packages/app/src/i18n/resources/fr.ts b/packages/app/src/i18n/resources/fr.ts
+index 44aae8762..0eb494846 100644
+--- a/packages/app/src/i18n/resources/fr.ts
++++ b/packages/app/src/i18n/resources/fr.ts
+@@ -1249,0 +1250,4 @@ export const fr: TranslationResources = {
++    nav: {
++      title: "Navigation",
++      resize: "Redimensionner la navigation",
++    },
+diff --git a/packages/app/src/i18n/resources/ja.ts b/packages/app/src/i18n/resources/ja.ts
+index baa248aa3..c7cddbc6c 100644
+--- a/packages/app/src/i18n/resources/ja.ts
++++ b/packages/app/src/i18n/resources/ja.ts
+@@ -1233,0 +1234,4 @@ export const ja: TranslationResources = {
++    nav: {
++      title: "ナビゲーション",
++      resize: "ナビゲーションのサイズを変更",
++    },
+diff --git a/packages/app/src/i18n/resources/ko.ts b/packages/app/src/i18n/resources/ko.ts
+index a573ef1ff..876ad78df 100644
+--- a/packages/app/src/i18n/resources/ko.ts
++++ b/packages/app/src/i18n/resources/ko.ts
+@@ -1226,0 +1227,4 @@ export const ko: TranslationResources = {
++    nav: {
++      title: "탐색",
++      resize: "탐색 크기 조절",
++    },
+diff --git a/packages/app/src/i18n/resources/pt-BR.ts b/packages/app/src/i18n/resources/pt-BR.ts
+index 43c32d291..cecd75992 100644
+--- a/packages/app/src/i18n/resources/pt-BR.ts
++++ b/packages/app/src/i18n/resources/pt-BR.ts
+@@ -1245,0 +1246,4 @@ export const ptBR: TranslationResources = {
++    nav: {
++      title: "Navegação",
++      resize: "Redimensionar navegação",
++    },
+diff --git a/packages/app/src/i18n/resources/ru.ts b/packages/app/src/i18n/resources/ru.ts
+index 586ad8595..16a9d852d 100644
+--- a/packages/app/src/i18n/resources/ru.ts
++++ b/packages/app/src/i18n/resources/ru.ts
+@@ -1237,0 +1238,4 @@ export const ru: TranslationResources = {
++    nav: {
++      title: "Навигация",
++      resize: "Изменить размер навигации",
++    },
+diff --git a/packages/app/src/i18n/resources/zh-CN.ts b/packages/app/src/i18n/resources/zh-CN.ts
+index 08bb8491c..019c09b06 100644
+--- a/packages/app/src/i18n/resources/zh-CN.ts
++++ b/packages/app/src/i18n/resources/zh-CN.ts
+@@ -1211,0 +1212,4 @@ export const zhCN: TranslationResources = {
++    nav: {
++      title: "导航",
++      resize: "调整导航大小",
++    },
+diff --git a/packages/app/src/sidebar-nav/group-layout.test.ts b/packages/app/src/sidebar-nav/group-layout.test.ts
+new file mode 100644
+index 000000000..762ca2a89
+--- /dev/null
++++ b/packages/app/src/sidebar-nav/group-layout.test.ts
+@@ -0,0 +1,175 @@
++import { describe, expect, it } from "vitest";
++import {
++  SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++  SIDEBAR_NAV_GROUP_CHROME_RESERVE,
++  SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT,
++  resolveSidebarNavGroupHeight,
++  resolveSidebarNavGroupMaxHeight,
++} from "./group-layout";
++
++describe("resolveSidebarNavGroupMaxHeight", () => {
++  it("caps the group at a third of the window", () => {
++    expect(resolveSidebarNavGroupMaxHeight(900)).toBe(300);
++    expect(resolveSidebarNavGroupMaxHeight(1000)).toBe(333);
++  });
++
++  it("keeps the fraction on the shortest windows the app runs at", () => {
++    expect(resolveSidebarNavGroupMaxHeight(360)).toBe(120);
++    expect(resolveSidebarNavGroupMaxHeight(200)).toBe(67);
++    expect(resolveSidebarNavGroupMaxHeight(108)).toBe(SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT);
++  });
++
++  it("shows one row rather than nothing when the viewport is unusable", () => {
++    expect(resolveSidebarNavGroupMaxHeight(60)).toBe(SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT);
++    expect(resolveSidebarNavGroupMaxHeight(0)).toBe(SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT);
++    expect(resolveSidebarNavGroupMaxHeight(Number.NaN)).toBe(SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT);
++    expect(resolveSidebarNavGroupMaxHeight(Number.POSITIVE_INFINITY)).toBe(
++      SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT,
++    );
++  });
++});
++
++describe("resolveSidebarNavGroupHeight", () => {
++  it("keeps a full compact navigation row when dragged fully up", () => {
++    for (const viewportHeight of [900, 100]) {
++      expect(
++        resolveSidebarNavGroupHeight({
++          requestedHeight: 0,
++          viewportHeight,
++          footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++          rowHeight: 44,
++          navigationRowHeight: 40,
++        }),
++      ).toBe(40);
++    }
++  });
++
++  it("uses the default share until the owner drags the group", () => {
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: null,
++        viewportHeight: 900,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(300);
++  });
++
++  it("honours a dragged height between one row and half the window", () => {
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 480,
++        viewportHeight: 900,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(450);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 120,
++        viewportHeight: 900,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(120);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 10,
++        viewportHeight: 900,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT);
++  });
++
++  it("leaves the sidebar's own chrome room on a short window", () => {
++    // A 200px window can spare 200 minus the header, footer and one workspace row.
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 200,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(200 - SIDEBAR_NAV_GROUP_CHROME_RESERVE);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 900,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(450);
++  });
++
++  it("reserves compact header and workspace row heights when dragging", () => {
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 260,
++        footerHeight: 80,
++      }),
++    ).toBe(108);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 260,
++        footerHeight: 80,
++        rowHeight: 44,
++      }),
++    ).toBe(92);
++  });
++
++  it("shrinks the dragged cap when the measured footer is taller", () => {
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 300,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(150);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 300,
++        footerHeight: 120,
++      }),
++    ).toBe(108);
++  });
++
++  it("never lets the ceiling fall below the default share", () => {
++    // Windows this short have no chrome budget at all, so the default share holds.
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 100,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(resolveSidebarNavGroupMaxHeight(100));
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 60,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(resolveSidebarNavGroupMaxHeight(60));
++  });
++
++  it("falls back to the default share when the height is not a number", () => {
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: Number.NaN,
++        viewportHeight: 600,
++        footerHeight: SIDEBAR_FOOTER_DEFAULT_HEIGHT,
++      }),
++    ).toBe(200);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 200,
++        footerHeight: Number.NaN,
++      }),
++    ).toBe(200 - SIDEBAR_NAV_GROUP_CHROME_RESERVE);
++    expect(
++      resolveSidebarNavGroupHeight({
++        requestedHeight: 900,
++        viewportHeight: 120,
++        footerHeight: -20,
++      }),
++    ).toBe(48);
++  });
++});
+diff --git a/packages/app/src/sidebar-nav/group-layout.ts b/packages/app/src/sidebar-nav/group-layout.ts
+new file mode 100644
+index 000000000..c9f9d5540
+--- /dev/null
++++ b/packages/app/src/sidebar-nav/group-layout.ts
+@@ -0,0 +1,87 @@
++/** Share of the window height the top sidebar group may take before it scrolls. */
++export const SIDEBAR_NAV_GROUP_MAX_HEIGHT_FRACTION = 1 / 3;
++
++/**
++ * One desktop workspace row. Below this the group would show nothing at all, which reads as a
++ * broken sidebar rather than a tight one.
++ */
++export const SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT = 36;
++
++/**
++ * The tallest the top sidebar group's rows may render before they scroll inside the
++ * group, so plugin contributions never push the workspace list off the sidebar.
++ *
++ * The contract is exactly a third of the window at every height the app runs at; the
++ * floor only answers a viewport of a few pixels, which is a measurement artefact
++ * rather than a layout.
++ */
++export function resolveSidebarNavGroupMaxHeight(viewportHeight: number): number {
++  if (!Number.isFinite(viewportHeight) || viewportHeight <= 0) {
++    return SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT;
++  }
++  return Math.max(
++    SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT,
++    Math.round(viewportHeight * SIDEBAR_NAV_GROUP_MAX_HEIGHT_FRACTION),
++  );
++}
++
++/**
++ * The most of the window a dragged group may take. The default share leaves the
++ * workspace list the bulk of the sidebar; dragging past half of it would put the
++ * navigation rows where the workspaces belong.
++ */
++export const SIDEBAR_NAV_GROUP_DRAGGED_MAX_HEIGHT_FRACTION = 1 / 2;
++
++/** The group's own header, `sidebarFooter`, and one workspace row. */
++const SIDEBAR_NAV_GROUP_HEADER_HEIGHT = 36;
++export const SIDEBAR_FOOTER_DEFAULT_HEIGHT = 57;
++
++/**
++ * The sidebar chrome a dragged group has to leave behind. Half of a short window is
++ * more than the sidebar can spare, and the list below would reach zero height.
++ */
++export const SIDEBAR_NAV_GROUP_CHROME_RESERVE =
++  SIDEBAR_NAV_GROUP_HEADER_HEIGHT +
++  SIDEBAR_FOOTER_DEFAULT_HEIGHT +
++  SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT;
++
++/**
++ * The height the group's rows render at: what the owner dragged it to, or the default
++ * share of the window until they drag it.
++ */
++export function resolveSidebarNavGroupHeight(input: {
++  requestedHeight: number | null;
++  viewportHeight: number;
++  footerHeight: number;
++  /** Header and workspace row height reserved below the dragged group. */
++  rowHeight?: number;
++  /** Height of one row inside the navigation group's scroller. */
++  navigationRowHeight?: number;
++}): number {
++  const defaultHeight = resolveSidebarNavGroupMaxHeight(input.viewportHeight);
++  if (input.requestedHeight === null || !Number.isFinite(input.requestedHeight)) {
++    return defaultHeight;
++  }
++  const viewportHeight = Number.isFinite(input.viewportHeight)
++    ? Math.max(input.viewportHeight, 0)
++    : 0;
++  const footerHeight = Number.isFinite(input.footerHeight)
++    ? Math.max(input.footerHeight, 0)
++    : SIDEBAR_FOOTER_DEFAULT_HEIGHT;
++  const rowHeight = input.rowHeight ?? SIDEBAR_NAV_GROUP_HEADER_HEIGHT;
++  const minimum = Math.max(
++    SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT,
++    input.navigationRowHeight ?? SIDEBAR_NAV_GROUP_MIN_MAX_HEIGHT,
++  );
++  // The default share is the floor: dragging may never cost the list more than not
++  // dragging at all, however short the window is.
++  const maximum = Math.max(
++    defaultHeight,
++    minimum,
++    Math.min(
++      Math.round(viewportHeight * SIDEBAR_NAV_GROUP_DRAGGED_MAX_HEIGHT_FRACTION),
++      viewportHeight - (rowHeight * 2 + footerHeight),
++    ),
++  );
++  return Math.min(maximum, Math.max(minimum, Math.round(input.requestedHeight)));
++}
+diff --git a/packages/app/src/stores/panel-store/index.ts b/packages/app/src/stores/panel-store/index.ts
+index 8af964f18..2bdf8935f 100644
+--- a/packages/app/src/stores/panel-store/index.ts
++++ b/packages/app/src/stores/panel-store/index.ts
+@@ -62,0 +63,2 @@ export interface PanelState {
++  /** Height of the sidebar's navigation group; null leaves it at its default share. */
++  sidebarNavHeight: number | null;
+@@ -88,0 +91 @@ export interface PanelState {
++  setSidebarNavHeight: (height: number | null) => void;
+@@ -121,0 +125 @@ export const usePanelStore = create<PanelState>()(
++      sidebarNavHeight: null,
+@@ -232,0 +237 @@ export const usePanelStore = create<PanelState>()(
++      setSidebarNavHeight: (height) => set({ sidebarNavHeight: height }),
+@@ -249,0 +255 @@ export const usePanelStore = create<PanelState>()(
++        sidebarNavHeight: state.sidebarNavHeight,
+diff --git a/packages/app/src/stores/panel-store/state.ts b/packages/app/src/stores/panel-store/state.ts
+index cbbead416..ab8efb5bb 100644
+--- a/packages/app/src/stores/panel-store/state.ts
++++ b/packages/app/src/stores/panel-store/state.ts
+@@ -99,0 +100,3 @@ export const PanelPersistedStateSchema = z.strictObject({
++  // null until the owner drags the sidebar's navigation group, which is not the same
++  // as absent: absent means "never seen this install", null means "left at its default".
++  sidebarNavHeight: z.number().nullable().optional(),
+@@ -158,0 +162,3 @@ export function migratePanelState(persistedState: unknown, version: number): Mig
++  if (typeof state.sidebarNavHeight !== "number") {
++    state.sidebarNavHeight = null;
++  }
+diff --git a/packages/app/src/stores/sidebar-view-store.test.ts b/packages/app/src/stores/sidebar-view-store.test.ts
+index a9e44e146..cf0b13fda 100644
+--- a/packages/app/src/stores/sidebar-view-store.test.ts
++++ b/packages/app/src/stores/sidebar-view-store.test.ts
+@@ -40,0 +41 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -43,0 +45,19 @@ describe("sidebar view store", () => {
++  it("folds the top group down and back up", () => {
++    useSidebarViewStore.getState().toggleNavCollapsed();
++    expect(useSidebarViewStore.getState().navCollapsed).toBe(true);
++
++    useSidebarViewStore.getState().toggleNavCollapsed();
++    expect(useSidebarViewStore.getState().navCollapsed).toBe(false);
++  });
++
++  it("keeps a folded top group across restarts and unfolds state written before it existed", () => {
++    expect(migrateSidebarViewState({ groupMode: "project", navCollapsed: true }).navCollapsed).toBe(
++      true,
++    );
++    expect(migrateSidebarViewState({ groupMode: "status" }).navCollapsed).toBe(false);
++    expect(migrateSidebarViewState({ groupModeByServerId: { a: "status" } }).navCollapsed).toBe(
++      false,
++    );
++    expect(migrateSidebarViewState("garbage").navCollapsed).toBe(false);
++  });
++
+@@ -94,0 +115 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -110,0 +132 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -126,0 +149 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -171,0 +195 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -210,0 +235 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -238,0 +264 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+@@ -249,0 +276 @@ describe("sidebar view store", () => {
++      navCollapsed: false,
+diff --git a/packages/app/src/stores/sidebar-view-store.ts b/packages/app/src/stores/sidebar-view-store.ts
+index 229e95f96..eee1f5890 100644
+--- a/packages/app/src/stores/sidebar-view-store.ts
++++ b/packages/app/src/stores/sidebar-view-store.ts
+@@ -66,0 +67,2 @@ interface SidebarViewStoreState {
++  /** The top group of built-in and plugin rows folded down to its header. */
++  navCollapsed: boolean;
+@@ -68,0 +71 @@ interface SidebarViewStoreState {
++  toggleNavCollapsed: () => void;
+@@ -86,0 +90 @@ interface SidebarViewPersistedState {
++  navCollapsed: boolean;
+@@ -101,0 +106 @@ const SidebarViewPersistedStateSchema = z.strictObject({
++  navCollapsed: z.boolean().optional(),
+@@ -139,0 +145 @@ export function migrateSidebarViewState(persistedState: unknown): SidebarViewPer
++      navCollapsed: false,
+@@ -152,0 +159 @@ export function migrateSidebarViewState(persistedState: unknown): SidebarViewPer
++      navCollapsed: false,
+@@ -164,0 +172 @@ export function migrateSidebarViewState(persistedState: unknown): SidebarViewPer
++    navCollapsed: state.navCollapsed ?? false,
+@@ -201,0 +210 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
++      navCollapsed: false,
+@@ -203,0 +213 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
++      toggleNavCollapsed: () => set((state) => ({ navCollapsed: !state.navCollapsed })),
+@@ -255,0 +266 @@ export const useSidebarViewStore = create<SidebarViewStoreState>()(
++        navCollapsed: state.navCollapsed,

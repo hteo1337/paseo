@@ -1,1 +1,1 @@
-Pre-existing macOS Ctrl+O/Ctrl+N assertions render ⌘O/⌘N: both fail on unchanged production source too; no worker blocker, unrelated fixes excluded. Lead owns exact-head reviewer confirmation, required adversarial review, CI and PR finalization.
+No operator blocker; adversarial review complete with no new confirmed defect. The one-row legacy runtime check was not established because the diagnostic retained folded state; no rerun under the test cap. Lead owns CI and PR finalization.
