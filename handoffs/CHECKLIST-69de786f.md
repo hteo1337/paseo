@@ -10,6 +10,6 @@ PASEO_AGENT_ID is unset (checked in session); filename uses dispatcher task 69de
 
 ## Reversible blocker follow-up
 
-- [x] Resolve continuation scope through Hermes and record decision without claiming implementation-branch authority. Evidence: Hermes permits local preparation/validation advice, escalates patch publication; publication stays pending.
+- [x] Resolve continuation scope through Hermes and record decision without claiming implementation-branch authority. Evidence: Hermes escalated publication; lead explicitly resolved keep-local/no-PR-write.
 - [x] Prepare a minimal applyable fix patch and validate the existing failing probe once with bounded workers; restore reviewed source afterward. Evidence: local-fix-evidence.json registry67→67 vs original67→187; one probe passed27.8s; app typecheck/lint0; git apply --check passes; production source restored.
-- [ ] Resolve publication approval, then publish patch/evidence if approved or preserve locally if declined; keep authorized issue handoff pushed. (in progress; structured question pending)
+- [x] Resolve publication approval, then publish patch/evidence if approved or preserve locally if declined; keep authorized issue handoff pushed. Evidence: lead explicitly chose keep-local and stop; all five patch/evidence files remain untracked; prior handoff push f9b235ac9 verified; final decision recorded here.
