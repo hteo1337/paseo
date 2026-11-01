@@ -1,0 +1,45 @@
+diff --git a/packages/protocol/src/messages.ts b/packages/protocol/src/messages.ts
+index 490cadcf7..36f9b1a19 100644
+--- a/packages/protocol/src/messages.ts
++++ b/packages/protocol/src/messages.ts
+@@ -3778,6 +3778,13 @@ export const ServerInfoStatusPayloadSchema = z
+     serverId: z.string().trim().min(1),
+     hostname: ServerInfoHostnameSchema.optional(),
+     version: ServerInfoVersionSchema.optional(),
++    buildIdentity: z
++      .object({
++        version: z.string().min(1),
++        seriesHash: z.string().regex(/^[0-9a-f]{16}$/),
++        sourceHead: z.string().regex(/^[0-9a-f]{40}$/),
++      })
++      .optional(),
+     // Authenticated producer for host registration ownership, separate from admission authority.
+     sourceId: z.string().optional(),
+     // COMPAT(sessionPermissions): optional while clients support older daemons.
+diff --git a/packages/server/src/server/websocket-server.ts b/packages/server/src/server/websocket-server.ts
+index a5dc758ce..e013eb100 100644
+--- a/packages/server/src/server/websocket-server.ts
++++ b/packages/server/src/server/websocket-server.ts
+@@ -21,6 +21,7 @@ import { WebSocket, WebSocketServer } from "ws";
+ import type { IncomingMessage, Server as HTTPServer } from "http";
+ import { join } from "path";
+ import { getHostName } from "./host-name.js";
++import { readLocalBuildIdentity } from "./build-identity.js";
+ import { randomUUID } from "node:crypto";
+ import { monitorEventLoopDelay } from "node:perf_hooks";
+ import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
+@@ -1963,12 +1964,14 @@ export class VoiceAssistantWebSocketServer {
+   }
+ 
+   private buildServerInfoStatusPayload(session: Session): ServerInfoStatusPayload {
++    const buildIdentity = readLocalBuildIdentity(this.daemonVersion);
+     return {
+       status: "server_info",
+       protocolVersion: WS_PROTOCOL_VERSION,
+       serverId: this.serverId,
+       hostname: getHostName(),
+       version: this.daemonVersion,
++      ...(buildIdentity ? { buildIdentity } : {}),
+       sourceId: session.getHostSourceId(),
+       permissions: session.getPermissions(),
+       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.

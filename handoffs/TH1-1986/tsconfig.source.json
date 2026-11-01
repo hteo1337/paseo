@@ -1,0 +1,15 @@
+{
+  "extends": "../../packages/server/tsconfig.server.typecheck.json",
+  "compilerOptions": {
+    "customConditions": ["source"],
+    "paths": {
+      "@server/*": ["../../packages/server/src/*"],
+      "@getpaseo/protocol/*": ["../../packages/protocol/src/*.ts", "../../packages/protocol/src/*/index.ts"],
+      "@getpaseo/relay": ["../../packages/relay/src/index.ts"],
+      "@getpaseo/relay/*": ["../../packages/relay/src/*.ts"],
+      "@getpaseo/client": ["../../packages/client/src/index.ts"],
+      "@getpaseo/client/node": ["../../packages/client/src/node/index.ts"],
+      "@getpaseo/client/internal/*": ["../../packages/client/src/*.ts", "../../packages/client/src/*/index.ts"]
+    }
+  }
+}
