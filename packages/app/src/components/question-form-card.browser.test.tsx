@@ -184,6 +184,7 @@ function mountQuestions(questions: Record<string, unknown>[]) {
         permission={buildPermission(questions)}
         onRespond={onRespond}
         isResponding={false}
+        responseError={null}
       />,
     ),
   );
