@@ -1715,7 +1715,7 @@ export class ClaudeAgentClient implements AgentClient {
       );
       discoveredModelIds = new Set(
         advertisedModels
-          .map((model) => normalizeClaudeRuntimeModelId(model.resolvedModel ?? model.value))
+          .map((model) => resolveObservedClaudeModelId(model.resolvedModel ?? model.value))
           .filter((id): id is string => id !== null),
       );
     } catch (error) {
