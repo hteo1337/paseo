@@ -25,7 +25,12 @@ export interface GhostSuggestion {
 export interface DesktopKeyPressContext<TInput, TPayload> {
   ghostSuggestion: GhostSuggestion | null;
   onKeyPressCallback:
-    | ((event: { key: string; hasModifier: boolean; preventDefault: () => void; input: TInput }) => boolean)
+    | ((event: {
+        key: string;
+        hasModifier: boolean;
+        preventDefault: () => void;
+        input: TInput;
+      }) => boolean)
     | undefined;
   input: TInput;
   submitOnEnter: boolean;
@@ -48,7 +53,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
   if (ctx.onKeyPressCallback) {
     const handled = ctx.onKeyPressCallback({
       key: event.nativeEvent.key,
-      hasModifier: Boolean(event.nativeEvent.shiftKey || event.nativeEvent.metaKey || event.nativeEvent.ctrlKey || event.nativeEvent.altKey),
+      hasModifier: hasKeyModifier(event),
       preventDefault: () => event.preventDefault(),
       input: ctx.input,
     });
@@ -60,8 +65,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
   // The ghost only claims a key the autocomplete above has already declined, and
   // its Enter answers to the same guard as an ordinary send.
   if (ctx.ghostSuggestion && !metaKey && !ctrlKey && !shiftKey) {
-    const canSubmit =
-      ctx.submitOnEnter && ctx.sendShortcut !== "mod-enter" && !ctx.isSubmitDisabled && !ctx.isSubmitLoading && !ctx.disabled;
+    const canSubmit = canSubmitGhost(ctx);
     if (handleGhostKey(event, ctx.ghostSuggestion, canSubmit)) return;
   }
 
@@ -73,7 +77,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
     metaKey: metaKey ?? false,
     ctrlKey: ctrlKey ?? false,
     isAgentRunning: ctx.isAgentRunning,
-    onQueue: ctx.onQueue,
+    onQueue: ctx.onQueue ? () => {} : undefined,
   });
   if (action === null || ctx.isSubmitDisabled || ctx.isSubmitLoading || ctx.disabled) return;
   event.preventDefault();
@@ -103,4 +107,19 @@ function handleGhostKey(
     default:
       return false;
   }
+}
+
+function canSubmitGhost<TInput, TPayload>(ctx: DesktopKeyPressContext<TInput, TPayload>): boolean {
+  return (
+    ctx.submitOnEnter &&
+    ctx.sendShortcut !== "mod-enter" &&
+    !ctx.isSubmitDisabled &&
+    !ctx.isSubmitLoading &&
+    !ctx.disabled
+  );
+}
+
+function hasKeyModifier(event: DesktopKeyEvent): boolean {
+  const key = event.nativeEvent;
+  return Boolean(key.shiftKey || key.metaKey || key.ctrlKey || key.altKey);
 }
