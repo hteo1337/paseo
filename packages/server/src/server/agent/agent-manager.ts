@@ -253,7 +253,7 @@ function formatProviderList(providers: readonly string[]): string {
   return providers.length > 0 ? providers.join(", ") : "none";
 }
 
-function nullableHookValue(value: string | null | undefined): string | null {
+function nullableHookValue<T>(value: T | null | undefined): T | null {
   return value ?? null;
 }
 
@@ -1624,9 +1624,9 @@ export class AgentManager {
       {
         reason: "create",
         purpose: "interactive",
-        workspaceId: options.workspaceId ?? null,
-        model: storedConfig.model ?? null,
-        title: storedConfig.title ?? options.initialTitle ?? null,
+        workspaceId: nullableHookValue(options.workspaceId),
+        model: nullableHookValue(storedConfig.model),
+        title: storedConfig.title ?? nullableHookValue(options.initialTitle),
         background: options.background,
         metadata: options.metadata ?? {},
         labels: options.labels ?? {},
@@ -1641,13 +1641,13 @@ export class AgentManager {
     try {
       openedInfo = await this.checkOpenedSession(session, {
         agentId: resolvedAgentId,
-        workspaceId: options.workspaceId ?? null,
+        workspaceId: nullableHookValue(options.workspaceId),
         provider: storedConfig.provider,
         cwd: storedConfig.cwd,
         reason: "create",
         purpose: "interactive",
-        model: storedConfig.model ?? null,
-        title: storedConfig.title ?? options.initialTitle ?? null,
+        model: nullableHookValue(storedConfig.model),
+        title: storedConfig.title ?? nullableHookValue(options.initialTitle),
       });
     } catch (error) {
       await this.closeUnregisteredSession(session);
@@ -1776,9 +1776,9 @@ export class AgentManager {
       );
     }
     this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
-    const workspaceId = options?.workspaceId ?? null;
-    const model = storedConfig.model ?? null;
-    const title = overrides?.title ?? record?.title ?? storedConfig.title ?? null;
+    const workspaceId = nullableHookValue(options?.workspaceId);
+    const model = nullableHookValue(storedConfig.model);
+    const title = overrides?.title ?? record?.title ?? nullableHookValue(storedConfig.title);
     const launchContext = await this.buildLaunchContext(
       resolvedAgentId,
       client,
@@ -3330,6 +3330,10 @@ export class AgentManager {
     });
   }
 
+  private foregroundTurnSource(agent: ManagedAgent, options?: AgentRunOptions) {
+    return options?.source ?? (agent.internal ? "internal" : "prompt");
+  }
+
   private async startPendingForegroundTurn(params: {
     agent: ActiveManagedAgent;
     agentId: string;
@@ -3348,10 +3352,7 @@ export class AgentManager {
         try {
           await this.pluginLifecycle.before(
             "agent.turn_start",
-            await this.buildTurnStartRequest(
-              agent,
-              options?.source ?? (agent.internal ? "internal" : "prompt"),
-            ),
+            await this.buildTurnStartRequest(agent, this.foregroundTurnSource(agent, options)),
           );
         } catch (error) {
           throw new TurnStartRefusal(policyErrorMessage(error));
@@ -4926,7 +4927,7 @@ export class AgentManager {
         config,
       ),
       historyPrimed: options?.historyPrimed ?? durableTimelineHasRows,
-      lastUserMessageAt: options?.lastUserMessageAt ?? null,
+      lastUserMessageAt: nullableHookValue(options?.lastUserMessageAt),
       lastUsage: options?.lastUsage,
       lastError: options?.lastError,
       attention: resolveInitialAttention(options?.attention),
@@ -6955,11 +6956,11 @@ export class AgentManager {
         agentId,
         provider: client.provider,
         cwd,
-        workspaceId: opening?.workspaceId ?? null,
+        workspaceId: nullableHookValue(opening?.workspaceId),
         reason: opening?.reason ?? "resume",
         purpose: opening?.purpose ?? "interactive",
-        model: opening?.model ?? null,
-        title: opening?.title ?? null,
+        model: nullableHookValue(opening?.model),
+        title: nullableHookValue(opening?.title),
         env: { ...env },
         background: opening?.background === true,
         ...agentEntityData(opening),

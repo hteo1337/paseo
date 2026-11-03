@@ -1,3 +1,4 @@
+// oxlint-disable-next-line paseo/no-sync-io -- Busy checks must not yield between identity lookup and archive admission.
 import { realpathSync } from "node:fs";
 import path from "node:path";
 import type { Logger } from "pino";

@@ -9266,6 +9266,14 @@ export class Session {
     return this.supportsForSource(CLIENT_CAPS.promptSuggestions, source);
   }
 
+  private subscriptionSourceUnderstandsEvent(
+    message: SessionOutboundMessage,
+    source: object,
+    onlySource?: object,
+  ): boolean {
+    return (!onlySource || source === onlySource) && this.sourceUnderstandsEvent(message, source);
+  }
+
   private emitSubscribedEvent(message: SessionOutboundMessage, onlySource?: object): boolean {
     const event = sessionEventCategory(message);
     if (!event) return false;
@@ -9280,9 +9288,7 @@ export class Session {
             CLIENT_CAPS.workspaceSetupObservation,
             subscription.owner.source,
           )) ||
-        (onlySource && subscription.owner.source !== onlySource)
- ||
-        !this.sourceUnderstandsEvent(message, subscription.owner.source)
+        !this.subscriptionSourceUnderstandsEvent(message, subscription.owner.source, onlySource)
       )
         continue;
       this.emitEventToOwner(subscription, message, notified);

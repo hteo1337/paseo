@@ -2193,6 +2193,9 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             textInputStyle={textInputStyle}
             readOnlyTextStyle={readOnlyTextStyle}
             placeholder={ghostPresentation.placeholder}
+            ghostSuggestion={ghostPresentation.suggestion}
+            ghostHintVisible={ghostPresentation.hintVisible}
+            onGhostRowWidth={setGhostRowWidth}
             accessibilityLabel={t(mode.accessibilityLabelKey)}
             onChangeText={handleInputChange}
             onFocus={handleInputFocus}
@@ -2207,7 +2210,15 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
             fullscreen={isFullscreen}
             compact={isCompact}
             onRenderedLinesChange={setRenderedLines}
-            focusHintVisible={!isFullscreen && isWeb && !isInputFocused && !hasLiveText}
+            focusHintVisible={
+              !isFullscreen &&
+              shouldShowFocusHint({
+                isWeb,
+                isInputFocused,
+                hasValue: hasLiveText,
+                hasGhost: Boolean(ghostPresentation.suggestion),
+              })
+            }
             focusInputKeys={focusInputKeys}
             focusHintLabel={t("composer.input.focusHint", {
               shortcut: focusInputKeys ? formatShortcut(focusInputKeys[0], getShortcutOs()) : "",
@@ -2221,7 +2232,6 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
         assignTextInput,
         textInputStyle,
         readOnlyTextStyle,
-        placeholder,
         ghostPresentation.placeholder,
         ghostPresentation.suggestion,
         ghostPresentation.hintVisible,

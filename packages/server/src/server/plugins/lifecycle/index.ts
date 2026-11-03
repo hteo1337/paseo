@@ -266,24 +266,6 @@ export function publishAgentStream(
   }
 }
 
-type SessionOpenRequest = z.infer<(typeof beforeSchemas)["agent.open.before"]>;
-
-// Omitted `background` and `metadata` mean unchanged, so a hook returning its own object keeps working.
-function changesSessionOpenTarget(previous: SessionOpenRequest, next: SessionOpenRequest): boolean {
-  return (
-    previous.agentId !== next.agentId ||
-    previous.workspaceId !== next.workspaceId ||
-    previous.provider !== next.provider ||
-    previous.cwd !== next.cwd ||
-    previous.reason !== next.reason ||
-    previous.purpose !== next.purpose ||
-    previous.title !== next.title ||
-    (next.background !== undefined && previous.background !== next.background) ||
-    !isDeepStrictEqual(previous.labels, next.labels) ||
-    (next.metadata !== undefined && !isDeepStrictEqual(previous.metadata, next.metadata))
-  );
-}
-
 export async function validateBeforeResult<Name extends keyof PluginWireBeforeRequests>(
   name: Name,
   input: PluginWireBeforeRequests[Name],
@@ -313,11 +295,12 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
   if (name === "agent.open.before") {
     const previous = beforeSchemas["agent.open.before"].parse(input);
     const next = beforeSchemas["agent.open.before"].parse(result);
-    if (changesSessionOpenTarget(previous, next) || previous.model !== next.model) {
+    if (!sameSessionOpenIdentity(previous, { ...next, background: next.background ?? previous.background, metadata: next.metadata ?? previous.metadata })) {
       throw new Error("agent.open.before hooks can only change env, tools, and mcpServers");
     }
     return { ...result, background: previous.background, metadata: previous.metadata };
   }
+
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);
     const next = beforeSchemas["agent.create.before"].parse(result);
@@ -475,4 +458,13 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
       this.changed();
     };
   }
+}
+
+function sameSessionOpenIdentity(
+  previous: SessionOpenWireRequest,
+  next: SessionOpenWireRequest,
+): boolean {
+  const { env: _oldEnv, tools: _oldTools, mcpServers: _oldMcp, ...oldIdentity } = previous;
+  const { env: _newEnv, tools: _newTools, mcpServers: _newMcp, ...newIdentity } = next;
+  return isDeepStrictEqual(oldIdentity, newIdentity);
 }
