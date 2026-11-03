@@ -67,6 +67,20 @@ export function createTestRegistries() {
     listAll: async () => Array.from(workspaces.values()),
     listActive: async () => Array.from(workspaces.values()).filter((w) => !w.archivedAt),
     get: async (id: string) => workspaces.get(id) ?? null,
+    getOrCreateActiveByCwd: async (record, context) => {
+      const existing = Array.from(workspaces.values()).find(
+        (candidate) =>
+          !candidate.archivedAt &&
+          candidate.cwd === record.cwd &&
+          candidate.background === record.background,
+      );
+      if (existing) {
+        if (context?.rehomeProjectId) existing.projectId = context.rehomeProjectId;
+        return { workspace: existing, created: false };
+      }
+      workspaces.set(record.workspaceId, record);
+      return { workspace: record, created: true };
+    },
     update: async (id, updater) => {
       const existing = workspaces.get(id);
       if (!existing) return null;
