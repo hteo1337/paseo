@@ -175,21 +175,13 @@ async function archiveByScopeWithPriority(
     const storedRecordsByWorkspace = request.abortIf
       ? new Map<string, StoredAgentRecord[]>()
       : undefined;
-    if (storedRecordsByWorkspace) {
-      for (const workspaceId of targetWorkspaceIds) {
-        storedRecordsByWorkspace.set(
-          workspaceId,
-          await listStoredAgentRecords(dependencies, workspaceId, Boolean(request.holdNewRuns)),
-        );
-      }
-      const storedAbort = abortForNonClosedStoredAgents(
-        storedRecordsByWorkspace,
-        Boolean(request.holdNewRuns),
-      );
-      if (storedAbort) return storedAbort;
-      const lateAbort = archiveAbortResult(request.abortIf?.());
-      if (lateAbort) return lateAbort;
-    }
+    const storedAbort = await preflightStoredArchive(
+      dependencies,
+      request,
+      targetWorkspaceIds,
+      storedRecordsByWorkspace,
+    );
+    if (storedAbort) return storedAbort;
 
     // Once teardown starts, cancellation commits to completion.
     const { archivedAgents, archivedWorkspaceIds, deferredByAgentIds } = await archiveTargetRecords(
@@ -249,6 +241,31 @@ async function archiveByScopeWithPriority(
       releaseRunHold?.();
     }
   }
+}
+
+async function preflightStoredArchive(
+  dependencies: ArchiveDependencies,
+  request: ArchiveByScopeRequest,
+  targetWorkspaceIds: string[],
+  storedRecordsByWorkspace: Map<string, StoredAgentRecord[]> | undefined,
+): Promise<ArchiveResult | null> {
+  if (storedRecordsByWorkspace) {
+    for (const workspaceId of targetWorkspaceIds) {
+      storedRecordsByWorkspace.set(
+        workspaceId,
+        await listStoredAgentRecords(dependencies, workspaceId, Boolean(request.holdNewRuns)),
+      );
+    }
+    const storedAbort = abortForNonClosedStoredAgents(
+      storedRecordsByWorkspace,
+      Boolean(request.holdNewRuns),
+    );
+    if (storedAbort) return storedAbort;
+    const lateAbort = archiveAbortResult(request.abortIf?.());
+    if (lateAbort) return lateAbort;
+  }
+
+  return null;
 }
 
 function archiveAbortResult(
