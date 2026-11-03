@@ -462,3 +462,114 @@ npm notice run 'vitest' run src/server/agent/create-agent/create.test.ts --bail=
 ```
 
 `git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/0073*.patch` — exit 128. [Exact output](evidence/TH1-2314-0073.log).
+
+## Phase 2 resumed at 0051; mandated stop at cascade 0064 (2026-11-04)
+
+Lead accepted deferring all of 0073 (both messages unchanged) until after 0025/0059 and verified its cross-root dependencies. The prior ordering blocker is resolved. New blockers are reported in the conversation, without async questions.
+
+0051's initial `git am -3` merged production changes but found a modify/delete conflict for scripts/repair-duplicate-workspaces.py because clean prerequisite patches 0049/0050 were not replayed. Aborted, replayed 0049 and 0050, retried 0051: all clean, no hand resolution. 0054's initial attempt likewise found the missing 0052 rehome script plus workspace context conflicts. Aborted; replayed clean workspace prerequisites 0036/0037/0046/0047/0048/0052/0053, then retried 0054: all clean. This fills omitted clean prerequisites while preserving the lead's conflict-root order (0051 then 0054). No roots pulled forward. Original patch subjects retained.
+
+`git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/0064*.patch` still conflicts after 0020, 0051 and 0054 have landed. Per the explicit cascade-stop rule, **no resolution attempted**. The only conflicted file is packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts, in the internal-agent-mid-teardown fixture. Our verified v0.15 adaptation injects at private drainSessionEvents (internal sessions are not persisted); 0064 replaces the obsolete applySnapshot spy with getLastAssistantMessage. The production hunks auto-merged. Saved the exact conflict, then `git am --abort` restored source HEAD **6a72342a1** (0054). No 0064 hunks retained. No keeper or later root started. Recommend retaining the already-tested drain seam when the lead authorizes resolving this cascade.
+
+### Checkpoint verification is RED; phase-1 evidence remains valid for its earlier head
+
+Inspected and checked the current applied-patch artifacts; clean application did not imply compile success. Ran npm run build:server (exit 2), npm_config_userconfig=/dev/null npm run typecheck (exit 2), npm run lint (exit 1), and the targeted three-file workspace test batch (exit 1). Did not modify code after the mandated 0064 stop, exclude tests, suppress these failures, or claim the checkpoint passes. Exact output is preserved below. No pre-existing/regression/flake classification is made and no baseline is claimed.
+
+Current drift to reconcile on resumption:
+
+- Protocol workspace snapshot and Session workspace payload have duplicate createdAt properties after clean replay.
+- bootstrap passes four arguments to the upstream workspace-provisioning API; CLI project delete/workspace archive pass three arguments to upstream client methods accepting one or two. Client declarations cannot be treated as refreshed because the owning protocol build failed first.
+- Reconciliation test fixture lacks newly required getOrCreateActiveByCwd.
+- Lint: two synchronous-IO imports in workspace provisioning, archiveByScopeWithPriority complexity 21, and duplicate createdAt in two files (5 errors total).
+- First executed workspace test file fails the existing background inheritance/visibility assertion at workspace-provisioning-service.test.ts:323 (visible.background expected false, received true). Batch bailed with 4 passed / 1 failed; the two remaining files were not fully run. No retry/exclusion. Preserve upstream background behavior when repairing this cluster.
+
+No review agent/task, PR, export, updater/bundle edits, Electron build, installation, restart, or upstream push. Handoff commit is documentation-only and explicitly skips the already-failed typecheck hook, keeping Markdown format checks enabled; source patch commits remain unchanged. This is a WIP checkpoint, not a verification gate.
+
+### Replay commands and exact outputs
+
+Each numbered attempt used `git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/NNNN*.patch` with NNNN as below; failed attempts were inspected and aborted before replaying prerequisites.
+
+0051-first: exit 128. [Exact output](evidence/TH1-2314-0051-first.log).
+
+0049: exit 0. [Exact output](evidence/TH1-2314-0049.log).
+
+0050: exit 0. [Exact output](evidence/TH1-2314-0050.log).
+
+0051: exit 0. [Exact output](evidence/TH1-2314-0051.log).
+
+0054-first: exit 128. [Exact output](evidence/TH1-2314-0054-first.log).
+
+0036: exit 0. [Exact output](evidence/TH1-2314-0036.log).
+
+0037: exit 0. [Exact output](evidence/TH1-2314-0037.log).
+
+0046: exit 0. [Exact output](evidence/TH1-2314-0046.log).
+
+0047: exit 0. [Exact output](evidence/TH1-2314-0047.log).
+
+0048: exit 0. [Exact output](evidence/TH1-2314-0048.log).
+
+0052: exit 0. [Exact output](evidence/TH1-2314-0052.log).
+
+0053: exit 0. [Exact output](evidence/TH1-2314-0053.log).
+
+0054: exit 0. [Exact output](evidence/TH1-2314-0054.log).
+
+0064: exit 128. [Exact output](evidence/TH1-2314-0064.log).
+
+Exact combined conflict (recorded before abort):
+
+```diff
+diff --cc packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+index ca3ddfcfd,b9311d587..000000000
+--- a/packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
++++ b/packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+@@@ -1019,12 -1021,9 +1021,24 @@@ describe("archiveIfSafe", () =>
+        { workspaceId },
+      );
+
+++<<<<<<< HEAD
+ +    // v0.15 never writes internal agents to storage. Inject at the real close
+ +    // drain, which is shared by internal and durable sessions.
+ +    const runtime = manager as unknown as { drainSessionEvents(id: string): Promise<void> };
+ +    const drain = runtime.drainSessionEvents.bind(runtime);
+++||||||| constructed fake ancestor
+++    const applySnapshot = storage.applySnapshot.bind(storage);
+++=======
++     const getLastAssistantMessage = manager.getLastAssistantMessage.bind(manager);
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+      let armed = true;
+++<<<<<<< HEAD
+ +    vi.spyOn(runtime, "drainSessionEvents").mockImplementation(async (id) => {
+++||||||| constructed fake ancestor
+++    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+++=======
++     vi.spyOn(manager, "getLastAssistantMessage").mockImplementation(async (...args) => {
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+        if (armed) {
+          armed = false;
+          client.sessions[0]?.push({
+@@@ -1033,7 -1032,7 +1047,13 @@@
+            turnId: "autonomous",
+          } as AgentStreamEvent);
+        }
+++<<<<<<< HEAD
+ +      return drain(id);
+++||||||| constructed fake ancestor
+++      return applySnapshot(...args);
+++=======
++       return getLastAssistantMessage(...args);
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+      });
+
+      const options = {
+
+```
+
+`npm run build:server` — exit 2. [Exact output](evidence/TH1-2314-build54.log).
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 2. [Exact output](evidence/TH1-2314-typecheck54.log).
+
+`npm run lint` — exit 1. [Exact output](evidence/TH1-2314-lint54.log).
+
+`(cd packages/server && npx vitest run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts src/server/workspace-archive-service.test.ts --bail=1)` — exit 1. [Exact output](evidence/TH1-2314-tests54.log).

@@ -1,0 +1,43 @@
+diff --cc packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+index ca3ddfcfd,b9311d587..000000000
+--- a/packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
++++ b/packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+@@@ -1019,12 -1021,9 +1021,24 @@@ describe("archiveIfSafe", () => 
+        { workspaceId },
+      );
+  
+++<<<<<<< HEAD
+ +    // v0.15 never writes internal agents to storage. Inject at the real close
+ +    // drain, which is shared by internal and durable sessions.
+ +    const runtime = manager as unknown as { drainSessionEvents(id: string): Promise<void> };
+ +    const drain = runtime.drainSessionEvents.bind(runtime);
+++||||||| constructed fake ancestor
+++    const applySnapshot = storage.applySnapshot.bind(storage);
+++=======
++     const getLastAssistantMessage = manager.getLastAssistantMessage.bind(manager);
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+      let armed = true;
+++<<<<<<< HEAD
+ +    vi.spyOn(runtime, "drainSessionEvents").mockImplementation(async (id) => {
+++||||||| constructed fake ancestor
+++    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+++=======
++     vi.spyOn(manager, "getLastAssistantMessage").mockImplementation(async (...args) => {
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+        if (armed) {
+          armed = false;
+          client.sessions[0]?.push({
+@@@ -1033,7 -1032,7 +1047,13 @@@
+            turnId: "autonomous",
+          } as AgentStreamEvent);
+        }
+++<<<<<<< HEAD
+ +      return drain(id);
+++||||||| constructed fake ancestor
+++      return applySnapshot(...args);
+++=======
++       return getLastAssistantMessage(...args);
+++>>>>>>> fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+      });
+  
+      const options = {

@@ -1,0 +1,13 @@
+Applying: fix(server): guard duplicate workspace repair archives
+Using index info to reconstruct a base tree...
+M	packages/client/src/daemon-client.ts
+M	packages/protocol/src/messages.ts
+M	packages/server/src/server/session.ts
+M	packages/server/src/server/workspace-archive-record-scoped.e2e.test.ts
+M	packages/server/src/server/workspace-archive-service.ts
+Falling back to patching base and 3-way merge...
+Auto-merging packages/client/src/daemon-client.ts
+Auto-merging packages/protocol/src/messages.ts
+Auto-merging packages/server/src/server/session.ts
+Auto-merging packages/server/src/server/workspace-archive-record-scoped.e2e.test.ts
+Auto-merging packages/server/src/server/workspace-archive-service.ts

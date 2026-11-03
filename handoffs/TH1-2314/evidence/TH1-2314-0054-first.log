@@ -1,0 +1,40 @@
+Applying: fix(workspaces): preserve shared import and project state
+Using index info to reconstruct a base tree...
+M	packages/server/src/server/session.test.ts
+M	packages/server/src/server/session.ts
+M	packages/server/src/server/session.workspaces.test.ts
+M	packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+M	packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts
+M	packages/server/src/server/workspace-archive-service.test.ts
+M	packages/server/src/server/workspace-archive-service.ts
+M	packages/server/src/server/workspace-registry.test.ts
+M	packages/server/src/server/workspace-registry.ts
+A	scripts/rehome-worktree-projects.py
+Falling back to patching base and 3-way merge...
+Auto-merging packages/server/src/server/session.test.ts
+Auto-merging packages/server/src/server/session.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/session.ts
+Auto-merging packages/server/src/server/session.workspaces.test.ts
+Auto-merging packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+Auto-merging packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts
+Auto-merging packages/server/src/server/workspace-archive-service.test.ts
+Auto-merging packages/server/src/server/workspace-archive-service.ts
+Auto-merging packages/server/src/server/workspace-registry.test.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/workspace-registry.test.ts
+Auto-merging packages/server/src/server/workspace-registry.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/workspace-registry.ts
+CONFLICT (modify/delete): scripts/rehome-worktree-projects.py deleted in HEAD and modified in fix(workspaces): preserve shared import and project state.  Version fix(workspaces): preserve shared import and project state of scripts/rehome-worktree-projects.py left in tree.
+Recorded preimage for 'packages/server/src/server/session.ts'
+Recorded preimage for 'packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts'
+Recorded preimage for 'packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts'
+Recorded preimage for 'packages/server/src/server/workspace-registry.test.ts'
+Recorded preimage for 'packages/server/src/server/workspace-registry.ts'
+error: Failed to merge in the changes.
+hint: Use 'git am --show-current-patch=diff' to see the failed patch
+hint: When you have resolved this problem, run "git am --continue".
+hint: If you prefer to skip this patch, run "git am --skip" instead.
+hint: To restore the original branch and stop patching, run "git am --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Patch failed at 0001 fix(workspaces): preserve shared import and project state

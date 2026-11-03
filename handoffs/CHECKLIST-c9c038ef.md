@@ -16,3 +16,10 @@ Resumed after lead populated all series blobs; preserve 0001–0004, continue at
 - [x] Phase 2: proceed through remaining authorized roots/dependents or document explicit stop condition.
 
 - [ ] Resolve 0073 sequencing decision and finish remaining phase-2 port.
+
+Lead approved deferring both 0073 messages until after 0025/0059; resume root order at 0051. Report questions in channel, not async form.
+
+- [x] Port 0051/0054 and retry 0064, replaying needed clean prerequisites without changing root order (0064 still conflicts; mandatory stop documented).
+- [x] Preserve mandated 0064 cascade stop with evidence; remaining roots not started.
+
+- [ ] Resolve current workspace build/typecheck/lint/background test failures and lead decision on 0064, then resume remaining roots.

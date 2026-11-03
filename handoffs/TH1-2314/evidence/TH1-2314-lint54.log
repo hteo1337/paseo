@@ -1,0 +1,189 @@
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+
+  x paseo(no-sync-io): Synchronous Node IO (existsSync) blocks the daemon event loop. Use an asynchronous capability at the owning module boundary.
+   ,-[packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts:4:10]
+ 3 | import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+ 4 | import { existsSync, realpathSync } from "node:fs";
+   :          ^^^^^^^^^^
+ 5 | import { homedir } from "node:os";
+   `----
+
+  x paseo(no-sync-io): Synchronous Node IO (realpathSync) blocks the daemon event loop. Use an asynchronous capability at the owning module boundary.
+   ,-[packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts:4:22]
+ 3 | import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
+ 4 | import { existsSync, realpathSync } from "node:fs";
+   :                      ^^^^^^^^^^^^
+ 5 | import { homedir } from "node:os";
+   `----
+
+  x eslint(complexity): async function `archiveByScopeWithPriority` has a complexity of 21. Maximum allowed is 20.
+     ,-[packages/server/src/server/workspace-archive-service.ts:151:1]
+ 150 |     
+ 151 | ,-> async function archiveByScopeWithPriority(
+ 152 | |     dependencies: ArchiveDependencies,
+ 153 | |     request: ArchiveByScopeRequest,
+ 154 | |   ): Promise<ArchiveResult> {
+ 155 | |     const target = await resolveArchiveTarget(dependencies, request.scope);
+ 156 | |     const targetWorkspaceIds = target.workspaceIds;
+ 157 | |   
+ 158 | |     const earlyAbort = archiveAbortResult(request.abortIf?.());
+ 159 | |     if (earlyAbort) return earlyAbort;
+ 160 | |   
+ 161 | |     await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
+ 162 | |   
+ 163 | |     const releaseRunHold = request.holdNewRuns?.();
+ 164 | |     let removedDirectory = false;
+ 165 | |     let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
+ 166 | |   
+ 167 | |     try {
+ 168 | |       if (targetWorkspaceIds.length > 0) {
+ 169 | |         dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
+ 170 | |       }
+ 171 | |       if (targetWorkspaceIds.length > 0) {
+ 172 | |         await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+ 173 | |       }
+ 174 | |   
+ 175 | |       const storedRecordsByWorkspace = request.abortIf
+ 176 | |         ? new Map<string, StoredAgentRecord[]>()
+ 177 | |         : undefined;
+ 178 | |       if (storedRecordsByWorkspace) {
+ 179 | |         for (const workspaceId of targetWorkspaceIds) {
+ 180 | |           storedRecordsByWorkspace.set(
+ 181 | |             workspaceId,
+ 182 | |             await listStoredAgentRecords(dependencies, workspaceId, Boolean(request.holdNewRuns)),
+ 183 | |           );
+ 184 | |         }
+ 185 | |         const storedAbort = abortForNonClosedStoredAgents(
+ 186 | |           storedRecordsByWorkspace,
+ 187 | |           Boolean(request.holdNewRuns),
+ 188 | |         );
+ 189 | |         if (storedAbort) return storedAbort;
+ 190 | |         const lateAbort = archiveAbortResult(request.abortIf?.());
+ 191 | |         if (lateAbort) return lateAbort;
+ 192 | |       }
+ 193 | |   
+ 194 | |       // Once teardown starts, cancellation commits to completion.
+ 195 | |       const { archivedAgents, archivedWorkspaceIds, deferredByAgentIds } = await archiveTargetRecords(
+ 196 | |         dependencies,
+ 197 | |         targetWorkspaceIds,
+ 198 | |         request.requestId,
+ 199 | |         storedRecordsByWorkspace,
+ 200 | |         Boolean(request.holdNewRuns),
+ 201 | |       );
+ 202 | |       if (deferredByAgentIds.length > 0) {
+ 203 | |         return {
+ 204 | |           archivedAgentIds: Array.from(archivedAgents),
+ 205 | |           archivedWorkspaceIds,
+ 206 | |           removedDirectory: false,
+ 207 | |           deferredByAgentIds,
+ 208 | |         };
+ 209 | |       }
+ 210 | |   
+ 211 | |       if (target.backing?.mainRepoRoot) {
+ 212 | |         try {
+ 213 | |           await dependencies.workspaceGitService.getSnapshot(target.backing.mainRepoRoot, {
+ 214 | |             force: true,
+ 215 | |             reason: "archive-worktree",
+ 216 | |           });
+ 217 | |         } catch (error) {
+ 218 | |           dependencies.sessionLogger?.warn(
+ 219 | |             { err: error, cwd: target.backing.mainRepoRoot, requestId: request.requestId },
+ 220 | |             "Failed to force-refresh workspace git snapshot after archiving",
+ 221 | |           );
+ 222 | |         }
+ 223 | |       }
+ 224 | |   
+ 225 | |       if (target.backing !== null) {
+ 226 | |         const removal = await finishArchiveDirectory(
+ 227 | |           dependencies,
+ 228 | |           request,
+ 229 | |           target,
+ 230 | |           archivedWorkspaceIds,
+ 231 | |         );
+ 232 | |         removedDirectory = removal.removedDirectory;
+ 233 | |         directoryLeftBehind = removal.directoryLeftBehind;
+ 234 | |       }
+ 235 | |   
+ 236 | |       return {
+ 237 | |         archivedAgentIds: Array.from(archivedAgents),
+ 238 | |         archivedWorkspaceIds,
+ 239 | |         removedDirectory,
+ 240 | |         ...(directoryLeftBehind ? { directoryLeftBehind } : {}),
+ 241 | |       };
+ 242 | |     } finally {
+ 243 | |       try {
+ 244 | |         if (targetWorkspaceIds.length > 0) {
+ 245 | |           dependencies.clearWorkspaceArchiving(targetWorkspaceIds);
+ 246 | |           await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
+ 247 | |         }
+ 248 | |       } finally {
+ 249 | |         releaseRunHold?.();
+ 250 | |       }
+ 251 | |     }
+ 252 | `-> }
+ 253 |     
+     `----
+
+  x eslint(no-dupe-keys): Duplicate key 'createdAt'
+      ,-[packages/server/src/server/session.ts:5786:7]
+ 5785 |       workspaceKind: workspace.kind,
+ 5786 |       createdAt: workspace.createdAt,
+      :       ^^^^|^^^^
+      :           `-- Key is first defined here
+ 5787 |       name: resolveWorkspaceDisplayName(workspace),
+ 5788 |       title: workspace.title,
+ 5789 |       pinnedAt: workspace.pinnedAt,
+ 5790 |       ...(workspace.labels && workspace.labels.length > 0 ? { labels: workspace.labels } : {}),
+ 5791 |       background: workspace.background,
+ 5792 |       archivingAt: null,
+ 5793 |       status: "done",
+ 5794 |       statusEnteredAt: null,
+ 5795 |       activityAt: null,
+ 5796 |       createdAt: workspace.createdAt,
+      :       ^^^^|^^^^
+      :           `-- and duplicated here
+ 5797 |       diffStat,
+      `----
+  help: Consider removing the duplicated key
+
+  x eslint(no-dupe-keys): Duplicate key 'createdAt'
+      ,-[packages/protocol/src/messages.ts:4210:5]
+ 4209 |     // Creation time lets clients pick the oldest active workspace for a directory.
+ 4210 |     createdAt: z.string().optional(),
+      :     ^^^^|^^^^
+      :         `-- Key is first defined here
+ 4211 |     name: z.string(),
+ 4212 |     // COMPAT(workspaceTitles): added in v0.1.97, drop the optional gate when floor >= v0.1.97.
+ 4213 |     // When the user has titled a workspace, `name` carries the resolved value
+ 4214 |     // (title) and `title` mirrors the raw override so the rename UI can prefill
+ 4215 |     // its input and offer a "reset to branch name" action. Null means the name
+ 4216 |     // is derived from the branch/directory.
+ 4217 |     title: z.string().nullable().optional(),
+ 4218 |     // COMPAT(workspacePinning): added in v0.1.107, remove optional after 2027-01-12.
+ 4219 |     pinnedAt: z.string().nullable().optional(),
+ 4220 |     // COMPAT(workspaceLabels): added in v0.5.0, remove optional after 2027-08-14.
+ 4221 |     labels: z.array(z.string()).optional(),
+ 4222 |     // Retained for wire parsing of older daemon descriptors.
+ 4223 |     internal: z.boolean().optional(),
+ 4224 |     background: z.boolean().optional(),
+ 4225 |     archivingAt: z.string().nullable().optional().default(null),
+ 4226 |     status: WorkspaceStateBucketSchema,
+ 4227 |     // Best-effort workspace status entry timestamp. Old daemons omit the
+ 4228 |     // field; old clients treat missing and null equivalently. The transform
+ 4229 |     // coerces a missing field to `null` so downstream code never has to
+ 4230 |     // handle `undefined`.
+ 4231 |     statusEnteredAt: z
+ 4232 |       .string()
+ 4233 |       .nullish()
+ 4234 |       .transform((value) => value ?? null),
+ 4235 |     activityAt: z.string().nullable(),
+ 4236 |     createdAt: z.string().optional(),
+      :     ^^^^|^^^^
+      :         `-- and duplicated here
+ 4237 |     lastUserMessageAt: z.string().nullable().optional(),
+      `----
+  help: Consider removing the duplicated key
+
+Found 0 warnings and 5 errors.
+Finished in 1.1s on 5143 files with 177 rules using 16 threads.

@@ -1,0 +1,22 @@
+Applying: fix(server): guard duplicate workspace repair archives
+Using index info to reconstruct a base tree...
+M	packages/client/src/daemon-client.ts
+M	packages/protocol/src/messages.ts
+M	packages/server/src/server/session.ts
+M	packages/server/src/server/workspace-archive-record-scoped.e2e.test.ts
+M	packages/server/src/server/workspace-archive-service.ts
+A	scripts/repair-duplicate-workspaces.py
+Falling back to patching base and 3-way merge...
+Auto-merging packages/client/src/daemon-client.ts
+Auto-merging packages/protocol/src/messages.ts
+Auto-merging packages/server/src/server/session.ts
+Auto-merging packages/server/src/server/workspace-archive-record-scoped.e2e.test.ts
+Auto-merging packages/server/src/server/workspace-archive-service.ts
+CONFLICT (modify/delete): scripts/repair-duplicate-workspaces.py deleted in HEAD and modified in fix(server): guard duplicate workspace repair archives.  Version fix(server): guard duplicate workspace repair archives of scripts/repair-duplicate-workspaces.py left in tree.
+error: Failed to merge in the changes.
+hint: Use 'git am --show-current-patch=diff' to see the failed patch
+hint: When you have resolved this problem, run "git am --continue".
+hint: If you prefer to skip this patch, run "git am --skip" instead.
+hint: To restore the original branch and stop patching, run "git am --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Patch failed at 0001 fix(server): guard duplicate workspace repair archives

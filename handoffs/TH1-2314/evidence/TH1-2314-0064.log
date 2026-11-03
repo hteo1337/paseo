@@ -1,0 +1,28 @@
+Applying: fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
+Using index info to reconstruct a base tree...
+M	packages/server/src/server/agent/agent-manager.test.ts
+M	packages/server/src/server/agent/mcp-server.test.ts
+M	packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+M	packages/server/src/server/auto-archive-on-merge/archive-if-safe.ts
+M	packages/server/src/server/session.ts
+M	packages/server/src/server/session.workspaces.test.ts
+M	packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+M	packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts
+Falling back to patching base and 3-way merge...
+Auto-merging packages/server/src/server/agent/agent-manager.test.ts
+Auto-merging packages/server/src/server/agent/mcp-server.test.ts
+Auto-merging packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts
+Auto-merging packages/server/src/server/auto-archive-on-merge/archive-if-safe.ts
+Auto-merging packages/server/src/server/session.ts
+Auto-merging packages/server/src/server/session.workspaces.test.ts
+Auto-merging packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+Auto-merging packages/server/src/server/session/workspace-provisioning/workspace-provisioning-service.ts
+Recorded preimage for 'packages/server/src/server/auto-archive-on-merge/archive-if-safe.test.ts'
+error: Failed to merge in the changes.
+hint: Use 'git am --show-current-patch=diff' to see the failed patch
+hint: When you have resolved this problem, run "git am --continue".
+hint: If you prefer to skip this patch, run "git am --skip" instead.
+hint: To restore the original branch and stop patching, run "git am --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Patch failed at 0001 fix(port): preserve guarded teardown and beta.3 workspace behavior (TH1-1350)
