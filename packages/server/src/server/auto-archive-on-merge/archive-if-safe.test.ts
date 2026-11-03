@@ -1019,9 +1019,12 @@ describe("archiveIfSafe", () => {
       { workspaceId },
     );
 
-    const applySnapshot = storage.applySnapshot.bind(storage);
+    // v0.15 never writes internal agents to storage. Inject at the real close
+    // drain, which is shared by internal and durable sessions.
+    const runtime = manager as unknown as { drainSessionEvents(id: string): Promise<void> };
+    const drain = runtime.drainSessionEvents.bind(runtime);
     let armed = true;
-    vi.spyOn(storage, "applySnapshot").mockImplementation(async (...args) => {
+    vi.spyOn(runtime, "drainSessionEvents").mockImplementation(async (id) => {
       if (armed) {
         armed = false;
         client.sessions[0]?.push({
@@ -1030,7 +1033,7 @@ describe("archiveIfSafe", () => {
           turnId: "autonomous",
         } as AgentStreamEvent);
       }
-      return applySnapshot(...args);
+      return drain(id);
     });
 
     const options = {

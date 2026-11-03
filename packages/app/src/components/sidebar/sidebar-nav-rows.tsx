@@ -1,8 +1,22 @@
 import { router, usePathname } from "expo-router";
 import { CalendarClock, History, Plus, Search } from "lucide-react-native";
-import { memo, useCallback, useMemo, useRef, useState, type ComponentType, type ReactNode } from "react";
+import {
+  memo,
+  useCallback,
+  useMemo,
+  useRef,
+  useState,
+  type ComponentType,
+  type ReactNode,
+} from "react";
 import { useTranslation } from "react-i18next";
-import { ScrollView, useWindowDimensions, View, type StyleProp, type ViewStyle } from "react-native";
+import {
+  ScrollView,
+  useWindowDimensions,
+  View,
+  type StyleProp,
+  type ViewStyle,
+} from "react-native";
 import { StyleSheet } from "react-native-unistyles";
 import { SidebarHeaderRow } from "@/components/sidebar/sidebar-header-row";
 import { SidebarNavResizeHandle } from "@/components/sidebar/sidebar-nav-resize-handle";
@@ -23,6 +37,7 @@ import { useKeyboardShortcutsStore } from "@/stores/keyboard-shortcuts-store";
 import { useActiveWorkspaceSelection } from "@/stores/navigation-active-workspace-store";
 import { useWorkspace } from "@/stores/session-store-hooks";
 import { usePanelStore } from "@/stores/panel-store";
+import {
   buildNewWorkspaceRoute,
   buildSchedulesRoute,
   buildSessionsRoute,
@@ -81,7 +96,6 @@ export function SidebarNavRows({ style, onBeforeNavigate, firstRowTrailing }: Si
   );
 
   if (visibleItems.length === 0 && !firstRowTrailing) return null;
-
 
   return (
     <View ref={groupRef} collapsable={false} style={style} testID="sidebar-nav-group">
