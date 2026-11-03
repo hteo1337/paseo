@@ -577,9 +577,9 @@ export class WorkspaceDirectory {
     ]);
     // A project whose only workspaces are hidden reads as empty to that caller.
     const projectIdsWithActiveWorkspaces = new Set(
-      (await this.existingActiveWorkspaces(persistedWorkspaces, persistedProjects)).filter((workspace) => options?.includeBackground === true || !workspace.background).map(
-        (workspace) => workspace.projectId,
-      ),
+      (await this.existingActiveWorkspaces(persistedWorkspaces, persistedProjects))
+        .filter((workspace) => options?.includeBackground === true || !workspace.background)
+        .map((workspace) => workspace.projectId),
     );
     return persistedProjects
       .filter(
