@@ -284,20 +284,11 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
   if (name === "agent.open.before") {
     const previous = beforeSchemas["agent.open.before"].parse(input);
     const next = beforeSchemas["agent.open.before"].parse(result);
-    if (
-      previous.agentId !== next.agentId ||
-      previous.workspaceId !== next.workspaceId ||
-      previous.provider !== next.provider ||
-      previous.cwd !== next.cwd ||
-      previous.reason !== next.reason ||
-      previous.purpose !== next.purpose ||
-      previous.title !== next.title ||
-      !isDeepStrictEqual(previous.labels, next.labels) ||
-      previous.model !== next.model
-    ) {
+    if (!sameSessionOpenIdentity(previous, next)) {
       throw new Error("agent.open.before hooks can only change env, tools, and mcpServers");
     }
   }
+
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);
     const next = beforeSchemas["agent.create.before"].parse(result);
@@ -447,4 +438,13 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
       this.changed();
     };
   }
+}
+
+function sameSessionOpenIdentity(
+  previous: SessionOpenWireRequest,
+  next: SessionOpenWireRequest,
+): boolean {
+  const { env: _oldEnv, tools: _oldTools, mcpServers: _oldMcp, ...oldIdentity } = previous;
+  const { env: _newEnv, tools: _newTools, mcpServers: _newMcp, ...newIdentity } = next;
+  return isDeepStrictEqual(oldIdentity, newIdentity);
 }
