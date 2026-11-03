@@ -208,10 +208,7 @@ import type {
   AgentProviderRuntimeSettingsMap,
   ProviderOverride,
 } from "./agent/provider-launch-config.js";
-import {
-  type MetadataGenerationConfig,
-  type PersistedConfig,
-} from "./persisted-config.js";
+import { type MetadataGenerationConfig, type PersistedConfig } from "./persisted-config.js";
 import { createServiceProxySubsystem, type ServiceProxySubsystem } from "./service-proxy.js";
 import { releaseWorkspaceServicePortPlan } from "./workspace-service-port-registry.js";
 import { ScriptHealthMonitor } from "./script-health-monitor.js";
@@ -584,7 +581,7 @@ function resolveReloadEnv(config: PaseoDaemonConfig): NodeJS.ProcessEnv {
   return config.configReload?.env ?? process.env;
 }
 
-function resolvePromptSuggestionsConfig(config: PaseoDaemonConfig): { enabled: boolean } {
+function resolvePromptSuggestionsConfig(config: ResolvedDaemonSettings): { enabled: boolean } {
   return { enabled: config.promptSuggestions?.enabled ?? true };
 }
 
@@ -1239,6 +1236,7 @@ export async function createPaseoDaemon(
       providerSnapshotManager,
       readDaemonConfig: () => ({ metadataGeneration: daemonConfigStore.get().metadataGeneration }),
       getFocusedSelection: () => undefined,
+      logger,
     }),
     emit: emitExternalSessionMessage,
     workspaceGitService,

@@ -352,6 +352,7 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
         : {}),
     };
   }
+
   if (name === "agent.create.before") {
     const previous = beforeSchemas["agent.create.before"].parse(input);
     const next = beforeSchemas["agent.create.before"].parse(result);
@@ -508,4 +509,13 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
       this.changed();
     };
   }
+}
+
+function sameSessionOpenIdentity(
+  previous: SessionOpenWireRequest,
+  next: SessionOpenWireRequest,
+): boolean {
+  const { env: _oldEnv, tools: _oldTools, mcpServers: _oldMcp, ...oldIdentity } = previous;
+  const { env: _newEnv, tools: _newTools, mcpServers: _newMcp, ...newIdentity } = next;
+  return isDeepStrictEqual(oldIdentity, newIdentity);
 }

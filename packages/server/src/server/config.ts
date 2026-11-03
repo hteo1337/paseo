@@ -611,8 +611,7 @@ export function resolveConfigFromPersisted(
 ): PaseoDaemonConfig {
   const env = configurationEnvironment(options?.env ?? process.env);
   const cli = options?.cli;
-  const relayEnabledFallback =
-    options?.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined;
+  const relayEnabledFallback = resolveRelayEnabledFallback(options, persisted);
   const { overrideControlledPaths, ...settings } = resolveReloadableConfig(persisted, options);
   const relay = resolveRelayConfig({
     env,
@@ -672,8 +671,7 @@ export function resolveReloadableConfig(
     persisted,
     cliRelayEnabled: cli?.relayEnabled,
     cliRelayUseTls: cli?.relayUseTls,
-    enabledFallback:
-      options?.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined,
+    enabledFallback: resolveRelayEnabledFallback(options, persisted),
   });
   return {
     ...resolveStaticLoadConfigSettings(env, cli, persisted),
@@ -844,4 +842,11 @@ function resolveRestartRecoveryConfig(agents: PersistedConfig["agents"]) {
     resumeOnStartup: agents?.resumeOnStartup ?? false,
     resumePrompt: agents?.resumePrompt ?? "Resume working.",
   };
+}
+
+function resolveRelayEnabledFallback(
+  options: ResolveConfigFromPersistedOptions | undefined,
+  persisted: PersistedConfig,
+): boolean {
+  return options?.relayEnabledFallback ?? persisted.daemon?.relay?.enabled === undefined;
 }

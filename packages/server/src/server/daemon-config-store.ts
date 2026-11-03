@@ -363,9 +363,7 @@ function pickSupportedPatchFields(patch: MutableDaemonConfigPatch): SupportedMut
     ...(patch.metadataGeneration !== undefined
       ? { metadataGeneration: patch.metadataGeneration }
       : {}),
-    ...(patch.promptSuggestions?.enabled !== undefined
-      ? { promptSuggestions: { enabled: patch.promptSuggestions.enabled } }
-      : {}),
+    ...pickPromptSuggestionsPatch(patch.promptSuggestions),
     ...(patch.autoArchiveAfterMerge !== undefined
       ? { autoArchiveAfterMerge: patch.autoArchiveAfterMerge }
       : {}),
@@ -947,4 +945,8 @@ function restartRecoveryPatch(patch: SupportedMutableConfigPatch) {
     ...(patch.resumeOnStartup !== undefined ? { resumeOnStartup: patch.resumeOnStartup } : {}),
     ...(patch.resumePrompt !== undefined ? { resumePrompt: patch.resumePrompt } : {}),
   };
+}
+
+function pickPromptSuggestionsPatch(value: MutableDaemonConfigPatch["promptSuggestions"]) {
+  return value?.enabled !== undefined ? { promptSuggestions: { enabled: value.enabled } } : {};
 }
