@@ -1,7 +1,7 @@
 import type { PluginLifecycle } from "../../plugins/lifecycle/index.js";
 import { describeHookWorkspace } from "../../plugins/lifecycle/index.js";
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from "node:path";
-import { existsSync, realpathSync } from "node:fs";
+import { access, realpath } from "node:fs/promises";
 import { homedir } from "node:os";
 import type { ProjectCheckoutLitePayload } from "@getpaseo/protocol/messages";
 import type { Logger } from "pino";
@@ -177,7 +177,7 @@ export function createWorkspaceProvisioningService(deps: {
   ): Promise<PersistedProjectRecord> {
     const requestedPath = resolve(cwd);
     let checkout = await workspaceGitService.getCheckout(requestedPath);
-    const realPath = canonicalPath(requestedPath);
+    const realPath = await canonicalPath(requestedPath);
     if (!checkout.isGit && realPath !== requestedPath) {
       const realCheckout = await workspaceGitService.getCheckout(realPath);
       if (realCheckout.isGit) checkout = realCheckout;
@@ -186,10 +186,10 @@ export function createWorkspaceProvisioningService(deps: {
       options?.exactRoot === true &&
       checkout.isGit &&
       !checkout.mainRepoRoot &&
-      !areEquivalentPaths(realPath, canonicalPath(checkout.worktreeRoot ?? realPath));
+      !areEquivalentPaths(realPath, await canonicalPath(checkout.worktreeRoot ?? realPath));
     const checkoutProjectRoot = exactNestedRoot
       ? realPath
-      : projectRootForCheckout(requestedPath, checkout);
+      : await projectRootForCheckout(requestedPath, checkout);
     const peerKey = deriveProjectKey({
       rootPath: checkoutProjectRoot,
       remoteUrl: checkout.remoteUrl,
@@ -201,7 +201,7 @@ export function createWorkspaceProvisioningService(deps: {
     const activeProjects = checkout.isGit
       ? (await projectRegistry.list()).filter((project) => !project.archivedAt)
       : [];
-    const rootPath = selectProjectRoot({
+    const rootPath = await selectProjectRoot({
       requestedPath,
       checkout,
       activeProjects,
@@ -227,14 +227,14 @@ export function createWorkspaceProvisioningService(deps: {
     });
   }
 
-  function selectProjectRoot(input: {
+  async function selectProjectRoot(input: {
     requestedPath: string;
     checkout: ProjectCheckoutLitePayload;
     activeProjects: PersistedProjectRecord[];
     checkoutProjectRoot: string;
     exactNestedRoot: boolean;
     peerKey: string;
-  }): string {
+  }): Promise<string> {
     const {
       requestedPath,
       checkout,
@@ -243,31 +243,45 @@ export function createWorkspaceProvisioningService(deps: {
       exactNestedRoot,
       peerKey,
     } = input;
+    const projectPaths = new Map(
+      await Promise.all(
+        activeProjects.map(
+          async (project) => [project.rootPath, await canonicalPath(project.rootPath)] as const,
+        ),
+      ),
+    );
     if (exactNestedRoot) {
-      const matches = createRealpathAwarePathMatcher(checkoutProjectRoot);
-      const existing = activeProjects.find((project) => matches(project.rootPath));
+      const target = await canonicalPath(checkoutProjectRoot);
+      const existing = activeProjects.find((project) =>
+        areEquivalentPaths(projectPaths.get(project.rootPath)!, target),
+      );
       return existing?.rootPath ?? checkoutProjectRoot;
     }
     if (checkout.mainRepoRoot) return checkoutProjectRoot;
-    const checkoutRoot = resolve(checkout.worktreeRoot ?? requestedPath);
+    const checkoutRoot = await canonicalPath(checkout.worktreeRoot ?? requestedPath);
+    const requestedRoot = await canonicalPath(requestedPath);
     const nested = activeProjects
-      .filter(
-        (project) =>
-          !areEquivalentPaths(project.rootPath, checkoutRoot) &&
-          isAtOrBelow(project.rootPath, checkoutRoot) &&
-          isAtOrBelow(requestedPath, project.rootPath),
-      )
+      .filter((project) => {
+        const root = projectPaths.get(project.rootPath)!;
+        return (
+          !areEquivalentPaths(root, checkoutRoot) &&
+          isAtOrBelow(root, checkoutRoot) &&
+          isAtOrBelow(requestedRoot, root)
+        );
+      })
       .sort((left, right) => right.rootPath.length - left.rootPath.length)[0];
     if (nested) return nested.rootPath;
-    // Standalone review clones share a remote key, but not a Git common dir.
-    const remotePeers = checkout.remoteUrl
-      ? activeProjects.filter(
-          (project) =>
-            project.kind === "git" &&
-            project.projectKey === peerKey &&
-            existsSync(project.rootPath),
+    // Remote peers must still exist; resolve the IO before selecting among them.
+    const livePeers = checkout.remoteUrl
+      ? await Promise.all(
+          activeProjects
+            .filter((project) => project.kind === "git" && project.projectKey === peerKey)
+            .map(async (project) => ((await pathExists(project.rootPath)) ? project : null)),
         )
       : [];
+    const remotePeers = livePeers.filter(
+      (project): project is PersistedProjectRecord => project !== null,
+    );
     return [checkoutProjectRoot, ...remotePeers.map((project) => project.rootPath)].sort(
       (left, right) =>
         left.split(sep).length - right.split(sep).length ||
@@ -276,12 +290,15 @@ export function createWorkspaceProvisioningService(deps: {
     )[0];
   }
 
-  function projectRootForCheckout(cwd: string, checkout: ProjectCheckoutLitePayload): string {
+  async function projectRootForCheckout(
+    cwd: string,
+    checkout: ProjectCheckoutLitePayload,
+  ): Promise<string> {
     // mainRepoRoot is derived from Git's common dir, so a linked worktree's
     // folder name cannot turn it into a separate top-level project.
     if (!checkout.isGit) return cwd;
     const checkoutRoot = resolve(checkout.worktreeRoot ?? cwd);
-    const withinCheckout = relative(canonicalPath(checkoutRoot), canonicalPath(cwd));
+    const withinCheckout = relative(await canonicalPath(checkoutRoot), await canonicalPath(cwd));
     if (
       withinCheckout === ".." ||
       withinCheckout.startsWith(`..${sep}`) ||
@@ -295,17 +312,26 @@ export function createWorkspaceProvisioningService(deps: {
     return withinCheckout && !checkout.remoteUrl ? cwd : checkoutRoot;
   }
 
-  function canonicalPath(target: string): string {
+  async function canonicalPath(target: string): Promise<string> {
     try {
-      return realpathSync(target);
+      return await realpath(target);
     } catch {
       return resolve(target);
     }
   }
 
   function isAtOrBelow(target: string, root: string): boolean {
-    const rel = relative(canonicalPath(root), canonicalPath(target));
+    const rel = relative(root, target);
     return rel === "" || (rel !== ".." && !rel.startsWith(`..${sep}`) && !isAbsolute(rel));
+  }
+
+  async function pathExists(target: string): Promise<boolean> {
+    try {
+      await access(target);
+      return true;
+    } catch {
+      return false;
+    }
   }
 
   async function requireActiveProject(projectId: string): Promise<PersistedProjectRecord> {
@@ -326,7 +352,14 @@ export function createWorkspaceProvisioningService(deps: {
     return callerWorkspace.background;
   }
 
-  async function createWorkspaceForDirectory(
+  const createWorkspaceForDirectory: WorkspaceProvisioningService["createWorkspaceForDirectory"] = (
+    cwd,
+    title,
+    projectId,
+    context,
+  ) => createDirectoryWorkspace(cwd, title, projectId, context);
+
+  async function createDirectoryWorkspace(
     cwd: string,
     title?: string | null,
     projectId?: string,
@@ -336,6 +369,7 @@ export function createWorkspaceProvisioningService(deps: {
       background?: boolean;
       callerWorkspaceId?: string;
     },
+    reuseExisting = false,
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
     const checkout = await workspaceGitService.getCheckout(normalizedCwd);
@@ -362,6 +396,13 @@ export function createWorkspaceProvisioningService(deps: {
       updatedAt: timestamp,
       background: await resolveBackground(context),
     });
+    if (!reuseExisting) {
+      await workspaceRegistry.upsert(workspace, {
+        expectsInitialAgent: context?.expectsInitialAgent,
+      });
+      emitWorkspaceCreated(workspace);
+      return workspace;
+    }
     const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, {
       expectsInitialAgent: context?.expectsInitialAgent,
       ...(managedGitCheckout || !projectId ? { rehomeProjectId: project.projectId } : {}),
@@ -475,15 +516,29 @@ export function createWorkspaceProvisioningService(deps: {
           left.workspaceId.localeCompare(right.workspaceId),
       );
     const active = workspaces.find((workspace) => !workspace.archivedAt);
-    if (active) return refreshWorkspaceRecord(active);
+    if (active) {
+      const refreshed = await refreshWorkspaceRecord(active);
+      const project = await findOrCreateProjectForDirectory(normalizedCwd);
+      return (
+        await workspaceRegistry.getOrCreateActiveByCwd(refreshed, {
+          rehomeProjectId: project.projectId,
+        })
+      ).workspace;
+    }
     const archived = workspaces.find((workspace) => workspace.archivedAt);
     if (archived) {
       const project = await projectRegistry.get(archived.projectId);
       if (project && !project.archivedAt) return ensureWorkspaceRecordUnarchived(archived);
     }
-    return createWorkspaceForDirectory(normalizedCwd, title, undefined, {
-      workspaceId: candidateWorkspaceId,
-    });
+    return createDirectoryWorkspace(
+      normalizedCwd,
+      title,
+      undefined,
+      {
+        workspaceId: candidateWorkspaceId,
+      },
+      true,
+    );
   }
 
   async function resolveOrCreateWorkspaceIdForCreateAgent(
@@ -497,25 +552,18 @@ export function createWorkspaceProvisioningService(deps: {
     const sandbox = resolve(homedir(), "Paseo", "Sandbox");
     const inDirectory = (root: string) => cwd === root || cwd.startsWith(`${root}/`);
     let repoRoot = cwd;
-    while (!existsSync(join(repoRoot, ".git"))) {
+    while (!(await pathExists(join(repoRoot, ".git")))) {
       const parent = dirname(repoRoot);
       if (parent === repoRoot) break;
       repoRoot = parent;
     }
     const throwaway =
-      !existsSync(join(repoRoot, ".git")) &&
+      !(await pathExists(join(repoRoot, ".git"))) &&
       (["/tmp", "/private/tmp", "/var/folders", "/private/var/folders"].some(inDirectory) ||
         inDirectory(sandbox));
     const workspaceCwd = throwaway ? resolve(homedir(), "Paseo", "Scratch") : cwd;
 
-    const realPath = (target: string) => {
-      try {
-        return realpathSync(target);
-      } catch {
-        return resolve(target);
-      }
-    };
-    const lockKey = realPath(workspaceCwd);
+    const lockKey = await canonicalPath(workspaceCwd);
     const previous = createAgentWorkspaceLocks.get(lockKey);
     let release!: () => void;
     const current = new Promise<void>((resolveLock) => {
@@ -526,16 +574,24 @@ export function createWorkspaceProvisioningService(deps: {
     try {
       const project = await findOrCreateProjectForDirectory(workspaceCwd);
       const workspaces = await workspaceRegistry.list();
+      const workspacePaths = new Map(
+        await Promise.all(
+          workspaces.map(
+            async (workspace) =>
+              [workspace.workspaceId, await canonicalPath(workspace.cwd)] as const,
+          ),
+        ),
+      );
       const active = workspaces
         .filter(
           (workspace) =>
             !workspace.archivedAt &&
-             workspace.background === background &&
+            workspace.background === background &&
             workspace.projectId === project.projectId &&
             workspace.kind !== "worktree" &&
             !workspace.isPaseoOwnedWorktree &&
             !(workspace.worktreeRoot && workspace.mainRepoRoot) &&
-            areEquivalentPaths(realPath(workspace.cwd), lockKey),
+            areEquivalentPaths(workspacePaths.get(workspace.workspaceId)!, lockKey),
         )
         .sort(
           (left, right) =>
@@ -544,11 +600,17 @@ export function createWorkspaceProvisioningService(deps: {
         )[0];
       if (active) return active.workspaceId;
       return (
-        await createWorkspaceForDirectory(workspaceCwd, input.initialTitle, undefined, {
-          expectsInitialAgent: true,
-          background,
-          callerWorkspaceId: input.callerWorkspaceId,
-        })
+        await createDirectoryWorkspace(
+          workspaceCwd,
+          input.initialTitle,
+          undefined,
+          {
+            expectsInitialAgent: true,
+            background,
+            callerWorkspaceId: input.callerWorkspaceId,
+          },
+          true,
+        )
       ).workspaceId;
     } finally {
       if (createAgentWorkspaceLocks.get(lockKey) === current) {
