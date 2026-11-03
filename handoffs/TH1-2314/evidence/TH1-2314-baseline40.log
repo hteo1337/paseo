@@ -1,0 +1,33 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/server
+
+stdout | src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🤖 agentic secret storage: https://dotenvx.com/as2
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🔐 encrypt with Dotenvx: https://dotenvx.com
+
+ ❯ src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts (0 test)
+
+⎯⎯⎯⎯⎯⎯ Failed Suites 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts [ src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts ]
+TypeError: TTLCache is not a constructor
+ ❯ createPullRequestStatusCache src/utils/checkout-git.ts:139:10
+    137|
+    138| function createPullRequestStatusCache(ttlMs: number) {
+    139|   return new TTLCache<string, PullRequestStatusResult>({
+       |          ^
+    140|     ttl: ttlMs,
+    141|     max: PULL_REQUEST_STATUS_CACHE_MAX,
+ ❯ src/utils/checkout-git.ts:90:30
+ ❯ src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts:7:1
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  no tests
+   Start at  01:33:39
+   Duration  433ms (transform 240ms, setup 18ms, import 0ms, tests 0ms, environment 0ms)
+

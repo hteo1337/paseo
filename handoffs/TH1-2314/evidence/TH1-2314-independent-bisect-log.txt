@@ -1,0 +1,10 @@
+# bad: [6a72342a1d79c52a55918bf5561a84f94f07751d] fix(workspaces): preserve shared import and project state
+# good: [40e5f1bd4b154ed3a1f0e4aa8ff3ed895226d392] docs(TH1-2314): checkpoint provenance port and bundled-patch dependency
+git bisect start '6a72342a1' '40e5f1bd4'
+# good: [909c21d08dc5dfe5dc4f9552b402949bddd5b61a] fix(cli): reuse workspace by cwd on agent run
+git bisect good 909c21d08dc5dfe5dc4f9552b402949bddd5b61a
+# bad: [aefd229855e9c57c01c50052925b3feaa76d80ea] fix(server): reuse active workspace for canonical directory
+git bisect bad aefd229855e9c57c01c50052925b3feaa76d80ea
+# good: [89570985d43c3dfa4e9b748e2b1b3ada6a58d7da] fix(server): reuse the active workspace for a directory on agent create
+git bisect good 89570985d43c3dfa4e9b748e2b1b3ada6a58d7da
+# first bad commit: [aefd229855e9c57c01c50052925b3feaa76d80ea] fix(server): reuse active workspace for canonical directory

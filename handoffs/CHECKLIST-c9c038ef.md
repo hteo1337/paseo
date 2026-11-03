@@ -23,3 +23,15 @@ Lead approved deferring both 0073 messages until after 0025/0059; resume root or
 - [x] Preserve mandated 0064 cascade stop with evidence; remaining roots not started.
 
 - [ ] Resolve current workspace build/typecheck/lint/background test failures and lead decision on 0064, then resume remaining roots.
+
+Lead correction: establish causation before retaining background fix.
+
+- [x] Run full provisioning file on detached 40e5f1bd4; if failing also baseline v0.15.0.
+- [x] If 40e5f1bd4 passes, confirm 6a72342a1 fails, bisect the file and record exact first bad commit/hunk.
+- [x] Reconcile preserved uncommitted changes against independent causal evidence (0048); upstream background test unchanged.
+- [ ] Reapply 0064, assert drain spy was called, and run full gate before keeper.
+
+Baseline correction: shared node_modules contaminated @getpaseo resolution. Discard initial baseline/bisect verdicts; harness failure TTLCache was not an assertion failure.
+
+- [x] Give detached baseline its own install/build and record all transitive @getpaseo resolutions before remeasurement.
+- [x] Repeat baseline/bisect with revision-local compiled packages at each step.

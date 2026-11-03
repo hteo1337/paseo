@@ -1,0 +1,33 @@
+running '/tmp/TH1-2314-bisect-independent.sh'
+909c21d08 test exit 0; resolution table and fresh runtime build logs recorded
+Bisecting: 2 revisions left to test after this (roughly 2 steps)
+[aefd229855e9c57c01c50052925b3feaa76d80ea] fix(server): reuse active workspace for canonical directory
+running '/tmp/TH1-2314-bisect-independent.sh'
+aefd22985 test exit 1; resolution table and fresh runtime build logs recorded
+Bisecting: 0 revisions left to test after this (roughly 1 step)
+[89570985d43c3dfa4e9b748e2b1b3ada6a58d7da] fix(server): reuse the active workspace for a directory on agent create
+running '/tmp/TH1-2314-bisect-independent.sh'
+89570985d test exit 0; resolution table and fresh runtime build logs recorded
+aefd229855e9c57c01c50052925b3feaa76d80ea is the first bad commit
+commit aefd229855e9c57c01c50052925b3feaa76d80ea
+Author: t <t@t>
+Date:   Sun Oct 11 13:08:44 2026 +0300
+
+    fix(server): reuse active workspace for canonical directory
+
+ handoffs/STATUS.md                                 | 22 +++++++
+ .../cli-run-workspace-precedence.e2e.test.ts       | 18 +++++-
+ .../open-project-missing-directory.e2e.test.ts     | 26 +++++++++
+ packages/server/src/server/session.ts              |  1 +
+ .../workspace-provisioning-service.test.ts         | 50 +++++++++++++++-
+ .../workspace-provisioning-service.ts              | 18 +++---
+ packages/server/src/server/websocket-server.ts     |  1 +
+ .../workspace-archive-record-scoped.e2e.test.ts    | 68 ++++++++++++++--------
+ .../server/src/server/workspace-directory.test.ts  | 45 ++++++++++++++
+ packages/server/src/server/workspace-directory.ts  | 35 ++++++++---
+ .../server/src/server/workspace-registry.test.ts   | 43 ++++++++++++++
+ packages/server/src/server/workspace-registry.ts   | 35 ++++++++++-
+ .../workspace-same-cwd-isolation.e2e.test.ts       | 45 +++-----------
+ 13 files changed, 324 insertions(+), 83 deletions(-)
+ create mode 100644 handoffs/STATUS.md
+bisect found first bad commit

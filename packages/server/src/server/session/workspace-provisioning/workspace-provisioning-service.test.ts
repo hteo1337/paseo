@@ -173,8 +173,8 @@ test("linked worktrees share their git-common-dir project while another repo sta
     updatedAt: "2026-01-01T00:00:00.000Z",
   });
   await workspaceRegistry.upsert(legacyWorkspace);
-  const linkedWorkspace = await provisioning.createWorkspaceForDirectory(linked);
-  const aliasWorkspace = await provisioning.createWorkspaceForDirectory(linkedAlias);
+  const linkedWorkspace = await provisioning.findOrCreateWorkspaceForDirectory(linked);
+  const aliasWorkspace = await provisioning.findOrCreateWorkspaceForDirectory(linkedAlias);
   const explicitLegacy = await provisioning.createWorkspaceForDirectory(
     linked,
     null,
@@ -191,7 +191,7 @@ test("linked worktrees share their git-common-dir project while another repo sta
   expect((await projectRegistry.get(linkedWorkspace.projectId))?.rootPath).toBe(mainRepo);
   expect(
     (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
-  ).toHaveLength(3);
+  ).toHaveLength(4);
 });
 
 test("a review clone with the same remote rejoins its main project", async () => {
@@ -238,10 +238,8 @@ test("a review clone with the same remote rejoins its main project", async () =>
     projectKey: "remote:github.com/acme/repo",
     timestamp: "2026-01-01T00:00:00.000Z",
   });
-  const selectedNested = await cloneProvisioning.createWorkspaceForDirectory(
+  const selectedNested = await cloneProvisioning.findOrCreateWorkspaceForDirectory(
     path.join(main, "src"),
-    null,
-    nestedProject.projectId,
   );
   const legacyCloneProject = await projectRegistry.getOrCreateActiveByRoot({
     rootPath: clone,
@@ -262,11 +260,7 @@ test("a review clone with the same remote rejoins its main project", async () =>
     }),
   );
 
-  const joined = await cloneProvisioning.createWorkspaceForDirectory(
-    clone,
-    null,
-    legacyCloneProject.projectId,
-  );
+  const joined = await cloneProvisioning.findOrCreateWorkspaceForDirectory(clone);
   const subdirectory = await cloneProvisioning.createWorkspaceForDirectory(path.join(clone, "src"));
   const addedClone = await cloneProvisioning.findOrCreateProjectForDirectory(clone, {
     exactRoot: true,
@@ -915,12 +909,12 @@ test("create-agent reuses only active directory workspaces and groups disposable
   expect(aliasId).toBe("wks-alias");
 });
 
-test("createWorkspaceForDirectory reuses the active workspace at the same cwd", async () => {
+test("implicit directory open reuses the active workspace at the same cwd", async () => {
   const repo = path.join(tmpDir, "repo");
   gitRoots.add(repo);
 
   const first = await provisioning.createWorkspaceForDirectory(repo);
-  const second = await provisioning.createWorkspaceForDirectory(repo);
+  const second = await provisioning.findOrCreateWorkspaceForDirectory(repo);
 
   expect(second.workspaceId).toBe(first.workspaceId);
   expect(await workspaceRegistry.list()).toHaveLength(1);

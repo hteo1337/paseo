@@ -1,0 +1,77 @@
+checkout=/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline; runtime source/build modules traversed=106
+Non-relative runtime specifiers (including conditional/dynamic literal imports):
+@codemirror/language
+@codemirror/legacy-modes/mode/clike
+@codemirror/legacy-modes/mode/swift
+@getpaseo/highlight
+@getpaseo/plugin/internal/lifecycle
+@getpaseo/plugin/server
+@getpaseo/protocol/agent-labels
+@getpaseo/protocol/branch-slug
+@getpaseo/protocol/git-remote
+@getpaseo/protocol/messages
+@getpaseo/protocol/paseo-config-schema
+@getpaseo/protocol/websocket-message-limit
+@getpaseo/relay
+@isaacs/ttlcache
+@lezer/common
+@lezer/cpp
+@lezer/css
+@lezer/go
+@lezer/highlight
+@lezer/html
+@lezer/java
+@lezer/javascript
+@lezer/json
+@lezer/lr
+@lezer/markdown
+@lezer/php
+@lezer/python
+@lezer/rust
+@lezer/xml
+@lezer/yaml
+@modelcontextprotocol/sdk/server/zod-json-schema-compat.js
+@noble/ciphers/chacha.js
+@noble/curves/ed25519.js
+@noble/hashes/hmac.js
+@noble/hashes/sha2.js
+base64-js
+child_process
+fs
+fs/promises
+lezer-elixir
+node:async_hooks
+node:child_process
+node:crypto
+node:fs
+node:fs/promises
+node:net
+node:os
+node:path
+node:timers
+node:timers/promises
+node:util
+p-limit
+p-throttle
+path
+pino
+strip-ansi
+tree-kill
+tweetnacl
+util
+vitest
+which
+zod
+
+Workspace resolution table (runtime imports plus source type imports; from baseline server package):
+@getpaseo/highlight	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/highlight/dist/index.js	LOCAL
+@getpaseo/plugin/internal/lifecycle	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/plugin/dist/server/lifecycle.js	LOCAL
+@getpaseo/plugin/server	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/plugin/dist/server/index.js	LOCAL
+@getpaseo/protocol/agent-labels	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/agent-labels.js	LOCAL
+@getpaseo/protocol/branch-slug	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/branch-slug.js	LOCAL
+@getpaseo/protocol/git-remote	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/git-remote.js	LOCAL
+@getpaseo/protocol/messages	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/messages.js	LOCAL
+@getpaseo/protocol/paseo-config-schema	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/paseo-config-schema.js	LOCAL
+@getpaseo/protocol/websocket-message-limit	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol/dist/websocket-message-limit.js	LOCAL
+@getpaseo/relay	/Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/relay/dist/index.js	LOCAL
+workspace resolution failures=0

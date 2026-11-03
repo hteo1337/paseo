@@ -582,7 +582,12 @@ export class FileBackedWorkspaceRegistry
         );
       }
       const existing = Array.from(records.values())
-        .filter((candidate) => !candidate.archivedAt && matchesCwd(candidate.cwd))
+        .filter(
+          (candidate) =>
+            !candidate.archivedAt &&
+            candidate.background === parsed.background &&
+            matchesCwd(candidate.cwd),
+        )
         .sort(
           (left, right) =>
             Date.parse(left.createdAt) - Date.parse(right.createdAt) ||

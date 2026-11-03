@@ -1,0 +1,39 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/server
+
+stdout | src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  specify custom .env file path with { path: '/custom/path/.env' }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🛠️  run anywhere with `dotenvx run -- yourcommand`
+
+ ❯ src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts (51 tests | 1 failed) 189ms
+   × background workspace creation preserves hooks, inheritance and durable visibility 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts > background workspace creation preserves hooks, inheritance and durable visibility
+AssertionError: expected true to be false // Object.is equality
+
+- Expected
++ Received
+
+- false
++ true
+
+ ❯ src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts:323:30
+    321|   expect(parent.background).toBe(true);
+    322|   expect(child.background).toBe(true);
+    323|   expect(visible.background).toBe(false);
+       |                              ^
+    324|   expect(human.background).toBe(false);
+    325|   expect(events).toEqual(Array(4).fill("workspace.create.after"));
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 50 passed (51)
+   Start at  01:37:36
+   Duration  821ms (transform 335ms, setup 20ms, import 546ms, tests 189ms, environment 0ms)
+

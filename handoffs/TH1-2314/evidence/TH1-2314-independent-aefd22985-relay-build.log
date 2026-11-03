@@ -1,0 +1,8 @@
+npm notice run paseo@0.15.0 build:relay:clean
+npm notice run npm run build:clean --workspace=@getpaseo/relay
+npm notice run @getpaseo/relay@0.15.0 build:clean
+npm notice run npm run clean && npm run build
+npm notice run @getpaseo/relay@0.15.0 clean
+npm notice run node ../../scripts/clean-package-dist.mjs
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false

@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  44 passed (44)
+   Start at  01:38:01
+   Duration  784ms (transform 354ms, setup 17ms, import 550ms, tests 159ms, environment 0ms)
+

@@ -1,0 +1,28 @@
+npm notice run paseo@0.15.0 build:protocol:clean
+npm notice run npm run build:clean --workspace=@getpaseo/protocol
+npm notice run @getpaseo/protocol@0.15.0 build:clean
+npm notice run npm run clean && npm run build
+npm notice run @getpaseo/protocol@0.15.0 clean
+npm notice run node ../../scripts/clean-package-dist.mjs
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 239 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+src/messages.ts(4236,5): error TS1117: An object literal cannot have multiple properties with the same name.
+npm error Lifecycle script `build` failed with error:
+npm error code 2
+npm error path /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol
+npm error workspace @getpaseo/protocol@0.15.0
+npm error location /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol
+npm error command failed
+npm error command sh -c tsc -p tsconfig.json --incremental false
+npm error Lifecycle script `build:clean` failed with error:
+npm error code 2
+npm error path /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol
+npm error workspace @getpaseo/protocol@0.15.0
+npm error location /Users/hteo/.paseo/worktrees/3eu1vvlp/th1-2314-baseline/packages/protocol
+npm error command failed
+npm error command sh -c npm run clean && npm run build
