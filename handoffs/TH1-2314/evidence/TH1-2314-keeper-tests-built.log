@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/keeper/keeper-control.e2e.test.ts src/server/keeper/event-outbox.test.ts src/server/agent/tracked-permission-map.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  3 passed (3)
+      Tests  34 passed (34)
+   Start at  01:51:35
+   Duration  23.44s (transform 4.03s, setup 31ms, import 5.10s, tests 18.11s, environment 0ms)
+

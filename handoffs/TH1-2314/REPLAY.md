@@ -723,3 +723,120 @@ npm notice run 'vitest' run src/server/auto-archive-on-merge/archive-if-safe.tes
 
 
 ```
+
+## Keeper cluster 0025–0035 and 0041
+
+0025: git am -3 found additive persisted-config/test-harness conflicts; kept upstream usage/resume settings and local keeperControl fields. Adapted keeper steering's recordAcceptedSteer call to v0.15's providerMessageId argument. Build/typecheck/lint passed; isolated original keeper E2E 11 passed and permission/outbox units 9 passed.
+
+0026/0027 applied cleanly. 0028 required retaining upstream restartRecovery.captureRunningAgents before capturing the local closeAllAgents result. 0029 applied and was amended (unpublished commit only, original subject retained) to strengthen its existing instant-completion test with spies proving settleForegroundStart(started) and settleForegroundRun for the target agent. Its held-start negative control and instant-finish acceptance passed in a 14-test E2E run. A max-nested-callbacks warning in that added control was refactored, not suppressed.
+
+0029/0030 patch-file clarification: neither actual mbox directly changes pendingRun.start. They consume the stream's first accepted turn event. v0.15's stream produces that synthetic event only after runs.settleForegroundStart and finalizes through settleForegroundRun; port 0022 already preserved those primitives. We retained this event boundary, verified both real primitives in the existing E2E control, and did not restore any direct pendingRun.start assignment (rg returned exit 1/no matches). 0030 preserves its single late-first-event continuation/drainer; no second reader or old pending-start mutation introduced.
+
+0030/0031/0032/0033/0034/0035/0041 all applied cleanly after the root. No cascade conflict. All original subjects retained. Final source HEAD 1128b2c86. Root build/typecheck/lint passed. The first final E2E invocation overlapped the workspace build and saw stale client dist (keeperAnswerQuestion missing), so that result is recorded as a harness/setup failure, not a source regression. Waited for build exit 0 and inspected keeperAnswerQuestion in BOTH client source and this worktree's emitted JS, then reran the affected batch: 3 files, 34 tests passed. No auth checks added, test files excluded, baseline/regression claim, live daemon interaction, review or dispatch.
+
+`npm run build:server` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 build:server
+npm notice run npm run build:server-deps && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli
+npm notice run paseo@0.15.0 build:server-deps
+npm notice run npm run build:client && concurrently --kill-others-on-fail --names highlight,plugin,relay --prefix-colors yellow,green,blue "npm run build:highlight" "npm run build:plugin" "npm run build:relay"
+npm notice run paseo@0.15.0 build:client
+npm notice run npm run build --workspace=@getpaseo/client
+npm notice run @getpaseo/client@0.15.0 build
+npm notice run npm run build --workspace=@getpaseo/protocol && npm run build --workspace=@getpaseo/relay && tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 244 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run paseo@0.15.0 build:relay
+[highlight] npm notice run paseo@0.15.0 build:highlight
+[highlight] npm notice run npm run build --workspace=@getpaseo/highlight
+[relay] npm notice run npm run build --workspace=@getpaseo/relay
+[plugin] npm notice run paseo@0.15.0 build:plugin
+[plugin] npm notice run npm run build --workspace=@getpaseo/plugin
+[highlight] npm notice run @getpaseo/highlight@0.15.0 build
+[highlight] npm notice run tsc -p tsconfig.json --incremental false
+[plugin] npm notice run @getpaseo/plugin@0.15.0 build
+[plugin] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run @getpaseo/relay@0.15.0 build
+[relay] npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm run build:highlight exited with code 0
+[relay] npm run build:relay exited with code 0
+[plugin] npm run build:plugin exited with code 0
+npm notice run @getpaseo/server@0.15.0 build
+npm notice run npm run build:lib && npm run build:scripts
+npm notice run @getpaseo/server@0.15.0 build:lib
+npm notice run tsc -p tsconfig.server.json --incremental false && node scripts/build-opencode-bridge-plugin.mjs && node scripts/build-terminal-worker.mjs && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/server/server/speech/providers/local/sherpa/assets',{recursive:true}); fs.copyFileSync('src/server/speech/providers/local/sherpa/assets/silero_vad.onnx','dist/server/server/speech/providers/local/sherpa/assets/silero_vad.onnx'); fs.cpSync('src/terminal/shell-integration','dist/server/terminal/shell-integration',{recursive:true}); fs.cpSync('src/terminal/shell-integration','dist/src/terminal/shell-integration',{recursive:true}); fs.copyFileSync('src/terminal/terminal-ts-loader.mjs','dist/server/terminal/terminal-ts-loader.mjs'); fs.rmSync('dist/server/skills',{recursive:true,force:true}); fs.cpSync('../../skills','dist/server/skills',{recursive:true}); fs.rmSync('dist/server/builtin-plugins',{recursive:true,force:true}); fs.cpSync('../../plugins','dist/server/builtin-plugins',{recursive:true,filter:(source)=>!source.split(require('node:path').sep).some((segment)=>segment==='node_modules'||segment==='test')&&!/\.(test|spec)\.[cm]?[jt]sx?$/.test(source)&&!source.endsWith('.tsbuildinfo')});"
+npm notice run @getpaseo/server@0.15.0 build:scripts
+npm notice run tsc -p tsconfig.scripts.json --incremental false && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/scripts',{recursive:true}); fs.copyFileSync('scripts/mcp-stdio-socket-bridge-cli.mjs','dist/scripts/mcp-stdio-socket-bridge-cli.mjs');"
+npm notice run @getpaseo/cli@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+
+```
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/builtin-plugins@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.json --noEmit
+npm notice run @getpaseo/expo-two-way-audio@0.15.0 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.15.0 typecheck
+npm notice run @getpaseo/plugin@0.15.0 typecheck
+npm notice run tsgo --noEmit && npm run typecheck:examples
+npm notice run @getpaseo/plugin@0.15.0 typecheck:examples
+npm notice run npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+up to date in 129ms
+npm notice run @getpaseo/protocol@0.15.0 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 244 session message validators
+npm notice run @getpaseo/protocol@0.15.0 typecheck
+npm notice run @getpaseo/client@0.15.0 typecheck
+npm notice run @getpaseo/server@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.15.0 typecheck
+npm notice run @getpaseo/relay@0.15.0 typecheck
+npm notice run @getpaseo/website@0.15.0 typecheck
+npm notice run @getpaseo/desktop@0.15.0 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.15.0 typecheck
+
+```
+
+`npm run lint` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+Found 0 warnings and 0 errors.
+Finished in 1.1s on 5154 files with 177 rules using 16 threads.
+
+```
+
+`(cd packages/server && npx vitest run src/server/keeper/keeper-control.e2e.test.ts src/server/keeper/event-outbox.test.ts src/server/agent/tracked-permission-map.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/keeper/keeper-control.e2e.test.ts src/server/keeper/event-outbox.test.ts src/server/agent/tracked-permission-map.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  3 passed (3)
+      Tests  34 passed (34)
+   Start at  01:51:35
+   Duration  23.44s (transform 4.03s, setup 31ms, import 5.10s, tests 18.11s, environment 0ms)
+
+
+```

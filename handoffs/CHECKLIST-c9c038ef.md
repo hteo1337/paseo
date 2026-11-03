@@ -37,3 +37,5 @@ Baseline correction: shared node_modules contaminated @getpaseo resolution. Disc
 - [x] Repeat baseline/bisect with revision-local compiled packages at each step.
 
 - [ ] Port 0025, retry 0026–0035 and 0041; preserve settleForeground\* for 0029/0030.
+
+- [ ] Port 0055 and retry 0056/0063/0071, preserving upstream collapsed-open-workspace handling.
