@@ -26,6 +26,7 @@ function context(
     onKeyPressCallback: undefined,
     input: "",
     submitOnEnter: true,
+    sendShortcut: "enter",
     isAgentRunning: false,
     onQueue: undefined,
     isSubmitDisabled: false,

@@ -1,5 +1,6 @@
+import { PressHighlight } from "@/components/ui/press-highlight";
 import { memo, useCallback } from "react";
-import { Pressable, ScrollView, Text, View } from "react-native";
+import { ScrollView, Text, View } from "react-native";
 import { useTranslation } from "react-i18next";
 import { StyleSheet } from "react-native-unistyles";
 import type { PromptSuggestion } from "@getpaseo/protocol/messages";
@@ -45,7 +46,7 @@ const PromptSuggestionChip = memo(function PromptSuggestionChip({
   const { t } = useTranslation();
   const handlePress = useCallback(() => onSelect(suggestion.text), [onSelect, suggestion.text]);
   return (
-    <Pressable
+    <PressHighlight
       onPress={handlePress}
       style={chipStyle}
       accessibilityRole="button"
@@ -56,7 +57,7 @@ const PromptSuggestionChip = memo(function PromptSuggestionChip({
       <Text numberOfLines={1} style={[composerPillStyles.label, styles.chipLabel]}>
         {suggestion.text}
       </Text>
-    </Pressable>
+    </PressHighlight>
   );
 });
 

@@ -2474,7 +2474,10 @@ function ComposerContentImpl({
           <View style={inputAreaContentStyle}>
             {isFullscreen ? null : queueList}
             {!isFullscreen && sendErrorNode}
-            <PromptSuggestionChips suggestions={promptSuggestions.chips} onSelect={handleSuggestionSelect} />
+            <PromptSuggestionChips
+              suggestions={promptSuggestions.chips}
+              onSelect={handleSuggestionSelect}
+            />
 
             <ComposerAutocompleteBinding
               text={textSource}

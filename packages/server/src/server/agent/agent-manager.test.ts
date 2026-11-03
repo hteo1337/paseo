@@ -6179,6 +6179,8 @@ test("importProviderSession imports the selected session without listing and pub
   expect(client.importInput).toEqual({ providerHandleId: "thread-selected", cwd: workdir });
   expect(client.importLaunchContext).toEqual({
     agentId: imported.id,
+    mcpServers: {},
+    mcpServerOwners: undefined,
     env: {
       PASEO_AGENT_ID: imported.id,
       PASEO_AGENT_CWD: workdir,
@@ -7062,7 +7064,9 @@ test.each([false, true])(
         "effective opus refused",
       );
       expect(steerCalls).toBe(0);
-      expect(() => manager.tryRunOutOfBand(created.id, "/steer")).toThrow("effective opus refused");
+      await expect(manager.tryRunOutOfBand(created.id, "/steer")).rejects.toThrow(
+        "effective opus refused",
+      );
       expect(outOfBandCalls).toBe(0);
     } else {
       expect(manager.getAgent(created.id)).toBeNull();
