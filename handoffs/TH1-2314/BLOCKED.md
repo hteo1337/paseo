@@ -1,0 +1,1 @@
+TH1-2314 phase 1 stopped by explicit early-stop rule: 0005 git am -3 failed (exit 128), lacking/useless preimage SHA information for packages/app/src/i18n/resources/ar.ts; audit's clean verdict does not reproduce in this partial clone. Patches 0001–0004 preserved; resume at 0005 after reconciliation.
