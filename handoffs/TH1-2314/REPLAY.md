@@ -583,3 +583,143 @@ Fix: explicit directory creation allocates a record and emits its create hook; i
 Removed duplicate createdAt entries without narrowing the remaining optional protocol field; rebuilt protocol/client before assessing signatures. Both CLI arity diagnostics disappeared after declaration refresh: their locally added guard options are already in the actual client source, so no new upstream signature widening or guard removal was needed. Bootstrap's real mismatch now uses upstream resolveOrCreateWorkspaceIdForCreateAgent, preserving caller/background context. Added the fixture's actual getOrCreateActiveByCwd implementation. Upstream complexity max=20 and no-sync-io rules verified at v0.15.0. Our project/path probes now await fs/promises access/realpath; archive preflight is extracted to a small helper. No lint-disable added.
 
 Pre-0064 repaired drift gate: build:server exit 0, root typecheck exit 0 (same documented npm userconfig workaround), full three workspace files 108/108 pass without bail/exclusions. Lint was clean for production, then caught max-depth in the new evidence scanner; scanner refactored without suppression. Complete 0064 gate remains pending until that patch is reapplied and its drain spy call explicitly asserted.
+
+## 0064 authorized port and required pre-keeper gate — GREEN
+
+Lead authorized keeping the proven drainSessionEvents seam. Replayed 0064 with git am -3; retained HEAD for the race seam and added `expect(drainSpy).toHaveBeenCalled()` before the existing armed=false, deferred, session-not-closed and workspace-not-archived assertions. Full archive-if-safe file passed 29/29 with that assertion installed; the seam cannot silently remain uncalled. No mocked archive behavior or excluded test.
+
+The drift repair made one additional source conflict in 0064's extracted disposable-cwd helper: retained its Sandbox-boundary/dotfiles behavior, using async access instead of restoring synchronous IO. Its automatically merged test hunks also attempted to alter the upstream background test (different paths and visibility errors); those obsolete adaptations were reconciled to the unchanged upstream test/visibility contract. Explicit upstream create and recovery assertions remain unchanged; local atomic claims are visibility-scoped. Other production hunks retained. Original patch subject preserved by git am --continue.
+
+Before starting 0025, these exact commands all exited 0 (full logs below):
+
+- `npm run build:server`
+- `npm_config_userconfig=/dev/null npm run typecheck` (documented npm12 user-config issue only)
+- `npm run lint`
+- `(cd packages/server && npx vitest run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts src/server/workspace-archive-service.test.ts)` — **3 files, 108 passed, no bail/exclusions/deselection**.
+- `(cd packages/server && npx vitest run src/server/auto-archive-on-merge/archive-if-safe.test.ts)` — **29 passed**, includes explicit drain-spy-called control.
+
+Independent baseline worktree was reset out of bisect, inspected clean at 6a72342a1, and removed after all evidence was copied into this branch. Task worktree and its work were not stashed, reset or checked out. No review or task dispatch.
+
+`npm run build:server` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 build:server
+npm notice run npm run build:server-deps && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli
+npm notice run paseo@0.15.0 build:server-deps
+npm notice run npm run build:client && concurrently --kill-others-on-fail --names highlight,plugin,relay --prefix-colors yellow,green,blue "npm run build:highlight" "npm run build:plugin" "npm run build:relay"
+npm notice run paseo@0.15.0 build:client
+npm notice run npm run build --workspace=@getpaseo/client
+npm notice run @getpaseo/client@0.15.0 build
+npm notice run npm run build --workspace=@getpaseo/protocol && npm run build --workspace=@getpaseo/relay && tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 239 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run paseo@0.15.0 build:relay
+[relay] npm notice run npm run build --workspace=@getpaseo/relay
+[highlight] npm notice run paseo@0.15.0 build:highlight
+[highlight] npm notice run npm run build --workspace=@getpaseo/highlight
+[plugin] npm notice run paseo@0.15.0 build:plugin
+[plugin] npm notice run npm run build --workspace=@getpaseo/plugin
+[highlight] npm notice run @getpaseo/highlight@0.15.0 build
+[highlight] npm notice run tsc -p tsconfig.json --incremental false
+[plugin] npm notice run @getpaseo/plugin@0.15.0 build
+[plugin] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run @getpaseo/relay@0.15.0 build
+[relay] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm run build:relay exited with code 0
+[highlight] npm run build:highlight exited with code 0
+[plugin] npm run build:plugin exited with code 0
+npm notice run @getpaseo/server@0.15.0 build
+npm notice run npm run build:lib && npm run build:scripts
+npm notice run @getpaseo/server@0.15.0 build:lib
+npm notice run tsc -p tsconfig.server.json --incremental false && node scripts/build-opencode-bridge-plugin.mjs && node scripts/build-terminal-worker.mjs && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/server/server/speech/providers/local/sherpa/assets',{recursive:true}); fs.copyFileSync('src/server/speech/providers/local/sherpa/assets/silero_vad.onnx','dist/server/server/speech/providers/local/sherpa/assets/silero_vad.onnx'); fs.cpSync('src/terminal/shell-integration','dist/server/terminal/shell-integration',{recursive:true}); fs.cpSync('src/terminal/shell-integration','dist/src/terminal/shell-integration',{recursive:true}); fs.copyFileSync('src/terminal/terminal-ts-loader.mjs','dist/server/terminal/terminal-ts-loader.mjs'); fs.rmSync('dist/server/skills',{recursive:true,force:true}); fs.cpSync('../../skills','dist/server/skills',{recursive:true}); fs.rmSync('dist/server/builtin-plugins',{recursive:true,force:true}); fs.cpSync('../../plugins','dist/server/builtin-plugins',{recursive:true,filter:(source)=>!source.split(require('node:path').sep).some((segment)=>segment==='node_modules'||segment==='test')&&!/\.(test|spec)\.[cm]?[jt]sx?$/.test(source)&&!source.endsWith('.tsbuildinfo')});"
+npm notice run @getpaseo/server@0.15.0 build:scripts
+npm notice run tsc -p tsconfig.scripts.json --incremental false && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/scripts',{recursive:true}); fs.copyFileSync('scripts/mcp-stdio-socket-bridge-cli.mjs','dist/scripts/mcp-stdio-socket-bridge-cli.mjs');"
+npm notice run @getpaseo/cli@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+
+```
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/builtin-plugins@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.json --noEmit
+npm notice run @getpaseo/expo-two-way-audio@0.15.0 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.15.0 typecheck
+npm notice run @getpaseo/plugin@0.15.0 typecheck
+npm notice run tsgo --noEmit && npm run typecheck:examples
+npm notice run @getpaseo/plugin@0.15.0 typecheck:examples
+npm notice run npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+up to date in 135ms
+npm notice run @getpaseo/protocol@0.15.0 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 239 session message validators
+npm notice run @getpaseo/protocol@0.15.0 typecheck
+npm notice run @getpaseo/client@0.15.0 typecheck
+npm notice run @getpaseo/server@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.15.0 typecheck
+npm notice run @getpaseo/relay@0.15.0 typecheck
+npm notice run @getpaseo/website@0.15.0 typecheck
+npm notice run @getpaseo/desktop@0.15.0 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.15.0 typecheck
+
+```
+
+`npm run lint` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+Found 0 warnings and 0 errors.
+Finished in 1.1s on 5144 files with 177 rules using 16 threads.
+
+```
+
+`(cd packages/server && npx vitest run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts src/server/workspace-archive-service.test.ts)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts src/server/workspace-archive-service.test.ts
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  3 passed (3)
+      Tests  108 passed (108)
+   Start at  01:42:45
+   Duration  7.58s (transform 510ms, setup 31ms, import 899ms, tests 6.45s, environment 0ms)
+
+
+```
+
+`(cd packages/server && npx vitest run src/server/auto-archive-on-merge/archive-if-safe.test.ts)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/auto-archive-on-merge/archive-if-safe.test.ts
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  01:41:45
+   Duration  2.11s (transform 451ms, setup 19ms, import 678ms, tests 1.35s, environment 0ms)
+
+
+```

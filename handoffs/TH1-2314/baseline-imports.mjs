@@ -89,14 +89,13 @@ while (pending.length) {
     if (spec.startsWith(".")) {
       const next = localFile(file, spec);
       if (next && /\.[cm]?[jt]sx?$/.test(next)) pending.push(next);
-    } else {
-      if (!imports.has(spec)) imports.set(spec, new Set());
-      imports.get(spec).add(path.relative(root, file));
-      // Continue through actual built workspace JS so their transitive imports are covered too.
-      if (spec.startsWith("@getpaseo/")) {
-        const workspaceFile = resolveWorkspaceFile(file, spec);
-        if (workspaceFile) pending.push(workspaceFile);
-      }
+      continue;
+    }
+    if (!imports.has(spec)) imports.set(spec, new Set());
+    imports.get(spec).add(path.relative(root, file));
+    if (spec.startsWith("@getpaseo/")) {
+      const workspaceFile = resolveWorkspaceFile(file, spec);
+      if (workspaceFile) pending.push(workspaceFile);
     }
   }
 }

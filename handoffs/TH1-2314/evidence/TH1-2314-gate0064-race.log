@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/auto-archive-on-merge/archive-if-safe.test.ts
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  29 passed (29)
+   Start at  01:41:45
+   Duration  2.11s (transform 451ms, setup 19ms, import 678ms, tests 1.35s, environment 0ms)
+

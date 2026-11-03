@@ -29,9 +29,11 @@ Lead correction: establish causation before retaining background fix.
 - [x] Run full provisioning file on detached 40e5f1bd4; if failing also baseline v0.15.0.
 - [x] If 40e5f1bd4 passes, confirm 6a72342a1 fails, bisect the file and record exact first bad commit/hunk.
 - [x] Reconcile preserved uncommitted changes against independent causal evidence (0048); upstream background test unchanged.
-- [ ] Reapply 0064, assert drain spy was called, and run full gate before keeper.
+- [x] Reapply 0064, assert drain spy was called, and run full gate before keeper (build/typecheck/lint exit 0; three full workspace files 108/108; archive race file 29/29).
 
 Baseline correction: shared node_modules contaminated @getpaseo resolution. Discard initial baseline/bisect verdicts; harness failure TTLCache was not an assertion failure.
 
 - [x] Give detached baseline its own install/build and record all transitive @getpaseo resolutions before remeasurement.
 - [x] Repeat baseline/bisect with revision-local compiled packages at each step.
+
+- [ ] Port 0025, retry 0026–0035 and 0041; preserve settleForeground\* for 0029/0030.
