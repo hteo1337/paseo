@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/plugins/lifecycle.e2e.test.ts --bail=1 -t agent creation hooks change the provider and environment before the session opens
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 14 skipped (15)
+   Start at  00:04:52
+   Duration  6.41s (transform 3.77s, setup 20ms, import 4.83s, tests 1.50s, environment 0ms)
+

@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/plugins/lifecycle/handlers.test.ts src/server/agent/create-agent/create.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  50 passed (50)
+   Start at  00:04:33
+   Duration  4.27s (transform 3.25s, setup 26ms, import 4.07s, tests 43ms, environment 0ms)
+

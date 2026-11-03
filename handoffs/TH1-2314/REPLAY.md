@@ -389,3 +389,76 @@ npm notice run 'vitest' run src/server/workspace-archive-service.test.ts --bail=
 ```
 
 Archive batch command also ran deferral.test.ts green (31 tests) before bailing on the old internal storage-spy test in archive-if-safe.test.ts. Only failing files were re-run after corrections. Agent-manager file initially exposed upstream MCP result-shape drift and a synchronous assertion on the now-async out-of-band API; final complete file is 286/286. No unrelated regression or flake claims; no full Paseo suite or UI/browser checks run. Accounts source remained unchanged.
+
+## Phase 2 checkpoint: 0057 and 0058 landed; bundled 0073 deferred
+
+Phase 1 was committed and pushed **before** phase 2: remote HEAD f6862a47315f78dfef32f30cf1a5ff6e612cfac5 matched local HEAD (git ls-remote checked). Lead's new order supersedes STOP at 0022 and cancels review/PR; no review agent/task was created.
+
+`git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/0057*.patch` found expected genuine namespace conflicts. Hand-port preserved v0.15 PluginHookRequests/agent.create.before, async validation, flat registry and upstream worktree validation. Added immutable creation provenance to that request; legacy before(agent.create) still maps there. Upstream daemon E2E was extended with provenance assertions while keeping its real provider plugin. `git am --continue` committed 14e8ad497 with original subject.
+
+`git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/0058*.patch` applied cleanly; commit 2f9d49c94 retains its original subject. Trusted system provenance is carried by hub/schedule creation. No need to hand-port the cascade.
+
+### Newly verified ordering problem in 0073
+
+0073 is an mbox containing **two commits**, not only build identity. First message (`fix(server): advertise local build identity to keeper`) applied. The second (`fix(server): bind keeper build identity to its app bundle`) conflicted in eight files. Its 17-file integration includes idle-runtime-cleanup, agent manager, bootstrap, hook types, keyboard helpers and a legacy handoff from TH1-2057.
+
+The prescribed order puts 0073 before **0025 and 0059**, but its contents depend on both:
+
+- First message's websocket-server.relay-reconnect.test.ts imports ./keeper/keeper-control.js and constructs WebSocketServer with keeperControl. `test -f packages/server/src/server/keeper/keeper-control.ts` returned exit 1: absent before 0025.
+- Second message's agent-manager conflict brings in a whole beginAgentUse/unloadIdleAgents/idle diagnostics block from its preimage. `git show 2f9d49c94:packages/server/src/server/agent/agent-manager.ts | rg -n 'beginAgentUse|idleUnloadCloses|logIdleUnloadSkips'` returned exit 1: absent before 0059. The conflict's base already contains those later-root methods; this is not an add-only independent identity fix.
+- Second message changes bootstrap from startIdleAgentUnload to the upstream collector, using idleUnloadMinutes and manager logging from 0059. Restoring incoming blocks now would pull later roots forward and risk replacing v0.15 runtime cleanup. Omitting those hunks would drop local behavior, which is forbidden.
+
+Stopped rather than inventing an order change or dropping hunks. Inspected current patch and conflict names, then `git am --abort` restored **2f9d49c94**, undoing both messages of this 0073 invocation. No build-identity fragment, legacy handoff, conflict or am state remains. 0057 and 0058 remain committed. No 0051+ or later root attempted. Proposed next step: defer the entire 0073 mbox until after 0025/0059, then resume the lead's root order; requires lead's sequencing decision.
+
+`npm run build:server` — exit 0. [Exact output](evidence/TH1-2314-build57.log).
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0. [Exact output](evidence/TH1-2314-typecheck58.log).
+
+`npm run lint` — exit 0. [Exact output](evidence/TH1-2314-lint58.log).
+
+`(cd packages/server && npx vitest run src/server/plugins/lifecycle/handlers.test.ts src/server/agent/create-agent/create.test.ts --bail=1)` — exit 0. [Exact output](evidence/TH1-2314-tests57.log).
+
+```text
+npm notice run 'vitest' run src/server/plugins/lifecycle/handlers.test.ts src/server/agent/create-agent/create.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  50 passed (50)
+   Start at  00:04:33
+   Duration  4.27s (transform 3.25s, setup 26ms, import 4.07s, tests 43ms, environment 0ms)
+
+```
+
+`(cd packages/server && npx vitest run src/server/plugins/lifecycle.e2e.test.ts --bail=1 -t "agent creation hooks change the provider and environment before the session opens")` — exit 0. [Exact output](evidence/TH1-2314-e2e57.log).
+
+```text
+npm notice run 'vitest' run src/server/plugins/lifecycle.e2e.test.ts --bail=1 -t agent creation hooks change the provider and environment before the session opens
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed | 14 skipped (15)
+   Start at  00:04:52
+   Duration  6.41s (transform 3.77s, setup 20ms, import 4.83s, tests 1.50s, environment 0ms)
+
+```
+
+`(cd packages/server && npx vitest run src/server/agent/create-agent/create.test.ts --bail=1)` — exit 0. [Exact output](evidence/TH1-2314-tests58.log).
+
+```text
+npm notice run 'vitest' run src/server/agent/create-agent/create.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  11 passed (11)
+   Start at  00:06:04
+   Duration  2.06s (transform 1.38s, setup 21ms, import 1.94s, tests 32ms, environment 0ms)
+
+```
+
+`git am -3 ~/Work/GitHub/paseo-app-patches/v0.14/0073*.patch` — exit 128. [Exact output](evidence/TH1-2314-0073.log).

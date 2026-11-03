@@ -1,0 +1,52 @@
+Applying: fix(server): advertise local build identity to keeper
+Applying: fix(server): bind keeper build identity to its app bundle
+Using index info to reconstruct a base tree...
+M	.oxlintrc.json
+M	docs/agent-lifecycle.md
+A	handoffs/STATUS.md
+M	packages/app/src/composer/input/desktop-keys.test.ts
+M	packages/app/src/composer/input/desktop-keys.ts
+M	packages/plugin/src/server/lifecycle.ts
+M	packages/server/src/server/agent/agent-manager.test.ts
+M	packages/server/src/server/agent/agent-manager.ts
+M	packages/server/src/server/bootstrap.ts
+M	packages/server/src/server/config.ts
+M	packages/server/src/server/daemon-config-store.test.ts
+M	packages/server/src/server/plugins/lifecycle/handlers.test.ts
+M	packages/server/src/server/plugins/lifecycle/index.ts
+M	packages/server/src/server/websocket-server.relay-reconnect.test.ts
+Falling back to patching base and 3-way merge...
+Auto-merging .oxlintrc.json
+Auto-merging docs/agent-lifecycle.md
+CONFLICT (content): Merge conflict in docs/agent-lifecycle.md
+CONFLICT (modify/delete): handoffs/STATUS.md deleted in HEAD and modified in fix(server): bind keeper build identity to its app bundle.  Version fix(server): bind keeper build identity to its app bundle of handoffs/STATUS.md left in tree.
+Auto-merging packages/app/src/composer/input/desktop-keys.ts
+CONFLICT (content): Merge conflict in packages/app/src/composer/input/desktop-keys.ts
+Auto-merging packages/plugin/src/server/lifecycle.ts
+CONFLICT (content): Merge conflict in packages/plugin/src/server/lifecycle.ts
+Auto-merging packages/server/src/server/agent/agent-manager.test.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/agent-manager.test.ts
+Auto-merging packages/server/src/server/agent/agent-manager.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/agent/agent-manager.ts
+Auto-merging packages/server/src/server/bootstrap.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/bootstrap.ts
+Auto-merging packages/server/src/server/config.ts
+Auto-merging packages/server/src/server/daemon-config-store.test.ts
+Auto-merging packages/server/src/server/plugins/lifecycle/handlers.test.ts
+Auto-merging packages/server/src/server/plugins/lifecycle/index.ts
+CONFLICT (content): Merge conflict in packages/server/src/server/plugins/lifecycle/index.ts
+Auto-merging packages/server/src/server/websocket-server.relay-reconnect.test.ts
+Recorded preimage for 'docs/agent-lifecycle.md'
+Recorded preimage for 'packages/app/src/composer/input/desktop-keys.ts'
+Recorded preimage for 'packages/plugin/src/server/lifecycle.ts'
+Recorded preimage for 'packages/server/src/server/agent/agent-manager.test.ts'
+Recorded preimage for 'packages/server/src/server/agent/agent-manager.ts'
+Recorded preimage for 'packages/server/src/server/bootstrap.ts'
+Recorded preimage for 'packages/server/src/server/plugins/lifecycle/index.ts'
+error: Failed to merge in the changes.
+hint: Use 'git am --show-current-patch=diff' to see the failed patch
+hint: When you have resolved this problem, run "git am --continue".
+hint: If you prefer to skip this patch, run "git am --skip" instead.
+hint: To restore the original branch and stop patching, run "git am --abort".
+hint: Disable this message with "git config set advice.mergeConflict false"
+Patch failed at 0002 fix(server): bind keeper build identity to its app bundle

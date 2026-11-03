@@ -1,1 +1,1 @@
-None for phase 1. Initial missing abbreviated-SHA preimages were populated by lead; root typecheck requires npm_config_userconfig=/dev/null to avoid npm 12 rejecting the user allow-scripts config during the nested example install.
+TH1-2314: 0073 is a two-commit mbox whose integration depends on not-yet-landed 0059 idle-unload methods and 0025 KeeperControl; prescribed early position is not independent. Aborted whole invocation, preserving 0057/0058. Recommend defer entire 0073 until after 0025/0059, then resume remaining root order; no hunks dropped or roots pulled forward.
