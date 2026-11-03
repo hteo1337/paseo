@@ -1,0 +1,104 @@
+npm warn ERESOLVE overriding peer dependency
+npm warn While resolving: @getpaseo/expo-two-way-audio@0.15.0
+npm warn Found: react@19.3.1
+npm warn packages/expo-two-way-audio/node_modules/react
+npm warn
+npm warn Could not resolve dependency:
+npm warn peer overridden react@"19.2.3" (was "*") from @getpaseo/expo-two-way-audio@0.15.0
+npm warn packages/expo-two-way-audio
+npm warn   @getpaseo/expo-two-way-audio@0.15.0
+npm warn   node_modules/@getpaseo/expo-two-way-audio
+npm warn deprecated inflight@1.0.6: This module is not supported, and leaks memory. Do not use it. Check out lru-cache if you want a good and tested way to coalesce async requests by a key value, which is much more comprehensive and powerful.
+npm warn deprecated lodash.get@4.4.2: This package is deprecated. Use the optional chaining (?.) operator instead.
+npm warn deprecated rimraf@2.4.5: Rimraf versions prior to v4 are no longer supported
+npm warn deprecated lodash.isequal@4.5.0: This package is deprecated. Use require('node:util').isDeepStrictEqual instead.
+npm warn deprecated @oclif/screen@3.0.8: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated abab@2.0.6: Use your platform's native atob() and btoa() methods instead
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@6.0.4: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@7.2.3: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+npm warn deprecated whatwg-encoding@2.0.0: Use @exodus/bytes instead for a more spec-conformant and faster implementation
+npm warn deprecated domexception@4.0.0: Use your platform's native DOMException instead
+npm warn deprecated @xmldom/xmldom@0.7.13: this version is no longer supported, please update to at least 0.8.*
+npm warn deprecated boolean@3.2.0: Package no longer supported. Contact Support at https://www.npmjs.com/support for more info.
+npm warn deprecated tar@6.2.1: Old versions of tar are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm warn deprecated glob@10.5.0: Old versions of glob are not supported, and contain widely publicized security vulnerabilities, which have been fixed in the current version. Please update. Support for old versions may be purchased (at exorbitant rates) by contacting i@izs.me
+npm notice run paseo@0.15.0 postinstall
+npm notice run node scripts/postinstall-patches.mjs
+patch-package 8.0.1
+Applying patches...
+expo-modules-core@57.0.23 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-enriched-markdown@1.2.0-nightly-20261014-766fc0e67 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-unistyles@3.2.4 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-reanimated@4.5.5 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-draggable-flatlist@4.0.3 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-gesture-handler@2.32.0 ✔
+patch-package 8.0.1
+Applying patches...
+@gorhom/bottom-sheet@5.2.14 ✔
+patch-package 8.0.1
+Applying patches...
+react-native-svg@15.15.4 ✔
+patch-package 8.0.1
+Applying patches...
+@mattermost/react-native-paste-input@2.0.1 ✔
+patch-package 8.0.1
+Applying patches...
+@opencode-ai/sdk@1.14.46 ✔
+npm notice run paseo@0.15.0 prepare
+npm notice run lefthook install --force
+sync hooks: ✔️ (pre-commit)
+
+added 2732 packages, and audited 2745 packages in 35s
+
+502 packages are looking for funding
+  run `npm fund` for details
+
+163 vulnerabilities (14 low, 88 moderate, 45 high, 16 critical)
+
+To address issues that do not require attention, run:
+  npm audit fix
+
+To address all issues possible (including breaking changes), run:
+  npm audit fix --force
+
+Some issues need review, and may require choosing
+a different dependency.
+
+Run `npm audit` for details.
+npm warn install-scripts 17 packages had install scripts blocked because they are not covered by allowScripts:
+npm warn install-scripts   dtrace-provider@0.8.8 (install: node-gyp rebuild || node suppress-error.js)
+npm warn install-scripts   esbuild@0.27.3 (postinstall: node install.js)
+npm warn install-scripts   fsevents@2.3.3 (install: (install scripts present))
+npm warn install-scripts   lefthook@2.1.6 (postinstall: node postinstall.js)
+npm warn install-scripts   msgpackr-extract@3.0.4 (install: node-gyp-build-optional-packages)
+npm warn install-scripts   fsevents@2.3.2 (install: (install scripts present))
+npm warn install-scripts   sharp@0.34.5 (install: node install/check.js || npm run build)
+npm warn install-scripts   unrs-resolver@1.11.1 (postinstall: napi-postinstall unrs-resolver 1.11.1 check)
+npm warn install-scripts   workerd@1.20260507.1 (postinstall: node install.js)
+npm warn install-scripts   @shopify/react-native-skia@2.6.2 (postinstall: node scripts/install-libs.js)
+npm warn install-scripts   esbuild@0.28.1 (postinstall: node install.js)
+npm warn install-scripts   react-native-enriched-markdown@1.2.0-nightly-20261014-766fc0e67 (postinstall: node postinstall.mjs)
+npm warn install-scripts   workerd@1.20260625.1 (postinstall: node install.js)
+npm warn install-scripts   esbuild@0.25.12 (postinstall: node install.js)
+npm warn install-scripts   node-pty@1.2.0-beta.15 (install: node scripts/prebuild.js || node-gyp rebuild; postinstall: node scripts/post-install.js)
+npm warn install-scripts   esbuild@0.28.1 (postinstall: node install.js)
+npm warn install-scripts   workerd@1.20260625.1 (postinstall: node install.js)
+npm warn install-scripts
+npm warn install-scripts Run `npm install-scripts ls` to review, or `npm install-scripts approve <pkg>` to allow.
