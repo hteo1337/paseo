@@ -99,7 +99,6 @@ Child creation can use an unarchived closed parent from durable storage. Resolvi
 parentage does not resume the parent's provider or start a turn. Archived parents
 remain unavailable.
 
-
 A provider runtime can still die on its own — crash, OOM kill, host suspend. Work the agent parked
 inside that process dies with it: Claude Code's background Bash shells, `Monitor` watches, and
 workflows all live in the CLI process, and the completion notification that would have woken the

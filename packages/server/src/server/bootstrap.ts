@@ -1127,20 +1127,22 @@ export async function createPaseoDaemon(
   ): Promise<string> => {
     // Reuse the active workspace for this directory; minting a row per create
     // left hundreds of duplicate workspaces sharing one cwd.
-    const workspace = await workspaceProvisioning.findOrCreateWorkspaceForDirectory(
+    const workspaceId = await workspaceProvisioning.resolveOrCreateWorkspaceIdForCreateAgent({
       cwd,
-      resolveFirstAgentPromptTitle(firstAgentContext),
-      undefined,
-      context,
-    );
+      createdWorktree: null,
+      initialTitle: resolveFirstAgentPromptTitle(firstAgentContext),
+      callerWorkspaceId: context?.callerWorkspaceId,
+    });
     if (firstAgentContext) {
+      const workspace = await workspaceRegistry.get(workspaceId);
+      if (!workspace) throw new Error(`Workspace ${workspaceId} disappeared during creation`);
       workspaceAutoName.scheduleForDirectory({
-        workspaceId: workspace.workspaceId,
+        workspaceId,
         cwd: workspace.cwd,
         firstAgentContext,
       });
     }
-    return workspace.workspaceId;
+    return workspaceId;
   };
   const listActiveWorkspacesExternal = async (): Promise<ActiveWorkspaceRef[]> => {
     const workspaces = await workspaceRegistry.list();
