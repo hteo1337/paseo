@@ -1,0 +1,2 @@
+npm notice run @getpaseo/server@0.15.0 build:owner-unix
+npm notice run node scripts/build-owner-unix.mjs

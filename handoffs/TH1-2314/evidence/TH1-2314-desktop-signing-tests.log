@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run scripts/mac-signing.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/desktop
+
+
+ Test Files  1 passed (1)
+      Tests  1 passed (1)
+   Start at  02:16:52
+   Duration  129ms (transform 21ms, setup 0ms, import 28ms, tests 23ms, environment 0ms)
+
+exit=0
