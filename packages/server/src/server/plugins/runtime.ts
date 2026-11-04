@@ -879,12 +879,16 @@ export class PluginRuntime {
         timeout,
       });
       loaded.pendingRequestSends += 1;
-      void send(child, message).finally(() => { loaded.pendingRequestSends -= 1; }).catch((error) => {
-        clearTimeout(timeout);
-        signal?.removeEventListener("abort", cancel);
-        loaded.pending.delete(requestId);
-        reject(error);
-      });
+      void send(child, message)
+        .finally(() => {
+          loaded.pendingRequestSends -= 1;
+        })
+        .catch((error) => {
+          clearTimeout(timeout);
+          signal?.removeEventListener("abort", cancel);
+          loaded.pending.delete(requestId);
+          reject(error);
+        });
     }).finally(() => {
       const durationMs = performance.now() - startedAt;
       if (durationMs >= 500) {
