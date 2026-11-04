@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  33 passed (33)
+   Start at  01:54:31
+   Duration  307ms (transform 103ms, setup 18ms, import 146ms, tests 76ms, environment 0ms)
+

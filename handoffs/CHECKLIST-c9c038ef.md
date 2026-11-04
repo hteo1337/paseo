@@ -15,14 +15,14 @@ Resumed after lead populated all series blobs; preserve 0001–0004, continue at
 - [x] Phase 2: attempt 0057/0058/0073, stopping on a dependent conflict after its root.
 - [x] Phase 2: proceed through remaining authorized roots/dependents or document explicit stop condition.
 
-- [ ] Resolve 0073 sequencing decision and finish remaining phase-2 port.
+- [x] Resolve 0073 sequencing decision: both messages deferred until the series tail.
 
 Lead approved deferring both 0073 messages until after 0025/0059; resume root order at 0051. Report questions in channel, not async form.
 
 - [x] Port 0051/0054 and retry 0064, replaying needed clean prerequisites without changing root order (0064 still conflicts; mandatory stop documented).
 - [x] Preserve mandated 0064 cascade stop with evidence; remaining roots not started.
 
-- [ ] Resolve current workspace build/typecheck/lint/background test failures and lead decision on 0064, then resume remaining roots.
+- [x] Resolve workspace drift and 0064 with the full green pre-keeper gate.
 
 Lead correction: establish causation before retaining background fix.
 
@@ -36,6 +36,13 @@ Baseline correction: shared node_modules contaminated @getpaseo resolution. Disc
 - [x] Give detached baseline its own install/build and record all transitive @getpaseo resolutions before remeasurement.
 - [x] Repeat baseline/bisect with revision-local compiled packages at each step.
 
-- [ ] Port 0025, retry 0026–0035 and 0041; preserve settleForeground\* for 0029/0030.
+- [x] Port 0025, retry 0026–0035 and 0041; preserve settleForeground\* for 0029/0030 (34 tests and green build/typecheck/lint checkpoint).
 
-- [ ] Port 0055 and retry 0056/0063/0071, preserving upstream collapsed-open-workspace handling.
+- [x] Port 0055 and retry 0056/0063/0071, preserving upstream collapsed-open-workspace handling (green build/typecheck/lint, session154 and targeted suites).
+
+- [ ] Port 0038 and retry 0061/0062; keep upstream snapshot retention.
+- [ ] Port 0044 and replay 0045.
+- [ ] Port 0059 bounded idle provider unload.
+- [ ] Port 0070 against the rewritten Codex agent.
+- [ ] Replay remaining clean prerequisites and all of 0073 last, unsplit into two commits.
+- [ ] Run final relevant checks, update exact evidence and issue state, commit and push handoff.

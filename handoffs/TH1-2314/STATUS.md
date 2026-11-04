@@ -1,11 +1,11 @@
 # TH1-2314 — Paseo v0.15 port
 
-- Issue: https://linear.app/th1337/issue/TH1-2314 ; project: Paseo Upstream; repo: hteo1337/paseo; branch: port/TH1-2314-v0150; origin=fork only.
-- Worktree: /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7. Landed: 0001–0022, 0025–0035/0041, 0036/37, 0046–0054, 0057/58, 0064. Original subjects retained; integration fixes separate. Last source 1128b2c86.
-- Causation: independent own-install/build/resolution baseline + per-revision builds/bisect identified 0048/aefd22985. Upstream background test unchanged, explicit creation restored and implicit reuse retained; contaminated first experiment discarded. BASELINE.md has full resolve table/outputs.
-- Workspace/0064 gate GREEN before keeper: build/typecheck/lint exit0, three full workspace files 108 passed (no bail/exclusions), archive race file 29 passed with explicit drain-spy-called assertion. Checkpoint da6ccbb04 pushed before 0025.
-- Keeper: 0025 additive conflicts + providerMessageId adaptation; 0028 preserves upstream restart capture. Other dependent patches applied clean. 0029 existing E2E now proves settleForegroundStart/settleForegroundRun; accepted-event boundary and 0030 late drain retained, no direct pendingRun.start mutation.
-- Latest keeper gate GREEN: build:server/typecheck/lint exit0; three keeper/permission/outbox files 34 passed after waiting for fresh client dist. Earlier stale-client test startup failure recorded, not a source regression. Exact commands/output in REPLAY.md/evidence.
-- Next: 0055 project groups; preserve upstream #8395 collapsed/open workspace handling, then retry 0056/0063/0071. Stop on a new cascade conflict after root. No later root started.
-- Remaining order: 0038→0061/62, 0044(+0045), 0059, 0070, both 0073 commits last; remaining clean patches/prerequisites still to replay. npm_config_userconfig=/dev/null only avoids npm12 nested-install user-config incompatibility.
-- Boundaries: no review/task dispatch, PR/merge/export/updater edits, Electron build/install/restart or upstream push. Baseline worktree retired after evidence captured. Report in conversation, no async questions.
+- Issue: https://linear.app/th1337/issue/TH1-2314 ; project: Paseo Upstream; repo hteo1337/paseo; branch port/TH1-2314-v0150; origin=fork only.
+- Worktree: /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7. Landed 0001–0037, 0041, 0046–0058, 0063/64/71; original subjects retained, integration fixes separate.
+- Workspace causation: independent own-install/build/resolution baseline + per-revision bisect identified 0048/aefd22985; fixed explicit creation while retaining implicit atomic reuse. Upstream assertion unchanged. BASELINE.md has resolve table/outputs; initial contaminated harness discarded.
+- Workspace/0064 pre-keeper gate: build/typecheck/lint exit0; three full workspace files 108 passed, archive race 29 with drain-spy-called assertion. Checkpoint da6ccbb04 pushed first.
+- Keeper gate: build/typecheck/lint exit0, 34 tests. Existing 0029 E2E proves settleForegroundStart/settleForegroundRun; accepted-event boundary and 0030 late drain retained without direct pendingRun.start mutation.
+- Project groups: 0055 preserves upstream #8395 visibility; 0056 clean; 0063 native API/atomic reuse + regenerated schema; 0023/24 clean prerequisites, 0071 dedupes and preserves event source filter. Latest build/typecheck/lint exit0; session154, metadata39, workspace85, keeper24, sidebar25 passed (REPLAY.md/evidence exact commands).
+- Harness: full session fixture blocked on host-signed git tag; process-local signing disabled rerun passed. Cross-package checks run after fresh build; earlier stale declarations recorded. No global config changes.
+- Next: 0038 plugin RPC authority, then retry 0061/62; 0044(+0045), 0059, 0070, both 0073 commits last. Replay omitted clean prerequisites; stop on a genuine dependent conflict after root.
+- Boundaries: no review/task dispatch, PR/merge/export/updater edits, Electron build/install/restart or upstream push. No open operator questions. npm_config_userconfig=/dev/null only avoids npm12 nested-install incompatibility.

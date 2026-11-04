@@ -840,3 +840,394 @@ npm notice run 'vitest' run src/server/keeper/keeper-control.e2e.test.ts src/ser
 
 
 ```
+
+## Project groups / integration: 0055, 0056, 0063, 0071
+
+0055 retains upstream #8395 leading/open workspace and pinned-chat visibility logic; concatenated renderPinnedChat with project-group state. 0056 applied clean. 0063 preserves ghost props/focus hints, native provisioning API and atomic implicit reuse, provider normalizer, foreground helper, and regenerated (not hand-edited) config schema. Removed duplicate question responseError. Clean prerequisites 0023/0024 landed before 0071. 0071 deduplicates createdAt and PressHighlight while preserving upstream event-source filtering alongside the setup observer helper.
+
+0063 initial typecheck ran concurrently with build and saw stale 0056 guard declarations; waited for build and reran successfully (typecheck-built log). No source changes to mask stale declaration errors.
+
+0071 first session run blocked in its synchronous fixture `git tag v1`; host tag.gpgsign=true. Terminated only the test process/fixture, recorded no assertion verdict from it. Same full file rerun with process-local Git signing disabled passed 154/154 in 5.21s. No test assertions or global Git configuration changed.
+
+`npm run build:server` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 build:server
+npm notice run npm run build:server-deps && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli
+npm notice run paseo@0.15.0 build:server-deps
+npm notice run npm run build:client && concurrently --kill-others-on-fail --names highlight,plugin,relay --prefix-colors yellow,green,blue "npm run build:highlight" "npm run build:plugin" "npm run build:relay"
+npm notice run paseo@0.15.0 build:client
+npm notice run npm run build --workspace=@getpaseo/client
+npm notice run @getpaseo/client@0.15.0 build
+npm notice run npm run build --workspace=@getpaseo/protocol && npm run build --workspace=@getpaseo/relay && tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run paseo@0.15.0 build:relay
+[plugin] npm notice run paseo@0.15.0 build:plugin
+[plugin] npm notice run npm run build --workspace=@getpaseo/plugin
+[highlight] npm notice run paseo@0.15.0 build:highlight
+[highlight] npm notice run npm run build --workspace=@getpaseo/highlight
+[relay] npm notice run npm run build --workspace=@getpaseo/relay
+[highlight] npm notice run @getpaseo/highlight@0.15.0 build
+[highlight] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run @getpaseo/relay@0.15.0 build
+[relay] npm notice run tsc -p tsconfig.json --incremental false
+[plugin] npm notice run @getpaseo/plugin@0.15.0 build
+[plugin] npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm run build:highlight exited with code 0
+[relay] npm run build:relay exited with code 0
+[plugin] npm run build:plugin exited with code 0
+npm notice run @getpaseo/server@0.15.0 build
+npm notice run npm run build:lib && npm run build:scripts
+npm notice run @getpaseo/server@0.15.0 build:lib
+npm notice run tsc -p tsconfig.server.json --incremental false && node scripts/build-opencode-bridge-plugin.mjs && node scripts/build-terminal-worker.mjs && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/server/server/speech/providers/local/sherpa/assets',{recursive:true}); fs.copyFileSync('src/server/speech/providers/local/sherpa/assets/silero_vad.onnx','dist/server/server/speech/providers/local/sherpa/assets/silero_vad.onnx'); fs.cpSync('src/terminal/shell-integration','dist/server/terminal/shell-integration',{recursive:true}); fs.cpSync('src/terminal/shell-integration','dist/src/terminal/shell-integration',{recursive:true}); fs.copyFileSync('src/terminal/terminal-ts-loader.mjs','dist/server/terminal/terminal-ts-loader.mjs'); fs.rmSync('dist/server/skills',{recursive:true,force:true}); fs.cpSync('../../skills','dist/server/skills',{recursive:true}); fs.rmSync('dist/server/builtin-plugins',{recursive:true,force:true}); fs.cpSync('../../plugins','dist/server/builtin-plugins',{recursive:true,filter:(source)=>!source.split(require('node:path').sep).some((segment)=>segment==='node_modules'||segment==='test')&&!/\.(test|spec)\.[cm]?[jt]sx?$/.test(source)&&!source.endsWith('.tsbuildinfo')});"
+npm notice run @getpaseo/server@0.15.0 build:scripts
+npm notice run tsc -p tsconfig.scripts.json --incremental false && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/scripts',{recursive:true}); fs.copyFileSync('scripts/mcp-stdio-socket-bridge-cli.mjs','dist/scripts/mcp-stdio-socket-bridge-cli.mjs');"
+npm notice run @getpaseo/cli@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+
+```
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/builtin-plugins@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.json --noEmit
+npm notice run @getpaseo/expo-two-way-audio@0.15.0 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.15.0 typecheck
+npm notice run @getpaseo/plugin@0.15.0 typecheck
+npm notice run tsgo --noEmit && npm run typecheck:examples
+npm notice run @getpaseo/plugin@0.15.0 typecheck:examples
+npm notice run npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+up to date in 136ms
+npm notice run @getpaseo/protocol@0.15.0 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 typecheck
+npm notice run @getpaseo/client@0.15.0 typecheck
+npm notice run @getpaseo/server@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.15.0 typecheck
+npm notice run @getpaseo/relay@0.15.0 typecheck
+npm notice run @getpaseo/website@0.15.0 typecheck
+npm notice run @getpaseo/desktop@0.15.0 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.15.0 typecheck
+
+```
+
+`npm run lint` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+Found 0 warnings and 0 errors.
+Finished in 1.1s on 5159 files with 177 rules using 16 threads.
+
+```
+
+`(cd packages/app && npx vitest run src/components/sidebar/sidebar-projection.test.ts src/components/sidebar/sidebar-group-visibility.test.ts src/projects/workspace-structure.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/components/sidebar/sidebar-projection.test.ts src/components/sidebar/sidebar-group-visibility.test.ts src/projects/workspace-structure.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/app
+
+
+ Test Files  3 passed (3)
+      Tests  25 passed (25)
+   Start at  01:54:30
+   Duration  916ms (transform 811ms, setup 58ms, import 843ms, tests 21ms, environment 0ms)
+
+
+```
+
+`(cd packages/server && npx vitest run src/server/workspace-registry.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/workspace-registry.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  33 passed (33)
+   Start at  01:54:31
+   Duration  307ms (transform 103ms, setup 18ms, import 146ms, tests 76ms, environment 0ms)
+
+
+```
+
+`npm run generate:config-schema --workspace=@getpaseo/server` — exit 0:
+
+```text
+npm notice run @getpaseo/server@0.15.0 generate:config-schema
+npm notice run tsx scripts/generate-config-schema.ts
+Wrote /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/website/public/schemas/paseo.config.v1.json
+
+```
+
+`npm run build:server` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 build:server
+npm notice run npm run build:server-deps && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli
+npm notice run paseo@0.15.0 build:server-deps
+npm notice run npm run build:client && concurrently --kill-others-on-fail --names highlight,plugin,relay --prefix-colors yellow,green,blue "npm run build:highlight" "npm run build:plugin" "npm run build:relay"
+npm notice run paseo@0.15.0 build:client
+npm notice run npm run build --workspace=@getpaseo/client
+npm notice run @getpaseo/client@0.15.0 build
+npm notice run npm run build --workspace=@getpaseo/protocol && npm run build --workspace=@getpaseo/relay && tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm notice run paseo@0.15.0 build:highlight
+[highlight] npm notice run npm run build --workspace=@getpaseo/highlight
+[relay] npm notice run paseo@0.15.0 build:relay
+[relay] npm notice run npm run build --workspace=@getpaseo/relay
+[plugin] npm notice run paseo@0.15.0 build:plugin
+[plugin] npm notice run npm run build --workspace=@getpaseo/plugin
+[relay] npm notice run @getpaseo/relay@0.15.0 build
+[highlight] npm notice run @getpaseo/highlight@0.15.0 build
+[highlight] npm notice run tsc -p tsconfig.json --incremental false
+[plugin] npm notice run @getpaseo/plugin@0.15.0 build
+[plugin] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm notice run tsc -p tsconfig.json --incremental false
+[relay] npm run build:relay exited with code 0
+[highlight] npm run build:highlight exited with code 0
+[plugin] npm run build:plugin exited with code 0
+npm notice run @getpaseo/server@0.15.0 build
+npm notice run npm run build:lib && npm run build:scripts
+npm notice run @getpaseo/server@0.15.0 build:lib
+npm notice run tsc -p tsconfig.server.json --incremental false && node scripts/build-opencode-bridge-plugin.mjs && node scripts/build-terminal-worker.mjs && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/server/server/speech/providers/local/sherpa/assets',{recursive:true}); fs.copyFileSync('src/server/speech/providers/local/sherpa/assets/silero_vad.onnx','dist/server/server/speech/providers/local/sherpa/assets/silero_vad.onnx'); fs.cpSync('src/terminal/shell-integration','dist/server/terminal/shell-integration',{recursive:true}); fs.cpSync('src/terminal/shell-integration','dist/src/terminal/shell-integration',{recursive:true}); fs.copyFileSync('src/terminal/terminal-ts-loader.mjs','dist/server/terminal/terminal-ts-loader.mjs'); fs.rmSync('dist/server/skills',{recursive:true,force:true}); fs.cpSync('../../skills','dist/server/skills',{recursive:true}); fs.rmSync('dist/server/builtin-plugins',{recursive:true,force:true}); fs.cpSync('../../plugins','dist/server/builtin-plugins',{recursive:true,filter:(source)=>!source.split(require('node:path').sep).some((segment)=>segment==='node_modules'||segment==='test')&&!/\.(test|spec)\.[cm]?[jt]sx?$/.test(source)&&!source.endsWith('.tsbuildinfo')});"
+npm notice run @getpaseo/server@0.15.0 build:scripts
+npm notice run tsc -p tsconfig.scripts.json --incremental false && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/scripts',{recursive:true}); fs.copyFileSync('scripts/mcp-stdio-socket-bridge-cli.mjs','dist/scripts/mcp-stdio-socket-bridge-cli.mjs');"
+npm notice run @getpaseo/cli@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+
+```
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/builtin-plugins@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.json --noEmit
+npm notice run @getpaseo/expo-two-way-audio@0.15.0 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.15.0 typecheck
+npm notice run @getpaseo/plugin@0.15.0 typecheck
+npm notice run tsgo --noEmit && npm run typecheck:examples
+npm notice run @getpaseo/plugin@0.15.0 typecheck:examples
+npm notice run npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+up to date in 130ms
+npm notice run @getpaseo/protocol@0.15.0 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 typecheck
+npm notice run @getpaseo/client@0.15.0 typecheck
+npm notice run @getpaseo/server@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.15.0 typecheck
+npm notice run @getpaseo/relay@0.15.0 typecheck
+npm notice run @getpaseo/website@0.15.0 typecheck
+npm notice run @getpaseo/desktop@0.15.0 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.15.0 typecheck
+
+```
+
+`npm run lint` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+Found 0 warnings and 0 errors.
+Finished in 1.4s on 5159 files with 177 rules using 16 threads.
+
+```
+
+`(cd packages/server && npx vitest run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/workspace-provisioning/workspace-provisioning-service.test.ts src/server/workspace-registry.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  85 passed (85)
+   Start at  01:58:03
+   Duration  1.15s (transform 446ms, setup 27ms, import 714ms, tests 276ms, environment 0ms)
+
+
+```
+
+`(cd packages/server && npx vitest run src/server/keeper/keeper-control.e2e.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/keeper/keeper-control.e2e.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  24 passed (24)
+   Start at  01:58:05
+   Duration  23.49s (transform 4.34s, setup 18ms, import 5.41s, tests 17.99s, environment 0ms)
+
+
+```
+
+`npm run build:server` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 build:server
+npm notice run npm run build:server-deps && npm run build --workspace=@getpaseo/server && npm run build --workspace=@getpaseo/cli
+npm notice run paseo@0.15.0 build:server-deps
+npm notice run npm run build:client && concurrently --kill-others-on-fail --names highlight,plugin,relay --prefix-colors yellow,green,blue "npm run build:highlight" "npm run build:plugin" "npm run build:relay"
+npm notice run paseo@0.15.0 build:client
+npm notice run npm run build --workspace=@getpaseo/client
+npm notice run @getpaseo/client@0.15.0 build
+npm notice run npm run build --workspace=@getpaseo/protocol && npm run build --workspace=@getpaseo/relay && tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/protocol@0.15.0 prebuild
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+npm notice run @getpaseo/relay@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm notice run paseo@0.15.0 build:highlight
+[highlight] npm notice run npm run build --workspace=@getpaseo/highlight
+[plugin] npm notice run paseo@0.15.0 build:plugin
+[plugin] npm notice run npm run build --workspace=@getpaseo/plugin
+[relay] npm notice run paseo@0.15.0 build:relay
+[relay] npm notice run npm run build --workspace=@getpaseo/relay
+[relay] npm notice run @getpaseo/relay@0.15.0 build
+[relay] npm notice run tsc -p tsconfig.json --incremental false
+[plugin] npm notice run @getpaseo/plugin@0.15.0 build
+[plugin] npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm notice run @getpaseo/highlight@0.15.0 build
+[highlight] npm notice run tsc -p tsconfig.json --incremental false
+[highlight] npm run build:highlight exited with code 0
+[relay] npm run build:relay exited with code 0
+[plugin] npm run build:plugin exited with code 0
+npm notice run @getpaseo/server@0.15.0 build
+npm notice run npm run build:lib && npm run build:scripts
+npm notice run @getpaseo/server@0.15.0 build:lib
+npm notice run tsc -p tsconfig.server.json --incremental false && node scripts/build-opencode-bridge-plugin.mjs && node scripts/build-terminal-worker.mjs && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/server/server/speech/providers/local/sherpa/assets',{recursive:true}); fs.copyFileSync('src/server/speech/providers/local/sherpa/assets/silero_vad.onnx','dist/server/server/speech/providers/local/sherpa/assets/silero_vad.onnx'); fs.cpSync('src/terminal/shell-integration','dist/server/terminal/shell-integration',{recursive:true}); fs.cpSync('src/terminal/shell-integration','dist/src/terminal/shell-integration',{recursive:true}); fs.copyFileSync('src/terminal/terminal-ts-loader.mjs','dist/server/terminal/terminal-ts-loader.mjs'); fs.rmSync('dist/server/skills',{recursive:true,force:true}); fs.cpSync('../../skills','dist/server/skills',{recursive:true}); fs.rmSync('dist/server/builtin-plugins',{recursive:true,force:true}); fs.cpSync('../../plugins','dist/server/builtin-plugins',{recursive:true,filter:(source)=>!source.split(require('node:path').sep).some((segment)=>segment==='node_modules'||segment==='test')&&!/\.(test|spec)\.[cm]?[jt]sx?$/.test(source)&&!source.endsWith('.tsbuildinfo')});"
+npm notice run @getpaseo/server@0.15.0 build:scripts
+npm notice run tsc -p tsconfig.scripts.json --incremental false && node -e "const fs=require('node:fs'); fs.mkdirSync('dist/scripts',{recursive:true}); fs.copyFileSync('scripts/mcp-stdio-socket-bridge-cli.mjs','dist/scripts/mcp-stdio-socket-bridge-cli.mjs');"
+npm notice run @getpaseo/cli@0.15.0 build
+npm notice run tsc -p tsconfig.json --incremental false
+
+```
+
+`npm_config_userconfig=/dev/null npm run typecheck` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 typecheck
+npm notice run npm run typecheck --workspaces --if-present
+npm notice run @getpaseo/builtin-plugins@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.json --noEmit
+npm notice run @getpaseo/expo-two-way-audio@0.15.0 typecheck
+npm notice run tsgo --noEmit
+npm notice run @getpaseo/highlight@0.15.0 typecheck
+npm notice run @getpaseo/plugin@0.15.0 typecheck
+npm notice run tsgo --noEmit && npm run typecheck:examples
+npm notice run @getpaseo/plugin@0.15.0 typecheck:examples
+npm notice run npm --prefix ../../plugin-examples/markdown-panel install --ignore-scripts --no-audit --no-fund && tsgo -p tsconfig.examples.json --noEmit
+
+up to date in 141ms
+npm notice run @getpaseo/protocol@0.15.0 pretypecheck
+npm notice run npm run generate:validators
+npm notice run @getpaseo/protocol@0.15.0 generate:validators
+npm notice run node scripts/generate-validation-aot.mjs
+generated src/generated/validation/ws-outbound.aot.ts: envelope + 245 session message validators
+npm notice run @getpaseo/protocol@0.15.0 typecheck
+npm notice run @getpaseo/client@0.15.0 typecheck
+npm notice run @getpaseo/server@0.15.0 typecheck
+npm notice run tsgo -p tsconfig.server.typecheck.json --noEmit
+npm notice run @getpaseo/app@0.15.0 typecheck
+npm notice run @getpaseo/relay@0.15.0 typecheck
+npm notice run @getpaseo/website@0.15.0 typecheck
+npm notice run @getpaseo/desktop@0.15.0 typecheck
+npm notice run tsgo --noEmit -p tsconfig.json
+npm notice run @getpaseo/cli@0.15.0 typecheck
+exit=0
+
+```
+
+`npm run lint` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 lint
+npm notice run oxlint
+Found 0 warnings and 0 errors.
+Finished in 968ms on 5159 files with 177 rules using 16 threads.
+
+```
+
+`(cd packages/server && npx vitest run src/server/session/checkout/git-metadata-generator.test.ts src/server/session/checkout/prompt-suggestions.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/checkout/git-metadata-generator.test.ts src/server/agent/prompt-suggestions/service.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  02:00:31
+   Duration  547ms (transform 213ms, setup 24ms, import 372ms, tests 21ms, environment 0ms)
+
+
+```
+
+`(cd packages/server && GIT_CONFIG_COUNT=2 GIT_CONFIG_KEY_0=tag.gpgsign GIT_CONFIG_VALUE_0=false GIT_CONFIG_KEY_1=commit.gpgsign GIT_CONFIG_VALUE_1=false npx vitest run src/server/session.test.ts --bail=1)` — exit 0:
+
+```text
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  1 passed (1)
+      Tests  154 passed (154)
+   Start at  02:04:58
+   Duration  5.21s (transform 3.57s, setup 18ms, import 4.59s, tests 522ms, environment 0ms)
+
+exit=0
+
+```

@@ -1,0 +1,11 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session/checkout/git-metadata-generator.test.ts src/server/agent/prompt-suggestions/service.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  2 passed (2)
+      Tests  39 passed (39)
+   Start at  02:00:31
+   Duration  547ms (transform 213ms, setup 24ms, import 372ms, tests 21ms, environment 0ms)
+
