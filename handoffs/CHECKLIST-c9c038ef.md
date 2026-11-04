@@ -44,5 +44,5 @@ Baseline correction: shared node_modules contaminated @getpaseo resolution. Disc
 - [x] Port 0044 and replay 0045 (native/server build,typecheck,lint exit0;187 tests); clean0039/40 and signing-validator1.
 - [x] Port 0059 bounded idle provider unload (build/typecheck/lint exit0,569 passed/5 existing skips); clean0060 and Muse65–69/72 verified.
 - [x] Port 0070 against rewritten Codex agent (build/typecheck/lint exit0,server720,SDK27,protocol4,Hub18); independent MCP baseline and source-only cold-load fix485 tests.
-- [ ] Replay remaining clean prerequisites and all of 0073 last, unsplit into two commits.
-- [ ] Run final relevant checks, update exact evidence and issue state, commit and push handoff.
+- [x] Remaining clean prerequisites replayed; both0073 source candidates verified, exact two-commit finalization prepared in FINAL-CANDIDATE.md before handoff commit.
+- [x] Final candidate checks/evidence/handoff prepared and updated; finish/recognize original0073 tail by sentinel subjects and source fingerprint, then push and record measured Git/Linear state.

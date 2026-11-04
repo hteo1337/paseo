@@ -1,0 +1,219 @@
+diff --git a/packages/protocol/src/messages.ts b/packages/protocol/src/messages.ts
+index ee7ccf6cd..ae4a269f9 100644
+--- a/packages/protocol/src/messages.ts
++++ b/packages/protocol/src/messages.ts
+@@ -3821,6 +3821,13 @@ export const ServerInfoStatusPayloadSchema = z
+     serverId: z.string().trim().min(1),
+     hostname: ServerInfoHostnameSchema.optional(),
+     version: ServerInfoVersionSchema.optional(),
++    buildIdentity: z
++      .object({
++        version: z.string().min(1),
++        seriesHash: z.string().regex(/^[0-9a-f]{16}$/),
++        sourceHead: z.string().regex(/^[0-9a-f]{40}$/),
++      })
++      .optional(),
+     // Authenticated producer for host registration ownership, separate from admission authority.
+     sourceId: z.string().optional(),
+     // COMPAT(sessionPermissions): optional while clients support older daemons.
+diff --git a/packages/server/src/server/build-identity.ts b/packages/server/src/server/build-identity.ts
+new file mode 100644
+index 000000000..6f202dab7
+--- /dev/null
++++ b/packages/server/src/server/build-identity.ts
+@@ -0,0 +1,41 @@
++import { readFileSync } from "node:fs";
++import { basename, dirname, join } from "node:path";
++import { fileURLToPath } from "node:url";
++import { z } from "zod";
++import type { ServerInfoStatusPayload } from "@getpaseo/protocol/messages";
++
++const LocalBuildMarkerSchema = z.object({
++  localBuild: z.literal(true),
++  baseTag: z.string(),
++  seriesHash: z.string().regex(/^[0-9a-f]{16}$/),
++  head: z.string().regex(/^[0-9a-f]{40}$/),
++});
++
++export function readLocalBuildIdentity(version: string): ServerInfoStatusPayload["buildIdentity"] {
++  const processResourcesPath = "resourcesPath" in process ? process.resourcesPath : undefined;
++  let resourcesPath: string;
++  if (typeof processResourcesPath === "string" && processResourcesPath) {
++    resourcesPath = processResourcesPath;
++  } else {
++    let directory = dirname(fileURLToPath(import.meta.url));
++    while (basename(directory) !== "app.asar" && basename(directory) !== "app.asar.unpacked") {
++      const parent = dirname(directory);
++      if (parent === directory) return undefined;
++      directory = parent;
++    }
++    resourcesPath = dirname(directory);
++  }
++  try {
++    const marker = LocalBuildMarkerSchema.safeParse(
++      JSON.parse(readFileSync(join(resourcesPath, "local-build.json"), "utf8")),
++    );
++    if (!marker.success || marker.data.baseTag !== `v${version}`) return undefined;
++    return {
++      version: marker.data.baseTag.slice(1),
++      seriesHash: marker.data.seriesHash,
++      sourceHead: marker.data.head,
++    };
++  } catch {
++    return undefined;
++  }
++}
+diff --git a/packages/server/src/server/websocket-server.relay-reconnect.test.ts b/packages/server/src/server/websocket-server.relay-reconnect.test.ts
+index c99d5ac9c..09d9e00a2 100644
+--- a/packages/server/src/server/websocket-server.relay-reconnect.test.ts
++++ b/packages/server/src/server/websocket-server.relay-reconnect.test.ts
+@@ -1,6 +1,10 @@
+ import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+ import { SessionDelivery } from "./session/owned-subscriptions/index.js";
+ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
++import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { tmpdir } from "node:os";
++import { join } from "node:path";
++import type { KeeperControl } from "./keeper/keeper-control.js";
+ import type { Server as HTTPServer } from "http";
+ import type pino from "pino";
+ import type { AgentManager } from "./agent/agent-manager.js";
+@@ -256,6 +260,7 @@ function createServer(options?: {
+   logger?: ReturnType<typeof createLogger>;
+   startPaused?: boolean;
+   auth?: { password: string; localCredential: () => string | null };
++  keeperControl?: KeeperControl;
+ }) {
+   const speechReadiness = options?.speechReadiness ?? null;
+   const daemonConfigStore = {
+@@ -284,7 +289,11 @@ function createServer(options?: {
+     "/tmp/paseo-test",
+     createStub<DaemonConfigStore>(daemonConfigStore),
+     null,
+-    { allowedOrigins: new Set(), startPaused: options?.startPaused },
++    {
++      allowedOrigins: new Set(),
++      startPaused: options?.startPaused,
++      keeperControl: options?.keeperControl,
++    },
+     createWorkspaceAutoNameStub(),
+     createWorkspaceRuntimeStore(),
+     options?.auth,
+@@ -596,6 +605,81 @@ describe("relay external socket reconnect behavior", () => {
+     vi.useRealTimers();
+   });
+ 
++  test("reports only readable local build identity and enabled keeper control", async () => {
++    const resourcesPath = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
++    const originalResourcesPath = Object.getOwnPropertyDescriptor(process, "resourcesPath");
++    const markerPath = join(resourcesPath, "local-build.json");
++    const marker = {
++      localBuild: true,
++      baseTag: `v${TEST_DAEMON_VERSION}`,
++      seriesHash: "0123456789abcdef",
++      head: "1234567890abcdef1234567890abcdef12345678",
++    };
++    Object.defineProperty(process, "resourcesPath", { configurable: true, value: resourcesPath });
++    try {
++      for (const enabled of [true, false]) {
++        writeFileSync(markerPath, JSON.stringify(marker));
++        const server = createServer({ keeperControl: createStub<KeeperControl>({ enabled }) });
++        try {
++          const socket = new MockSocket();
++          const serverInfo = await attachRelayAndHello({
++            server,
++            socket,
++            clientId: `build-${enabled}`,
++          });
++          const expectedIdentity = {
++            version: TEST_DAEMON_VERSION,
++            seriesHash: marker.seriesHash,
++            sourceHead: marker.head,
++          };
++          expect(parseSentEnvelope(socket.sent[0]).message?.payload).toEqual(
++            expect.objectContaining({ buildIdentity: expectedIdentity }),
++          );
++          expect(serverInfo).toEqual(expect.objectContaining({ buildIdentity: expectedIdentity }));
++          expect(serverInfo.features?.keeperControl).toBe(enabled ? true : undefined);
++        } finally {
++          await server.close();
++        }
++      }
++      const invalidMarkers = [
++        null,
++        "{broken",
++        JSON.stringify({ ...marker, localBuild: false }),
++        JSON.stringify({ ...marker, baseTag: "v9.9.9" }),
++        JSON.stringify({ ...marker, head: undefined }),
++        JSON.stringify({ ...marker, head: "not-a-source-head" }),
++        JSON.stringify({ ...marker, seriesHash: "not-a-series-hash" }),
++        "directory",
++      ];
++      for (const [index, invalidMarker] of invalidMarkers.entries()) {
++        rmSync(markerPath, { recursive: true, force: true });
++        if (invalidMarker === "directory") mkdirSync(markerPath);
++        else if (invalidMarker !== null) writeFileSync(markerPath, invalidMarker);
++        const server = createServer();
++        try {
++          const socket = new MockSocket();
++          const serverInfo = await attachRelayAndHello({
++            server,
++            socket,
++            clientId: `invalid-${index}`,
++          });
++          expect(parseSentEnvelope(socket.sent[0]).message?.payload).not.toHaveProperty(
++            "buildIdentity",
++          );
++          expect(serverInfo).not.toHaveProperty("buildIdentity");
++          expect(serverInfo.features).not.toHaveProperty("keeperControl");
++        } finally {
++          await server.close();
++        }
++      }
++    } finally {
++      if (originalResourcesPath)
++        Object.defineProperty(process, "resourcesPath", originalResourcesPath);
++      else Reflect.deleteProperty(process, "resourcesPath");
++      rmSync(resourcesPath, { recursive: true, force: true });
++    }
++  });
++
+   test("keeps the same session when relay reconnects within grace window", async () => {
+     const server = createServer();
+     const clientId = "cid-relay-reconnect";
+diff --git a/packages/server/src/server/websocket-server.ts b/packages/server/src/server/websocket-server.ts
+index 795d6ebd7..03ea15580 100644
+--- a/packages/server/src/server/websocket-server.ts
++++ b/packages/server/src/server/websocket-server.ts
+@@ -25,6 +25,7 @@ import { WebSocket, WebSocketServer } from "ws";
+ import type { IncomingMessage, Server as HTTPServer } from "http";
+ import { join } from "path";
+ import { getHostName } from "./host-name.js";
++import { readLocalBuildIdentity } from "./build-identity.js";
+ import { randomUUID } from "node:crypto";
+ import { monitorEventLoopDelay } from "node:perf_hooks";
+ import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
+@@ -564,6 +565,7 @@ export class VoiceAssistantWebSocketServer {
+   private readonly pluginSocketCleanup = new WeakMap<WebSocketLike, () => void>();
+   private readonly serverId: string;
+   private readonly daemonVersion: string;
++  private readonly buildIdentity: ServerInfoStatusPayload["buildIdentity"];
+   private readonly daemonRuntimeConfig: DaemonRuntimeConfig | undefined;
+   private readonly agentManager: AgentManager;
+   private readonly agentStorage: AgentStorage;
+@@ -712,6 +714,7 @@ export class VoiceAssistantWebSocketServer {
+       throw new MissingDaemonVersionError();
+     }
+     this.daemonVersion = daemonVersion.trim();
++    this.buildIdentity = readLocalBuildIdentity(this.daemonVersion);
+     this.credentialSource = auth;
+     this.daemonRuntimeConfig = daemonRuntimeConfig;
+     this.browserToolsBroker = browserToolsBroker ?? null;
+@@ -2025,6 +2028,7 @@ export class VoiceAssistantWebSocketServer {
+       serverId: this.serverId,
+       hostname: getHostName(),
+       version: this.daemonVersion,
++      ...(this.buildIdentity ? { buildIdentity: this.buildIdentity } : {}),
+       sourceId: session.getHostSourceId(),
+       permissions: session.getPermissions(),
+       // COMPAT(desktopManaged): added in v0.1.X, remove optional parsing after 2027-01-16.

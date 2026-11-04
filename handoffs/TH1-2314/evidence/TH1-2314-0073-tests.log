@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/agent-manager.test.ts src/server/agent/idle-runtime-cleanup/idle-runtime-cleanup.test.ts src/server/daemon-config-store.test.ts src/server/plugins/lifecycle/handlers.test.ts src/server/websocket-server.relay-reconnect.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  5 passed (5)
+      Tests  439 passed (439)
+   Start at  02:38:00
+   Duration  25.01s (transform 2.96s, setup 42ms, import 4.31s, tests 20.33s, environment 0ms)
+
+exit=0

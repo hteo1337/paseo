@@ -1,0 +1,14 @@
+require.resolve("@getpaseo/plugin") = /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/plugin/dist/index.js
+require.resolve("@getpaseo/plugin/server") = /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/plugin/dist/server/index.js
+before("agent.set_model") => unhook
+before("agent.turn_start") => unhook
+before("agent.session_opened") => unhook
+[account-router] started · every 60s, usage every 10 sweeps, cap 90%
+[codex-router] started · every 60s, usage every 10 sweeps
+[codex-router] home work unhealthy: no CODEX_HOME configured
+[codex-router] home personal unhealthy: no CODEX_HOME configured
+[codex-router] home business unhealthy: no CODEX_HOME configured
+[codex-router] resolved work · preferred: work is preferred and has room
+[account-router] resolved work · schedule: Wednesday: work is today's default
+PASS: real accounts registration, both maps, unhooks, upstream aliases, waits, unknown-name controls; hook unavailable logs=0
+exit=0

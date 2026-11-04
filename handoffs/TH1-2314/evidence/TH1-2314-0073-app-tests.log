@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/composer/input/desktop-keys.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/app
+
+
+ Test Files  1 passed (1)
+      Tests  8 passed (8)
+   Start at  02:38:01
+   Duration  110ms (transform 29ms, setup 21ms, import 18ms, tests 3ms, environment 0ms)
+
+exit=0

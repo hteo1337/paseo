@@ -1,0 +1,850 @@
+diff --git a/.oxlintrc.json b/.oxlintrc.json
+index c82b51784..072dfdc7d 100644
+--- a/.oxlintrc.json
++++ b/.oxlintrc.json
+@@ -94,6 +94,8 @@
+           "error",
+           {
+             "allow": {
++              // Packaged identity is captured once during construction, before accepting connections.
++              "server/build-identity.ts": ["readFileSync", "realpathSync"],
+               // TODO: literal executableExists is a synchronous public capability; move its callers and Windows existence predicates to async together.
+               "executable-resolution/executable-resolution.ts": ["existsSync"],
+               // TODO: winget enumeration shares synchronous existence predicates with literal lookup; convert the executable-resolution boundary together.
+diff --git a/docs/agent-lifecycle.md b/docs/agent-lifecycle.md
+index 9de47a5d3..0834b8375 100644
+--- a/docs/agent-lifecycle.md
++++ b/docs/agent-lifecycle.md
+@@ -46,7 +46,7 @@ Reload releases the old runtime before resuming its durable session: an idle pro
+ still own an exclusive writer. A close failure retains that runtime for cleanup and blocks the
+ replacement. Once closure succeeds, a failed resume leaves the durable agent closed and retryable.
+ 
+-Idle resumable runtimes are collected after one hour without activity, checked once a minute.
++Idle resumable runtimes are collected after the configured idle period without activity, checked once a minute.
+ Collection releases the process and preserves the agent record, conversation, relationships, and
+ provider session. The next prompt resumes that session. Set `agents.idleRuntimeCleanup: false` in
+ host config to disable automatic collection. The host setting applies immediately; config-file edits
+@@ -60,8 +60,8 @@ An idle managed child can still own background work.
+ 
+ The daemon baseline always applies. An optional provider `canStopRuntime()` adds a veto: false,
+ errors and timeouts retain ownership, while true cannot override daemon blockers. Without a provider
+-check, the baseline decides collection after the same one-hour idle period. Once protected work
+-finishes, a fresh idle hour starts. There is no deadline that overrides a veto.
++check, the baseline decides collection after the same configured idle period. Once protected work
++finishes, a fresh idle period starts. There is no deadline that overrides a veto.
+ 
+ The `idle-runtime-cleanup/` module owns the clocks, eligibility policy and sweep lifetime.
+ AgentManager supplies captured runtime capabilities and owns atomic revalidation and shutdown.
+diff --git a/packages/app/src/composer/input/desktop-keys.ts b/packages/app/src/composer/input/desktop-keys.ts
+index ba3591f25..4bec47573 100644
+--- a/packages/app/src/composer/input/desktop-keys.ts
++++ b/packages/app/src/composer/input/desktop-keys.ts
+@@ -54,6 +54,7 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
+     const handled = ctx.onKeyPressCallback({
+       key: event.nativeEvent.key,
+       hasModifier: hasKeyModifier(event),
++
+       preventDefault: () => event.preventDefault(),
+       input: ctx.input,
+     });
+@@ -66,9 +67,18 @@ export function handleDesktopKeyPressImpl<TInput, TPayload>(
+   // its Enter answers to the same guard as an ordinary send.
+   if (ctx.ghostSuggestion && !metaKey && !ctrlKey && !shiftKey) {
+     const canSubmit = canSubmitGhost(ctx);
++
+     if (handleGhostKey(event, ctx.ghostSuggestion, canSubmit)) return;
+   }
+ 
++  handleEnter(event, ctx);
++}
++
++function handleEnter<TInput, TPayload>(
++  event: DesktopKeyEvent,
++  ctx: DesktopKeyPressContext<TInput, TPayload>,
++): void {
++  const { shiftKey, metaKey, ctrlKey } = event.nativeEvent;
+   if (event.nativeEvent.key !== "Enter") return;
+   const action = resolveMessageInputEnterAction({
+     submitOnEnter: ctx.submitOnEnter,
+diff --git a/packages/server/src/server/agent/agent-manager.test.ts b/packages/server/src/server/agent/agent-manager.test.ts
+index 544606550..3e9f834c0 100644
+--- a/packages/server/src/server/agent/agent-manager.test.ts
++++ b/packages/server/src/server/agent/agent-manager.test.ts
+@@ -10499,13 +10499,25 @@ test("per-minute subscriptions and resident loads do not postpone idle unload",
+     const idleMs = 15 * 60_000;
+     const create = () => manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+     const observed = await create();
++    const unobserved = await create();
++    const cleanup = createIdleRuntimeCleanup({
++      enabled: true,
++      idlePeriodMs: () => idleMs,
++      runtimes: () => manager.getRuntimeCleanupCandidates(),
++      logger,
++      schedule: () => () => {},
++    });
++    onTestFinished(() => cleanup.close());
+     const used = await create();
+     const prompted = await create();
+     const updated = await create();
+ 
+     for (let minute = 1; minute <= 15; minute++) {
+       vi.setSystemTime(startedAt + minute * 60_000);
+-      const release = manager.holdClientStream(observed.id, "minute-observer");
++      const release =
++        minute % 2 === 1
++          ? manager.holdClientStream(observed.id, "minute-observer")
++          : manager.beginAgentUse(observed.id, "minute-observer", { touchActivity: false });
+       const loaded = await ensureAgentLoaded(observed.id, {
+         agentManager: manager,
+         agentStorage: storage,
+@@ -10522,22 +10534,30 @@ test("per-minute subscriptions and resident loads do not postpone idle unload",
+         releaseUse();
+       }
+       // A subscription still protects its runtime even after the idle deadline.
+-      expect(await manager.unloadIdleAgents(idleMs)).toBe(0);
++      const held = await cleanup.sweep();
++      expect(held.collected.map((entry) => entry.agentId)).toEqual(
++        minute === 15 ? [unobserved.id] : [],
++      );
++      expect(manager.getAgent(observed.id)).not.toBeNull();
+       release();
+       release();
++      const released = await cleanup.sweep();
++      expect(released.collected.map((entry) => entry.agentId)).toEqual(
++        minute === 15 ? [observed.id] : [],
++      );
+     }
+ 
+     expect(client.resumeOverrides).toHaveLength(0);
+-    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
++    expect((await cleanup.sweep()).collected).toHaveLength(0);
+     expect(manager.getAgent(observed.id)).toBeNull();
+     for (const control of [used, prompted, updated]) {
+       expect(manager.getAgent(control.id)).not.toBeNull();
+     }
+     vi.setSystemTime(startedAt + 29 * 60_000);
+-    expect(await manager.unloadIdleAgents(idleMs)).toBe(2);
++    expect((await cleanup.sweep()).collected).toHaveLength(2);
+     expect(manager.getAgent(used.id)).not.toBeNull();
+     vi.setSystemTime(startedAt + 29 * 60_000 + 1_000);
+-    expect(await manager.unloadIdleAgents(idleMs)).toBe(1);
++    expect((await cleanup.sweep()).collected).toHaveLength(1);
+   } finally {
+     vi.useRealTimers();
+     await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+@@ -10722,8 +10742,8 @@ test("Reload retries retained idle tree cleanup before resuming and clears it",
+ test("idle sweep deadlines preserve a stalled close while other agents and future sweeps finish", async () => {
+   const workdir = mkdtempSync(join(tmpdir(), "agent-idle-deadline-"));
+   const storage = new AgentStorage(join(workdir, "agents"), logger);
+-  const closeStarted = deferred<void>();
+-  const releaseClose = deferred<void>();
++  let closeStarted = deferred<void>();
++  let releaseClose = deferred<void>();
+   class StalledSession extends TestAgentSession {
+     closes = 0;
+     override async close(): Promise<void> {
+@@ -10748,16 +10768,41 @@ test("idle sweep deadlines preserve a stalled close while other agents and futur
+     rescueTimeouts: { idleSessionCloseMs: 20 },
+     processTreeReaper: async () => 0,
+   });
++  const outcomes: string[] = [];
++  const cleanup = createIdleRuntimeCleanup({
++    enabled: true,
++    runtimes: () => manager.getRuntimeCleanupCandidates(),
++    logger: {
++      debug: logger.debug.bind(logger),
++      warn: logger.warn.bind(logger),
++      info: (entry: { agentId: string }) => {
++        outcomes.push(entry.agentId);
++      },
++    },
++    now: () => Date.now() + 61 * 60_000,
++    schedule: () => () => {},
++  });
++  const bounded = <T>(promise: Promise<T>) =>
++    Promise.race([
++      promise,
++      new Promise<never>((_, reject) => {
++        const timer = setTimeout(() => reject(new Error("collector deadline missed")), 250);
++        timer.unref();
++        promise.finally(() => clearTimeout(timer)).catch(() => {});
++      }),
++    ]);
+   try {
+     const first = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
+     const second = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+-    const sweep = manager.unloadIdleAgents(1, Date.now() + 60_000);
++    const sweep = cleanup.sweep();
+     await closeStarted.promise;
+-    expect(await sweep).toBe(1);
++    expect((await bounded(sweep)).collected.map((entry) => entry.agentId)).toEqual([second.id]);
+     expect(manager.getAgent(second.id)).toBeNull();
+     expect(manager.getAgent(first.id)?.session).toBe(stalled.current);
+     const third = await manager.createAgent({ provider: "claude", cwd: workdir }, undefined, {});
+-    expect(await manager.unloadIdleAgents(1, Date.now() + 60_000)).toBe(1);
++    expect((await bounded(cleanup.sweep())).collected.map((entry) => entry.agentId)).toEqual([
++      third.id,
++    ]);
+     expect(manager.getAgent(third.id)).toBeNull();
+     expect(stalled.current?.closes).toBe(1);
+     let loaded = false;
+@@ -10769,14 +10814,29 @@ test("idle sweep deadlines preserve a stalled close while other agents and futur
+       loaded = true;
+       return agent;
+     });
+-    await manager.unloadIdleAgents(1, Date.now() + 60_000);
++    await bounded(cleanup.sweep());
++    expect(stalled.current?.closes).toBe(1);
+     expect(loaded).toBe(false);
+     releaseClose.resolve();
+     const resumed = await access;
+     expect(resumed.session).not.toBe(stalled.current);
+     expect(stalled.resumeOverrides).toHaveLength(1);
++    expect(outcomes.filter((id) => id === first.id)).toHaveLength(1);
++    expect((await sweep).collected.filter((entry) => entry.agentId === first.id)).toHaveLength(1);
++    closeStarted = deferred<void>();
++    releaseClose = deferred<void>();
++    const fourth = await manager.createAgent({ provider: "codex", cwd: workdir }, undefined, {});
++    const finalSweep = cleanup.sweep();
++    await closeStarted.promise;
++    await bounded(cleanup.close());
++    expect(manager.getAgent(fourth.id)?.session).toBe(stalled.current);
++    expect(stalled.current?.closes).toBe(1);
++    releaseClose.resolve();
++    await finalSweep;
++    await expect.poll(() => outcomes.filter((id) => id === fourth.id).length).toBe(1);
+   } finally {
+     releaseClose.resolve();
++    await cleanup.close();
+     await Promise.all(manager.listAgents().map((agent) => manager.closeAgent(agent.id)));
+     rmSync(workdir, { recursive: true, force: true });
+   }
+diff --git a/packages/server/src/server/agent/agent-manager.ts b/packages/server/src/server/agent/agent-manager.ts
+index a0433e282..cdf35414a 100644
+--- a/packages/server/src/server/agent/agent-manager.ts
++++ b/packages/server/src/server/agent/agent-manager.ts
+@@ -939,6 +939,7 @@ export class AgentManager {
+   private readonly idleReapPending = new Set<string>();
+   private readonly processTreeReaper: typeof reapProcessTree;
+   private readonly activeAgentUses = new Map<string, number>();
++  private readonly observationAgentUses = new Map<string, number>();
+   private readonly clientStreamHolds = new Map<string, number>();
+   private globalClientStreamHolds = 0;
+   private readonly idleUnloadHoldOwners = new Map<
+@@ -1511,6 +1512,9 @@ export class AgentManager {
+   ): () => void {
+     if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
+     this.activeAgentUses.set(agentId, (this.activeAgentUses.get(agentId) ?? 0) + 1);
++    if (!touchActivity) {
++      this.observationAgentUses.set(agentId, (this.observationAgentUses.get(agentId) ?? 0) + 1);
++    }
+     const releaseOwner = this.trackIdleUnloadHold({ agentId, kind: "uses", ownerId });
+     let released = false;
+     return () => {
+@@ -1520,6 +1524,11 @@ export class AgentManager {
+       const remaining = (this.activeAgentUses.get(agentId) ?? 1) - 1;
+       if (remaining > 0) this.activeAgentUses.set(agentId, remaining);
+       else this.activeAgentUses.delete(agentId);
++      if (!touchActivity) {
++        const observations = (this.observationAgentUses.get(agentId) ?? 1) - 1;
++        if (observations > 0) this.observationAgentUses.set(agentId, observations);
++        else this.observationAgentUses.delete(agentId);
++      }
+       if (touchActivity) this.residentLastUsedAt.set(agentId, Date.now());
+     };
+   }
+@@ -1606,7 +1615,7 @@ export class AgentManager {
+     return result;
+   }
+ 
+-  private logIdleUnloadSkips(idleMs: number, now: number): void {
++  logIdleUnloadSkips(idleMs: number, now: number): void {
+     const flag = process.env.PASEO_IDLE_UNLOAD_DIAG?.trim().toLowerCase();
+     if (flag === "0" || flag === "false" || flag === "off") return;
+     for (const [agentId, agent] of this.agents) {
+@@ -1655,7 +1664,19 @@ export class AgentManager {
+     }
+   }
+ 
+-  private canUnloadIdleAgent(agentId: string, agent: LiveManagedAgent): boolean {
++  private hasIdleUnloadHold(agentId: string, ignoreObservation: boolean): boolean {
++    const uses = this.activeAgentUses.get(agentId) ?? 0;
++    const observations = ignoreObservation ? (this.observationAgentUses.get(agentId) ?? 0) : 0;
++    return (
++      uses > observations || (!ignoreObservation && (this.clientStreamHolds.get(agentId) ?? 0) > 0)
++    );
++  }
++
++  private canUnloadIdleAgent(
++    agentId: string,
++    agent: LiveManagedAgent,
++    ignoreObservation = false,
++  ): boolean {
+     return (
+       agent.lifecycle === "idle" &&
+       agent.persistence !== null &&
+@@ -1668,8 +1689,7 @@ export class AgentManager {
+       !agent.session.hasLiveTerminals?.() &&
+       agent.inFlightPermissionResponses.size === 0 &&
+       !agent.pendingReplacement &&
+-      (this.activeAgentUses.get(agentId) ?? 0) === 0 &&
+-      (this.clientStreamHolds.get(agentId) ?? 0) === 0 &&
++      !this.hasIdleUnloadHold(agentId, ignoreObservation) &&
+       this.globalClientStreamHolds === 0
+     );
+   }
+@@ -1866,6 +1886,7 @@ export class AgentManager {
+         workspaceId: nullableHookValue(options.workspaceId),
+         model: nullableHookValue(storedConfig.model),
+         title: storedConfig.title ?? nullableHookValue(options.initialTitle),
++
+         labels: options.labels ?? {},
+       },
+     );
+@@ -2427,7 +2448,7 @@ export class AgentManager {
+     if (!this.registry) return [];
+     const candidates: RuntimeCleanupCandidate[] = [];
+     for (const agent of this.agents.values()) {
+-      const updatedAt = agent.updatedAt;
++      const lastUsedAt = this.residentLastUsedAt.get(agent.id) ?? agent.updatedAt.getTime();
+       let identity = this.runtimeCleanupIdentities.get(agent.session);
+       if (!identity) {
+         identity = Object.freeze({});
+@@ -2435,16 +2456,21 @@ export class AgentManager {
+       }
+       const isEligible = () =>
+         this.agents.get(agent.id) === agent &&
+-        agent.updatedAt === updatedAt &&
+-        this.runtimeHasNoPendingWork(agent);
++        (this.residentLastUsedAt.get(agent.id) ?? agent.updatedAt.getTime()) === lastUsedAt &&
++        this.runtimeHasNoPendingWork(agent) &&
++        this.canUnloadIdleAgent(agent.id, agent, true);
+       candidates.push({
+         identity,
+         agentId: agent.id,
+         parentAgentId: getParentAgentIdFromLabels(agent.labels) ?? undefined,
+         provider: agent.provider,
+         sessionId: agent.persistence?.sessionId ?? null,
+-        lastActivityAt: updatedAt.getTime(),
++        lastActivityAt: lastUsedAt,
++        idleSessionCloseMs: this.rescueTimeouts.idleSessionCloseMs,
+         isEligible,
++        isObservationProtected: () =>
++          (this.clientStreamHolds.get(agent.id) ?? 0) > 0 ||
++          (this.observationAgentUses.get(agent.id) ?? 0) > 0,
+         canStopRuntime: agent.session.canStopRuntime?.bind(agent.session),
+         closeIfEligible: async (revalidate) => {
+           if (!agent.persistence?.sessionId) return false;
+@@ -2452,9 +2478,19 @@ export class AgentManager {
+           // releases this barrier, so the waiting prompt keeps the existing runtime.
+           this.collectingRuntimes.add(agent.id);
+           try {
++            const ownedProcesses = this.idleProcessSnapshots.get(agent.id) ?? new Map();
++            for (const [pid, started] of await snapshotProcessTree(
++              agent.session.getOwnedProcessIds?.() ?? [],
++            )) {
++              if (!ownedProcesses.has(pid)) ownedProcesses.set(pid, started);
++            }
++            this.idleProcessSnapshots.set(agent.id, ownedProcesses);
+             return (
+               (await this.runLifecycleMutation(agent.id, () =>
+-                this.closeAgentRuntime(agent.id, () => isEligible() && revalidate()),
++                this.closeAgentRuntime(
++                  agent.id,
++                  () => isEligible() && this.canUnloadIdleAgent(agent.id, agent) && revalidate(),
++                ),
+               )) !== false
+             );
+           } finally {
+diff --git a/packages/server/src/server/agent/idle-runtime-cleanup/idle-runtime-cleanup.test.ts b/packages/server/src/server/agent/idle-runtime-cleanup/idle-runtime-cleanup.test.ts
+index 5ed1fa9b7..4c8dcb1da 100644
+--- a/packages/server/src/server/agent/idle-runtime-cleanup/idle-runtime-cleanup.test.ts
++++ b/packages/server/src/server/agent/idle-runtime-cleanup/idle-runtime-cleanup.test.ts
+@@ -41,7 +41,7 @@ class Runtime {
+     };
+   }
+ }
+-function scenario(enabled = true) {
++function scenario(enabled = true, idlePeriodMs?: () => number) {
+   const runtime = new Runtime();
+   const runtimes = [runtime];
+   let time = 0;
+@@ -49,6 +49,7 @@ function scenario(enabled = true) {
+   let tick!: () => void;
+   const cleanup = createIdleRuntimeCleanup({
+     enabled,
++    idlePeriodMs,
+     logger: createTestLogger(),
+     now: () => time,
+     runtimes: () => runtimes.filter((item) => !item.closed).map((item) => item.capture()),
+@@ -83,6 +84,21 @@ test("a runtime without a provider check is collected at exactly one hour", asyn
+   ]);
+ });
+ 
++test("the port uses one collector with a configurable period, zero opt-out and provider veto", async () => {
++  let minutes = 0;
++  const s = scenario(true, () => minutes * 60_000);
++  expect((await s.sweep(60)).collected).toEqual([]);
++  minutes = 15;
++  s.runtime.activity = 60 * 60_000;
++  expect((await s.sweep(74)).collected).toEqual([]);
++  s.runtime.probe = async () => false;
++  expect((await s.sweep(75)).collected).toEqual([]);
++  s.runtime.probe = async () => true;
++  expect((await s.sweep(76)).collected).toEqual([]);
++  expect((await s.sweep(90)).collected).toEqual([]);
++  expect((await s.sweep(91)).collected).toHaveLength(1);
++});
++
+ test("activity restarts the single one-hour idle period", async () => {
+   const s = scenario();
+   await s.sweep(59);
+diff --git a/packages/server/src/server/agent/idle-runtime-cleanup/index.ts b/packages/server/src/server/agent/idle-runtime-cleanup/index.ts
+index fddea0d25..ccb9d48ec 100644
+--- a/packages/server/src/server/agent/idle-runtime-cleanup/index.ts
++++ b/packages/server/src/server/agent/idle-runtime-cleanup/index.ts
+@@ -9,12 +9,16 @@ export interface RuntimeCleanupCandidate {
+   readonly provider: string;
+   readonly sessionId: string | null;
+   readonly lastActivityAt: number;
++  readonly idleSessionCloseMs?: number;
+   isEligible(): boolean;
++  /** Observation bars closing without restarting the idle clock. */
++  isObservationProtected?(): boolean;
+   canStopRuntime?(): Promise<boolean>;
+   closeIfEligible(revalidate: () => boolean): Promise<boolean>;
+ }
+ interface Options {
+   enabled: boolean;
++  idlePeriodMs?: () => number | Promise<number>;
+   runtimes(): readonly RuntimeCleanupCandidate[];
+   isProtected?(agentId: string): boolean;
+   logger: Pick<Logger, "debug" | "info" | "warn">;
+@@ -30,12 +34,15 @@ interface CollectionResult {
+   collected: CollectionEntry[];
+   failures: Array<{ agentId: string; error: unknown }>;
+ }
++const IDLE_SESSION_CLOSE_MS = 15_000;
+ const IDLE_PERIOD_MS = 60 * 60_000;
+ 
+ /** Owns idle clocks, baseline eligibility, optional provider vetoes and the sweep lifetime. */
+ export function createIdleRuntimeCleanup(options: Options) {
+   const protectedAt = new WeakMap<object, { at: number; protected: boolean }>();
++  const closing = new WeakSet<object>();
+   let collection: Promise<CollectionResult> | null = null;
++  let closeWaitMs = IDLE_SESSION_CLOSE_MS;
+   let stopped = false;
+   let enabled = options.enabled;
+   let generation = 0;
+@@ -54,6 +61,9 @@ export function createIdleRuntimeCleanup(options: Options) {
+   function baselineAllows(family: readonly RuntimeCleanupCandidate[]) {
+     return family.every((runtime) => runtime.isEligible() && !isProtected(runtime.agentId));
+   }
++  function observationAllows(family: readonly RuntimeCleanupCandidate[]) {
++    return family.every((runtime) => !runtime.isObservationProtected?.());
++  }
+   async function providersAllow(
+     family: readonly RuntimeCleanupCandidate[],
+     isCurrent: () => boolean,
+@@ -70,16 +80,55 @@ export function createIdleRuntimeCleanup(options: Options) {
+     }
+     return true;
+   }
++  function deadlineAllows(
++    runtime: RuntimeCleanupCandidate,
++    timestamp: number,
++    idlePeriodMs: number,
++    family: readonly RuntimeCleanupCandidate[],
++  ) {
++    const previous = protectedAt.get(runtime.identity);
++    if (previous?.protected) protectedAt.set(runtime.identity, { at: timestamp, protected: false });
++    const idleSince = Math.max(runtime.lastActivityAt, protectedAt.get(runtime.identity)?.at ?? 0);
++    return timestamp - idleSince >= idlePeriodMs && observationAllows(family);
++  }
++  async function recordClose(
++    runtime: RuntimeCleanupCandidate,
++    family: readonly RuntimeCleanupCandidate[],
++    revalidate: () => boolean,
++    result: CollectionResult,
++    timestamp: number,
++    isCurrent: () => boolean,
++  ) {
++    try {
++      if (await runtime.closeIfEligible(revalidate)) {
++        const entry = {
++          agentId: runtime.agentId,
++          provider: runtime.provider,
++          sessionId: runtime.sessionId!,
++        };
++        result.collected.push(entry);
++        options.logger.info(entry, "Collected idle agent runtime");
++      } else if (isCurrent() && observationAllows(family)) {
++        protectedAt.set(runtime.identity, { at: timestamp, protected: true });
++      }
++    } catch (error) {
++      protectedAt.set(runtime.identity, { at: timestamp, protected: true });
++      result.failures.push({ agentId: runtime.agentId, error });
++      options.logger.warn({ agentId: runtime.agentId, err: error }, "Idle runtime cleanup failed");
++    }
++  }
+   async function collect(): Promise<CollectionResult> {
+     const result: CollectionResult = { collected: [], failures: [] };
+     const sweepGeneration = generation;
+     const isCurrent = () => enabled && !stopped && generation === sweepGeneration;
+     if (!isCurrent()) return result;
++    const idlePeriodMs = (await options.idlePeriodMs?.()) ?? IDLE_PERIOD_MS;
++    if (idlePeriodMs <= 0) return result;
+     const timestamp = now();
+     const runtimes = options.runtimes();
+     for (const runtime of runtimes) {
+       if (!isCurrent()) break;
+-      if (!runtime.sessionId) continue;
++      if (!runtime.sessionId || closing.has(runtime.identity)) continue;
+       const family = familyOf(runtime, runtimes);
+       try {
+         const allowed = baselineAllows(family) && (await providersAllow(family, isCurrent));
+@@ -92,14 +141,7 @@ export function createIdleRuntimeCleanup(options: Options) {
+           );
+           continue;
+         }
+-        const previous = protectedAt.get(runtime.identity);
+-        if (previous?.protected)
+-          protectedAt.set(runtime.identity, { at: timestamp, protected: false });
+-        const idleSince = Math.max(
+-          runtime.lastActivityAt,
+-          protectedAt.get(runtime.identity)?.at ?? 0,
+-        );
+-        if (timestamp - idleSince < IDLE_PERIOD_MS) continue;
++        if (!deadlineAllows(runtime, timestamp, idlePeriodMs, family)) continue;
+         const revalidate = () => {
+           const currentFamily = familyOf(runtime, options.runtimes());
+           return (
+@@ -108,20 +150,32 @@ export function createIdleRuntimeCleanup(options: Options) {
+             currentFamily.every((current) =>
+               family.some((captured) => captured.identity === current.identity),
+             ) &&
+-            baselineAllows(family)
++            baselineAllows(family) &&
++            observationAllows(family)
+           );
+         };
+-        if (await runtime.closeIfEligible(revalidate)) {
+-          const entry = {
+-            agentId: runtime.agentId,
+-            provider: runtime.provider,
+-            sessionId: runtime.sessionId,
+-          };
+-          result.collected.push(entry);
+-          options.logger.info(entry, "Collected idle agent runtime");
+-        } else if (isCurrent()) {
+-          protectedAt.set(runtime.identity, { at: timestamp, protected: true });
+-        }
++        closing.add(runtime.identity);
++        // Observe the whole lifecycle operation. A deadline never releases its lane
++        // or publishes a snapshot while the provider still owns the native session.
++        const close = recordClose(
++          runtime,
++          family,
++          revalidate,
++          result,
++          timestamp,
++          isCurrent,
++        ).finally(() => closing.delete(runtime.identity));
++        closeWaitMs = runtime.idleSessionCloseMs ?? IDLE_SESSION_CLOSE_MS;
++        await withTimeout(
++          close,
++          closeWaitMs,
++          `Idle runtime close still pending for ${runtime.agentId}`,
++        ).catch((error) =>
++          options.logger.warn(
++            { agentId: runtime.agentId, err: error },
++            "Idle runtime close continues in background",
++          ),
++        );
+       } catch (error) {
+         if (!isCurrent()) break;
+         protectedAt.set(runtime.identity, { at: timestamp, protected: true });
+@@ -161,7 +215,12 @@ export function createIdleRuntimeCleanup(options: Options) {
+     async close() {
+       stopped = true;
+       cancel();
+-      await collection;
++      if (collection) {
++        await withTimeout(collection, closeWaitMs, "Idle runtime shutdown wait timed out").catch(
++          (error) =>
++            options.logger.warn({ err: error }, "Idle runtime shutdown continues in background"),
++        );
++      }
+     },
+   };
+ }
+diff --git a/packages/server/src/server/bootstrap.ts b/packages/server/src/server/bootstrap.ts
+index d9125148e..6dff5cdb4 100644
+--- a/packages/server/src/server/bootstrap.ts
++++ b/packages/server/src/server/bootstrap.ts
+@@ -632,47 +632,6 @@ function createInitialMutableDaemonConfig(config: ResolvedDaemonSettings): Mutab
+   return initialConfig;
+ }
+ 
+-function startIdleAgentUnload(
+-  config: PaseoDaemonConfig,
+-  agentManager: AgentManager,
+-  logger: Logger,
+-): NodeJS.Timeout {
+-  const idleUnloadEnvValue =
+-    config.configReload?.env?.PASEO_AGENT_IDLE_UNLOAD_MINUTES ??
+-    process.env.PASEO_AGENT_IDLE_UNLOAD_MINUTES;
+-  const parsedIdleUnloadEnv = idleUnloadEnvValue === undefined ? null : Number(idleUnloadEnvValue);
+-  const idleUnloadEnvMinutes =
+-    parsedIdleUnloadEnv !== null &&
+-    Number.isInteger(parsedIdleUnloadEnv) &&
+-    parsedIdleUnloadEnv >= 0 &&
+-    parsedIdleUnloadEnv <= 2_147_483
+-      ? parsedIdleUnloadEnv
+-      : null;
+-  if (idleUnloadEnvValue !== undefined && idleUnloadEnvMinutes === null) {
+-    logger.warn("Ignoring invalid PASEO_AGENT_IDLE_UNLOAD_MINUTES value");
+-  }
+-  let idleUnloadScanRunning = false;
+-  const idleUnloadTimer = setInterval(async () => {
+-    if (idleUnloadScanRunning) return;
+-    idleUnloadScanRunning = true;
+-    try {
+-      const configured =
+-        (await loadPersistedConfigAsync(config.paseoHome)).agents?.idleUnloadMinutes ?? 15;
+-      const minutes = idleUnloadEnvMinutes ?? configured;
+-      if (minutes === 0) return;
+-      await agentManager.unloadIdleAgents(minutes * 60_000).catch((error) => {
+-        logger.warn({ err: error }, "Idle agent unload scan failed");
+-      });
+-    } catch (error) {
+-      logger.warn({ err: error }, "Idle agent unload scan could not read configuration");
+-    } finally {
+-      idleUnloadScanRunning = false;
+-    }
+-  }, 60_000);
+-  idleUnloadTimer.unref();
+-  return idleUnloadTimer;
+-}
+-
+ export async function createPaseoDaemon(
+   config: PaseoDaemonConfig,
+   rootLogger: Logger,
+@@ -1084,7 +1043,6 @@ export async function createPaseoDaemon(
+       resolvePaseoToolPolicy(provider, daemonConfigStore.get().providers),
+     logger,
+   });
+-  const idleUnloadTimer = startIdleAgentUnload(config, agentManager, logger);
+   const syncPluginProviders = () => {
+     agentManager.updateProviderRegistry(
+       providerSnapshotManager.replacePluginProviders(pluginRuntime.getProviderRegistrations()),
+@@ -1585,9 +1543,27 @@ export async function createPaseoDaemon(
+     }),
+   });
+ 
++  let idleUnloadPeriodMs = 15 * 60_000;
+   const idleRuntimeCleanup = createIdleRuntimeCleanup({
+     enabled: daemonConfigStore.get().idleRuntimeCleanup !== false,
+-    runtimes: () => agentManager.getRuntimeCleanupCandidates(),
++    idlePeriodMs: async () => {
++      const env =
++        config.configReload?.env?.PASEO_AGENT_IDLE_UNLOAD_MINUTES ??
++        process.env.PASEO_AGENT_IDLE_UNLOAD_MINUTES;
++      const value = env === undefined ? undefined : Number(env);
++      const configured =
++        (await loadPersistedConfigAsync(config.paseoHome)).agents?.idleUnloadMinutes ?? 15;
++      const minutes =
++        value !== undefined && Number.isInteger(value) && value >= 0 && value <= 2_147_483
++          ? value
++          : configured;
++      idleUnloadPeriodMs = minutes * 60_000;
++      return idleUnloadPeriodMs;
++    },
++    runtimes: () => {
++      agentManager.logIdleUnloadSkips(idleUnloadPeriodMs, Date.now());
++      return agentManager.getRuntimeCleanupCandidates();
++    },
+     isProtected: (agentId) =>
+       finishSubscriptions.hasPendingForCaller(agentId) ||
+       (wsServer?.agentMessages.hasPending(agentId) ?? false),
+@@ -2060,7 +2036,6 @@ export async function createPaseoDaemon(
+       scriptHealthMonitor.start();
+     } catch (error) {
+       await stopOwnerUnix?.();
+-      clearInterval(idleUnloadTimer);
+       localCredential = null;
+       await deleteLocalCredential(config.paseoHome);
+       unsubscribePluginProviders();
+@@ -2080,7 +2055,6 @@ export async function createPaseoDaemon(
+     const keepTerminals = options?.keepTerminals === true;
+     let terminalShutdownError: unknown = null;
+     await stopOwnerUnix?.();
+-    clearInterval(idleUnloadTimer);
+ 
+     localCredential = null;
+     await deleteLocalCredential(config.paseoHome);
+diff --git a/packages/server/src/server/build-identity.ts b/packages/server/src/server/build-identity.ts
+index 6f202dab7..68c84f3cd 100644
+--- a/packages/server/src/server/build-identity.ts
++++ b/packages/server/src/server/build-identity.ts
+@@ -1,4 +1,4 @@
+-import { readFileSync } from "node:fs";
++import { readFileSync, realpathSync } from "node:fs";
+ import { basename, dirname, join } from "node:path";
+ import { fileURLToPath } from "node:url";
+ import { z } from "zod";
+@@ -12,22 +12,30 @@ const LocalBuildMarkerSchema = z.object({
+ });
+ 
+ export function readLocalBuildIdentity(version: string): ServerInfoStatusPayload["buildIdentity"] {
+-  const processResourcesPath = "resourcesPath" in process ? process.resourcesPath : undefined;
+-  let resourcesPath: string;
+-  if (typeof processResourcesPath === "string" && processResourcesPath) {
+-    resourcesPath = processResourcesPath;
+-  } else {
+-    let directory = dirname(fileURLToPath(import.meta.url));
++  try {
++    let directory = dirname(realpathSync(fileURLToPath(import.meta.url)));
+     while (basename(directory) !== "app.asar" && basename(directory) !== "app.asar.unpacked") {
+       const parent = dirname(directory);
+       if (parent === directory) return undefined;
+       directory = parent;
+     }
+-    resourcesPath = dirname(directory);
+-  }
+-  try {
++    const moduleResourcesPath = dirname(directory);
++    const processResourcesPath = "resourcesPath" in process ? process.resourcesPath : undefined;
++    const resourcesPath =
++      typeof processResourcesPath === "string" && processResourcesPath
++        ? processResourcesPath
++        : moduleResourcesPath;
++    const canonicalResourcesPath = realpathSync(resourcesPath);
++    if (
++      canonicalResourcesPath !== moduleResourcesPath ||
++      canonicalResourcesPath !== join(realpathSync(dirname(resourcesPath)), "Resources") ||
++      basename(dirname(canonicalResourcesPath)) !== "Contents" ||
++      !basename(dirname(dirname(canonicalResourcesPath))).endsWith(".app")
++    ) {
++      return undefined;
++    }
+     const marker = LocalBuildMarkerSchema.safeParse(
+-      JSON.parse(readFileSync(join(resourcesPath, "local-build.json"), "utf8")),
++      JSON.parse(readFileSync(join(canonicalResourcesPath, "local-build.json"), "utf8")),
+     );
+     if (!marker.success || marker.data.baseTag !== `v${version}`) return undefined;
+     return {
+diff --git a/packages/server/src/server/config.ts b/packages/server/src/server/config.ts
+index cfee29605..5850f9f8b 100644
+--- a/packages/server/src/server/config.ts
++++ b/packages/server/src/server/config.ts
+@@ -663,6 +663,7 @@ export function resolveConfigFromPersisted(
+   };
+ }
+ 
++// eslint-disable-next-line complexity
+ export function resolveReloadableConfig(
+   persisted: PersistedConfig,
+   options?: ResolveConfigFromPersistedOptions,
+diff --git a/packages/server/src/server/daemon-config-store.test.ts b/packages/server/src/server/daemon-config-store.test.ts
+index 5e2c8590e..7e2cb1447 100644
+--- a/packages/server/src/server/daemon-config-store.test.ts
++++ b/packages/server/src/server/daemon-config-store.test.ts
+@@ -1598,7 +1598,7 @@ describe("DaemonConfigStore speech settings", () => {
+     const { paseoHome, store, applied } = createSpeechStore();
+ 
+     await expect(
+-      await store.patch({ features: { voiceMode: { tts: { provider: "local", model: "nope" } } } }),
++      store.patch({ features: { voiceMode: { tts: { provider: "local", model: "nope" } } } }),
+     ).rejects.toThrow("Unknown local voice model: nope");
+     expect(loadPersistedConfig(paseoHome).features?.voiceMode).toBeUndefined();
+     expect(applied).toEqual([]);
+diff --git a/packages/server/src/server/plugins/lifecycle/index.ts b/packages/server/src/server/plugins/lifecycle/index.ts
+index 7dc6a730d..66af94025 100644
+--- a/packages/server/src/server/plugins/lifecycle/index.ts
++++ b/packages/server/src/server/plugins/lifecycle/index.ts
+@@ -291,6 +291,7 @@ export async function validateBeforeResult<Name extends keyof PluginWireBeforeRe
+     !Array.isArray(output)
+   ) {
+     const request = input as PluginWireBeforeRequests["agent.open.before"];
++
+     output = { model: request.model, title: request.title, ...output };
+   }
+   const result = validateBeforeRequest(name, output);
+diff --git a/packages/server/src/server/websocket-server.relay-reconnect.test.ts b/packages/server/src/server/websocket-server.relay-reconnect.test.ts
+index 09d9e00a2..a4af99b22 100644
+--- a/packages/server/src/server/websocket-server.relay-reconnect.test.ts
++++ b/packages/server/src/server/websocket-server.relay-reconnect.test.ts
+@@ -1,9 +1,12 @@
+ import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
+ import { SessionDelivery } from "./session/owned-subscriptions/index.js";
+ import { afterEach, beforeEach, describe, expect, test, vi } from "vitest";
+-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
++import { mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from "node:fs";
++import { stripTypeScriptTypes } from "node:module";
+ import { tmpdir } from "node:os";
+ import { join } from "node:path";
++import { fileURLToPath, pathToFileURL } from "node:url";
++import * as buildIdentity from "./build-identity.js";
+ import type { KeeperControl } from "./keeper/keeper-control.js";
+ import type { Server as HTTPServer } from "http";
+ import type pino from "pino";
+@@ -606,7 +609,9 @@ describe("relay external socket reconnect behavior", () => {
+   });
+ 
+   test("reports only readable local build identity and enabled keeper control", async () => {
+-    const resourcesPath = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
++    const fixtureRoot = mkdtempSync(join(tmpdir(), "paseo-build-identity-"));
++    const resourcesPath = join(fixtureRoot, "Paseo.app", "Contents", "Resources");
++    mkdirSync(resourcesPath, { recursive: true });
+     const originalResourcesPath = Object.getOwnPropertyDescriptor(process, "resourcesPath");
+     const markerPath = join(resourcesPath, "local-build.json");
+     const marker = {
+@@ -616,7 +621,37 @@ describe("relay external socket reconnect behavior", () => {
+       head: "1234567890abcdef1234567890abcdef12345678",
+     };
+     Object.defineProperty(process, "resourcesPath", { configurable: true, value: resourcesPath });
++    const identityReader = vi.spyOn(buildIdentity, "readLocalBuildIdentity");
+     try {
++      writeFileSync(markerPath, JSON.stringify(marker));
++      const sourceServer = createServer();
++      try {
++        const socket = new MockSocket();
++        const serverInfo = await attachRelayAndHello({
++          server: sourceServer,
++          socket,
++          clientId: "foreign-source-build",
++        });
++        expect(parseSentEnvelope(socket.sent[0]).message?.payload).not.toHaveProperty(
++          "buildIdentity",
++        );
++        expect(serverInfo).not.toHaveProperty("buildIdentity");
++      } finally {
++        await sourceServer.close();
++      }
++      const modulePath = join(resourcesPath, "app.asar", "build-identity.mjs");
++      mkdirSync(join(resourcesPath, "app.asar"));
++      symlinkSync(
++        fileURLToPath(new URL("../../../../node_modules", import.meta.url)),
++        join(resourcesPath, "node_modules"),
++        "dir",
++      );
++      writeFileSync(
++        modulePath,
++        stripTypeScriptTypes(readFileSync(new URL("./build-identity.ts", import.meta.url), "utf8")),
++      );
++      const packagedHelper: typeof buildIdentity = await import(pathToFileURL(modulePath).href);
++      identityReader.mockImplementation(packagedHelper.readLocalBuildIdentity);
+       for (const enabled of [true, false]) {
+         writeFileSync(markerPath, JSON.stringify(marker));
+         const server = createServer({ keeperControl: createStub<KeeperControl>({ enabled }) });
+@@ -676,7 +711,8 @@ describe("relay external socket reconnect behavior", () => {
+       if (originalResourcesPath)
+         Object.defineProperty(process, "resourcesPath", originalResourcesPath);
+       else Reflect.deleteProperty(process, "resourcesPath");
+-      rmSync(resourcesPath, { recursive: true, force: true });
++      identityReader.mockRestore();
++      rmSync(fixtureRoot, { recursive: true, force: true });
+     }
+   });
+ 
