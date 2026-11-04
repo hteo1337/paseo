@@ -1,0 +1,33 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/providers/codex-app-server-agent.test.ts src/server/agent/providers/codex/mcp-selection.test.ts src/server/agent/agent-storage.test.ts src/server/agent/agent-manager.test.ts src/server/agent/mcp-server.test.ts src/server/plugins/mcp-selection.e2e.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+stdout | src/server/agent/providers/codex-app-server-agent.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚙️  suppress all logs with { quiet: true }
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+
+ ❯ src/server/agent/providers/codex-app-server-agent.test.ts (203 tests | 1 failed) 2885ms
+     × retains simple provider enabled flags inside the final aggregate 6ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/providers/codex-app-server-agent.test.ts > native session MCP selection > retains simple provider enabled flags inside the final aggregate
+TypeError: Cannot read properties of null (reading 'metadata')
+ ❯ src/server/agent/providers/codex-app-server-agent.test.ts:7320:42
+    7318|         config: { mcp_servers: { inherited: { enabled: false }, select…
+    7319|       });
+    7320|       expect(session.describePersistence().metadata).toMatchObject({
+       |                                          ^
+    7321|         mcpServerEnabled: { inherited: false, selected: true },
+    7322|       });
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 1 passed (6)
+      Tests  1 failed | 471 passed (495)
+   Start at  02:25:34
+   Duration  11.83s (transform 1.10s, setup 26ms, import 1.68s, tests 9.97s, environment 0ms)
+
+exit=1

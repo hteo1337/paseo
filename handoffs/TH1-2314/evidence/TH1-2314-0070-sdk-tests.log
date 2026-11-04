@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/index.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/client
+
+
+ Test Files  1 passed (1)
+      Tests  27 passed (27)
+   Start at  02:25:34
+   Duration  3.23s (transform 2.04s, setup 0ms, import 2.39s, tests 773ms, environment 0ms)
+
+exit=0

@@ -1,0 +1,193 @@
+checkout=/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7; runtime source/build modules traversed=429
+Non-relative runtime specifiers (including conditional/dynamic literal imports):
+@agentclientprotocol/sdk
+@agentclientprotocol/sdk/dist/schema/zod.gen.js
+@anthropic-ai/claude-agent-sdk
+@codemirror/language
+@codemirror/legacy-modes/mode/clike
+@codemirror/legacy-modes/mode/swift
+@getpaseo/client/internal/daemon-client
+@getpaseo/highlight
+@getpaseo/plugin/internal/lifecycle
+@getpaseo/plugin/server
+@getpaseo/plugin/server/provider
+@getpaseo/protocol/agent-labels
+@getpaseo/protocol/agent-lifecycle
+@getpaseo/protocol/agent-profile
+@getpaseo/protocol/agent-state-bucket
+@getpaseo/protocol/agent-title-limits
+@getpaseo/protocol/agent-types
+@getpaseo/protocol/binary-frames/index
+@getpaseo/protocol/branch-slug
+@getpaseo/protocol/browser-automation/capabilities
+@getpaseo/protocol/browser-automation/rpc-schemas
+@getpaseo/protocol/check-traits
+@getpaseo/protocol/chunked-transport
+@getpaseo/protocol/client-capabilities
+@getpaseo/protocol/daemon-endpoints
+@getpaseo/protocol/error-utils
+@getpaseo/protocol/forge-manifest
+@getpaseo/protocol/git-remote
+@getpaseo/protocol/gitea-status
+@getpaseo/protocol/gitlab-pipeline
+@getpaseo/protocol/messages
+@getpaseo/protocol/paseo-config-schema
+@getpaseo/protocol/paseo-tool-presentation/index
+@getpaseo/protocol/path-utils
+@getpaseo/protocol/plugin-config
+@getpaseo/protocol/plugin-registry
+@getpaseo/protocol/project-groups
+@getpaseo/protocol/provider-config
+@getpaseo/protocol/provider-manifest
+@getpaseo/protocol/provider-snapshot-codec
+@getpaseo/protocol/schedule/cadence
+@getpaseo/protocol/schedule/cron-expression
+@getpaseo/protocol/schedule/types
+@getpaseo/protocol/terminal-activity
+@getpaseo/protocol/terminal-input-mode
+@getpaseo/protocol/terminal-key-input
+@getpaseo/protocol/terminal-profile
+@getpaseo/protocol/timeline-identity
+@getpaseo/protocol/timeline-turn
+@getpaseo/protocol/tool-call-display
+@getpaseo/protocol/tool-name-normalization
+@getpaseo/protocol/validation/ws-outbound
+@getpaseo/protocol/websocket-message-limit
+@getpaseo/relay
+@getpaseo/relay/e2ee
+@isaacs/ttlcache
+@lezer/common
+@lezer/cpp
+@lezer/css
+@lezer/go
+@lezer/highlight
+@lezer/html
+@lezer/java
+@lezer/javascript
+@lezer/json
+@lezer/lr
+@lezer/markdown
+@lezer/php
+@lezer/python
+@lezer/rust
+@lezer/xml
+@lezer/yaml
+@modelcontextprotocol/sdk/client/index.js
+@modelcontextprotocol/sdk/client/sse.js
+@modelcontextprotocol/sdk/client/stdio.js
+@modelcontextprotocol/sdk/client/streamableHttp.js
+@modelcontextprotocol/sdk/inMemory.js
+@modelcontextprotocol/sdk/server/mcp.js
+@modelcontextprotocol/sdk/server/zod-compat.js
+@modelcontextprotocol/sdk/server/zod-json-schema-compat.js
+@modelcontextprotocol/sdk/types.js
+@noble/ciphers/chacha.js
+@noble/curves/ed25519.js
+@noble/hashes/hmac.js
+@noble/hashes/sha2.js
+@opencode-ai/sdk/v2/client
+@opencode/client
+@opencode/client/service
+@xterm/addon-serialize
+@xterm/addon-unicode-graphemes
+@xterm/headless
+ajv
+base64-js
+child_process
+crypto
+esbuild
+express
+fs
+fs/promises
+lezer-elixir
+lru-cache
+mnemonic-id
+node-pty
+node:async_hooks
+node:child_process
+node:crypto
+node:events
+node:fs
+node:fs/promises
+node:http
+node:module
+node:net
+node:os
+node:path
+node:readline
+node:stream
+node:stream/promises
+node:timers
+node:timers/promises
+node:url
+node:util
+node:v8
+p-limit
+p-throttle
+path
+pino
+react/jsx-runtime
+strip-ansi
+tree-kill
+tweetnacl
+util
+uuid
+vitest
+which
+zod
+
+Workspace resolution table (runtime imports plus source type imports; from baseline server package):
+@getpaseo/client/internal/daemon-client	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/client/dist/daemon-client.js	LOCAL
+@getpaseo/client/internal/daemon-client-transport-types	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/client/dist/daemon-client-transport-types.js	LOCAL
+@getpaseo/highlight	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/highlight/dist/index.js	LOCAL
+@getpaseo/plugin/internal/lifecycle	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/plugin/dist/server/lifecycle.js	LOCAL
+@getpaseo/plugin/server	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/plugin/dist/server/index.js	LOCAL
+@getpaseo/plugin/server/provider	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/plugin/dist/server/provider.js	LOCAL
+@getpaseo/protocol/agent-labels	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-labels.js	LOCAL
+@getpaseo/protocol/agent-lifecycle	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-lifecycle.js	LOCAL
+@getpaseo/protocol/agent-message	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-message.js	LOCAL
+@getpaseo/protocol/agent-profile	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-profile.js	LOCAL
+@getpaseo/protocol/agent-state-bucket	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-state-bucket.js	LOCAL
+@getpaseo/protocol/agent-title-limits	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-title-limits.js	LOCAL
+@getpaseo/protocol/agent-types	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/agent-types.js	LOCAL
+@getpaseo/protocol/binary-frames/index	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/binary-frames/index.js	LOCAL
+@getpaseo/protocol/branch-slug	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/branch-slug.js	LOCAL
+@getpaseo/protocol/browser-automation/capabilities	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/browser-automation/capabilities.js	LOCAL
+@getpaseo/protocol/browser-automation/rpc-schemas	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/browser-automation/rpc-schemas.js	LOCAL
+@getpaseo/protocol/check-traits	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/check-traits.js	LOCAL
+@getpaseo/protocol/chunked-transport	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/chunked-transport.js	LOCAL
+@getpaseo/protocol/client-capabilities	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/client-capabilities.js	LOCAL
+@getpaseo/protocol/daemon-endpoints	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/daemon-endpoints.js	LOCAL
+@getpaseo/protocol/error-utils	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/error-utils.js	LOCAL
+@getpaseo/protocol/forge-manifest	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/forge-manifest.js	LOCAL
+@getpaseo/protocol/git-remote	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/git-remote.js	LOCAL
+@getpaseo/protocol/gitea-status	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/gitea-status.js	LOCAL
+@getpaseo/protocol/gitlab-pipeline	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/gitlab-pipeline.js	LOCAL
+@getpaseo/protocol/hosts	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/hosts.js	LOCAL
+@getpaseo/protocol/messages	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/messages.js	LOCAL
+@getpaseo/protocol/paseo-config-schema	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/paseo-config-schema.js	LOCAL
+@getpaseo/protocol/paseo-tool-presentation/index	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/paseo-tool-presentation/index.js	LOCAL
+@getpaseo/protocol/path-utils	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/path-utils.js	LOCAL
+@getpaseo/protocol/plugin-config	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/plugin-config.js	LOCAL
+@getpaseo/protocol/plugin-registry	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/plugin-registry.js	LOCAL
+@getpaseo/protocol/project-groups	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/project-groups.js	LOCAL
+@getpaseo/protocol/provider-config	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/provider-config.js	LOCAL
+@getpaseo/protocol/provider-manifest	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/provider-manifest.js	LOCAL
+@getpaseo/protocol/provider-snapshot-codec	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/provider-snapshot-codec.js	LOCAL
+@getpaseo/protocol/schedule/cadence	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/schedule/cadence.js	LOCAL
+@getpaseo/protocol/schedule/cron-expression	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/schedule/cron-expression.js	LOCAL
+@getpaseo/protocol/schedule/types	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/schedule/types.js	LOCAL
+@getpaseo/protocol/speech/rpc-schemas	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/speech/rpc-schemas.js	LOCAL
+@getpaseo/protocol/terminal-activity	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/terminal-activity.js	LOCAL
+@getpaseo/protocol/terminal-input-mode	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/terminal-input-mode.js	LOCAL
+@getpaseo/protocol/terminal-key-input	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/terminal-key-input.js	LOCAL
+@getpaseo/protocol/terminal-profile	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/terminal-profile.js	LOCAL
+@getpaseo/protocol/timeline-identity	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/timeline-identity.js	LOCAL
+@getpaseo/protocol/timeline-turn	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/timeline-turn.js	LOCAL
+@getpaseo/protocol/tool-call-display	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/tool-call-display.js	LOCAL
+@getpaseo/protocol/tool-name-normalization	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/tool-name-normalization.js	LOCAL
+@getpaseo/protocol/validation/ws-outbound	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/validation/ws-outbound.js	LOCAL
+@getpaseo/protocol/websocket-message-limit	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol/dist/websocket-message-limit.js	LOCAL
+@getpaseo/relay	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/relay/dist/index.js	LOCAL
+@getpaseo/relay/e2ee	/Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/relay/dist/e2ee.js	LOCAL
+workspace resolution failures=0

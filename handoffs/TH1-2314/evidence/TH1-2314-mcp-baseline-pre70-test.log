@@ -1,0 +1,33 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/mcp-server.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+stdout | src/server/agent/mcp-server.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: 🛡️ auth for agents: https://vestauth.com
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: 🔐 prevent building .env in docker: https://dotenvx.com/prebuild
+
+ ❯ src/server/agent/mcp-server.test.ts (194 tests | 1 failed) 6181ms
+     × loads archived agents before reading get_agent_activity 9ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/mcp-server.test.ts > agent snapshot MCP serialization > loads archived agents before reading get_agent_activity
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/server/agent/mcp-server.test.ts:6724:59
+    6722|       }),
+    6723|     );
+    6724|     expect(spies.agentManager.resumeAgentFromPersistence).toHaveBeenCa…
+       |                                                           ^
+    6725|     expect(spies.agentManager.hydrateTimelineFromProvider).toHaveBeenC…
+    6726|       "archived-activity-agent",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed | 187 passed (194)
+   Start at  02:30:01
+   Duration  9.96s (transform 2.90s, setup 19ms, import 3.69s, tests 6.18s, environment 0ms)
+
+exit=1

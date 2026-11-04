@@ -43,6 +43,6 @@ Baseline correction: shared node_modules contaminated @getpaseo resolution. Disc
 - [x] Port 0038 and retry 0061/0062; keep upstream snapshot retention (build/typecheck/lint exit0, server249/client213/protocol1).
 - [x] Port 0044 and replay 0045 (native/server build,typecheck,lint exit0;187 tests); clean0039/40 and signing-validator1.
 - [x] Port 0059 bounded idle provider unload (build/typecheck/lint exit0,569 passed/5 existing skips); clean0060 and Muse65–69/72 verified.
-- [ ] Port 0070 against the rewritten Codex agent.
+- [x] Port 0070 against rewritten Codex agent (build/typecheck/lint exit0,server720,SDK27,protocol4,Hub18); independent MCP baseline and source-only cold-load fix485 tests.
 - [ ] Replay remaining clean prerequisites and all of 0073 last, unsplit into two commits.
 - [ ] Run final relevant checks, update exact evidence and issue state, commit and push handoff.

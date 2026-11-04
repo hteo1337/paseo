@@ -1,1 +1,1 @@
-No operator blocker. Continue root0070; all other originals except0073 landed.0073 exact two source subjects/order reserved for tail. Source/handoff commits separate; existing four mixed commits preserved for lead cleanup.
+No operator blocker. Only0073 remains. Preflight candidate before final handoff commit, then original mailbox as final two source-only commits; no history rewrite. Loader baseline proves0059 source cause, fixed in0e02c4c9c.0070 restored/verified/committed, stash dropped after content comparison.

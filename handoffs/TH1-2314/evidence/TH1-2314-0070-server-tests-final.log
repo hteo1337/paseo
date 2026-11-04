@@ -1,0 +1,33 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/providers/codex-app-server-agent.test.ts src/server/agent/providers/codex/mcp-selection.test.ts src/server/agent/agent-storage.test.ts src/server/agent/agent-manager.test.ts src/server/agent/mcp-server.test.ts src/server/plugins/mcp-selection.e2e.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+stdout | src/server/agent/mcp-server.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  suppress all logs with { quiet: true }
+
+ ❯ src/server/agent/mcp-server.test.ts (195 tests | 1 failed) 6542ms
+     × loads archived agents before reading get_agent_activity 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/agent/mcp-server.test.ts > agent snapshot MCP serialization > loads archived agents before reading get_agent_activity
+AssertionError: expected "vi.fn()" to be called at least once
+ ❯ src/server/agent/mcp-server.test.ts:6780:59
+    6778|       }),
+    6779|     );
+    6780|     expect(spies.agentManager.resumeAgentFromPersistence).toHaveBeenCa…
+       |                                                           ^
+    6781|     expect(spies.agentManager.hydrateTimelineFromProvider).toHaveBeenC…
+    6782|       "archived-activity-agent",
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 2 passed (6)
+      Tests  1 failed | 683 passed (690)
+   Start at  02:26:36
+   Duration  21.98s (transform 3.76s, setup 40ms, import 5.26s, tests 16.42s, environment 0ms)
+
+exit=1

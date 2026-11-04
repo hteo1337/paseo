@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/messages.create-agent-internal.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/protocol
+
+
+ Test Files  1 passed (1)
+      Tests  4 passed (4)
+   Start at  02:25:34
+   Duration  345ms (transform 171ms, setup 0ms, import 274ms, tests 5ms, environment 0ms)
+
+exit=0

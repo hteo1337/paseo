@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/providers/codex-app-server-agent.test.ts src/server/agent/providers/codex/mcp-selection.test.ts src/server/agent/agent-storage.test.ts src/server/agent/agent-manager.test.ts src/server/agent/mcp-server.test.ts src/server/plugins/mcp-selection.e2e.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  6 passed (6)
+      Tests  720 passed (720)
+   Start at  02:34:16
+   Duration  23.81s (transform 3.85s, setup 43ms, import 6.12s, tests 17.25s, environment 0ms)
+
+exit=0
