@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session.test.ts src/server/plugins/invocation-protocol.test.ts src/server/plugins/internal-seam.e2e.test.ts src/server/plugins/runtime.posix.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  4 passed (4)
+      Tests  249 passed (249)
+   Start at  02:08:43
+   Duration  47.20s (transform 3.93s, setup 34ms, import 6.49s, tests 40.41s, environment 0ms)
+
+exit=0

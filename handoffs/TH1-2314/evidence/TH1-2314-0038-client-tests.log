@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/daemon-client.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/client
+
+
+ Test Files  1 passed (1)
+      Tests  213 passed (213)
+   Start at  02:07:15
+   Duration  4.93s (transform 1.98s, setup 0ms, import 2.34s, tests 2.52s, environment 0ms)
+
+exit=0

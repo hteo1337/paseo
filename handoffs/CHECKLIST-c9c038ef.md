@@ -40,7 +40,7 @@ Baseline correction: shared node_modules contaminated @getpaseo resolution. Disc
 
 - [x] Port 0055 and retry 0056/0063/0071, preserving upstream collapsed-open-workspace handling (green build/typecheck/lint, session154 and targeted suites).
 
-- [ ] Port 0038 and retry 0061/0062; keep upstream snapshot retention.
+- [x] Port 0038 and retry 0061/0062; keep upstream snapshot retention (build/typecheck/lint exit0, server249/client213/protocol1).
 - [ ] Port 0044 and replay 0045.
 - [ ] Port 0059 bounded idle provider unload.
 - [ ] Port 0070 against the rewritten Codex agent.

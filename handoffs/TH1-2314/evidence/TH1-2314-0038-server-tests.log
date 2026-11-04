@@ -1,0 +1,65 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/session.test.ts src/server/plugins/invocation-protocol.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+stdout | src/server/session.test.ts
+[dotenv@17.3.1] injecting env (0) from .env.test -- tip: ⚡️ secrets for agents: https://dotenvx.com/as2
+[dotenv@17.3.1] injecting env (0) from ../.env -- tip: ⚙️  load multiple .env files with { path: ['.env.local', '.env'] }
+
+ ❯ src/server/session.test.ts (174 tests | 1 failed) 1143ms
+     × preserves unscoped legacy calls and carries canonical host context through the real child 12ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/server/session.test.ts > plugin invocation authority transport > preserves unscoped legacy calls and carries canonical host context through the real child
+AssertionError: expected { Object (type, payload) } to deeply equal { …(2) }
+
+- Expected
++ Received
+
+  {
+    "payload": {
+-     "output": {
+-       "executions": Any<Number>,
+-       "input": {
+-         "workspace": "forged",
+-       },
+-       "invocation": {
+-         "authentication": {
+-           "clientId": "reported-test-client",
+-           "kind": "session",
+-           "sessionId": "7484921d-54d1-4020-a459-074e31f099a6",
+-         },
+-         "permissions": [
+-           "workspace.read",
+-         ],
+-         "workspaceId": "workspace-a",
+-       },
+-     },
++     "code": "handler_error",
++     "error": "Request failed: Plugin invocation access denied",
+      "requestId": "invoke",
++     "requestType": "plugin.rpc.invoke.request",
+    },
+-   "type": "plugin.rpc.invoke.response",
++   "type": "rpc_error",
+  }
+
+ ❯ src/server/session.test.ts:6325:91
+    6323|       },
+    6324|     });
+    6325|     expect(await invoke("read", { workspaceId: "workspace-a" }, { work…
+       |                                                                                           ^
+    6326|       type: "plugin.rpc.invoke.response",
+    6327|       payload: {
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (2)
+      Tests  1 failed | 154 passed (174)
+   Start at  02:07:15
+   Duration  6.10s (transform 3.81s, setup 22ms, import 4.86s, tests 1.14s, environment 0ms)
+
+exit=1
