@@ -1,0 +1,12 @@
+npm notice run paseo@0.15.0 npx
+npm notice run 'vitest' run src/server/agent/agent-manager.test.ts src/server/agent/provider-registry-wrap.test.ts src/server/agent/providers/acp-agent.test.ts src/server/agent/providers/opencode-agent.recovery.test.ts src/server/agent/providers/opencode-server-manager.test.ts src/server/session.workspaces.test.ts src/server/wire-compat.test.ts --bail=1
+
+ RUN  v4.1.6 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/server
+
+
+ Test Files  7 passed (7)
+      Tests  569 passed | 5 skipped (574)
+   Start at  02:20:06
+   Duration  29.59s (transform 3.89s, setup 55ms, import 6.34s, tests 22.75s, environment 0ms)
+
+exit=0

@@ -1,0 +1,13 @@
+npm notice run @getpaseo/builtin-plugins@0.15.0 test
+npm notice run vitest run muse-provider/test/provider.test.ts --bail=1
+
+ RUN  v4.1.7 /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/plugins
+
+Muse MSP fingerprint mismatch: expected sha256:e0e163db6ccf00dbe68402ce55d6319b3edc33c421f31e9583b587b2de8a118f, received sha256:unverified
+
+ Test Files  1 passed (1)
+      Tests  115 passed | 2 skipped (117)
+   Start at  02:21:40
+   Duration  18.49s (transform 247ms, setup 0ms, import 392ms, tests 18.03s, environment 0ms)
+
+exit=0

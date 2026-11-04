@@ -1,0 +1,3 @@
+npm notice run @getpaseo/server@0.15.0 generate:config-schema
+npm notice run tsx scripts/generate-config-schema.ts
+Wrote /Users/hteo/.paseo/worktrees/3eu1vvlp/c9c038efbba7/packages/website/public/schemas/paseo.config.v1.json
