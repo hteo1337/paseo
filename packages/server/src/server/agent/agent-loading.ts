@@ -73,8 +73,9 @@ export async function ensureAgentLoaded(
   deps: EnsureAgentLoadedDeps,
 ): Promise<ManagedAgent> {
   const release = deps.agentManager.beginAgentUse?.(agentId, deps.useOwnerId, {
-    // Observing a resident runtime needs a close barrier, not a fresh idle deadline.
-    touchActivity: !deps.agentManager.getAgent(agentId),
+    // Observation needs a close barrier. Only actual cold initialization below
+    // refreshes activity, after the close barrier and existing-runtime lookup.
+    touchActivity: false,
   });
   try {
     return await ensureAgentLoadedInner(agentId, deps);
@@ -114,6 +115,7 @@ async function ensureAgentLoadedInner(
   const pendingOptions = {
     broadcastTimeline: deps.broadcastTimeline === true,
   };
+  const releaseActivity = deps.agentManager.beginAgentUse?.(agentId, deps.useOwnerId);
   const initPromise = (async () => {
     const record = await deps.agentStorage.get(agentId);
     if (!record) {
@@ -172,5 +174,6 @@ async function ensureAgentLoadedInner(
     if (current === pending) {
       pendingAgentInitializations.delete(agentId);
     }
+    releaseActivity?.();
   }
 }
