@@ -305,6 +305,12 @@ const CODEX_MODES: AgentMode[] = [
       "Read files without making changes; request approval for commands that need more access.",
   },
   {
+    id: "workspace-write",
+    label: "Workspace Write (No Command/File Approvals)",
+    description:
+      "Skip command/file approvals in the workspace sandbox; enabled MCP servers may still prompt. Shell network is off by default; temporary directories or configured extra access may be allowed.",
+  },
+  {
     id: "auto",
     label: "Default Permissions",
     description: "Edit files and run commands with Codex's default approval flow.",
@@ -382,6 +388,11 @@ const MODE_PRESETS: Record<string, CodexModePreset> = {
   "read-only": {
     approvalPolicy: "on-request",
     sandbox: "read-only",
+    approvalsReviewer: "user",
+  },
+  "workspace-write": {
+    approvalPolicy: "never",
+    sandbox: "workspace-write",
     approvalsReviewer: "user",
   },
   auto: {
