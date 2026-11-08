@@ -1,1 +1,1 @@
-TH1-2410: dispatcher review launch returned backend_busy; headless browser run exited 1 without completed test result; fork main lacks routed fleet code, so fleet-wide behavior remains unverified. Draft only; no merge/install/restart.
+TH1-2410: review dispatch refused with continuity_conflict (issue has this active writer task); lead must dispatch Sol/adversarial Sol/security-auditor after worker stop. UI browser run exited 1 without completed result; fleet-wide routing unverified/absent on fork base. Draft PR #9; no merge/install/restart.
