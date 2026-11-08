@@ -1,0 +1,5 @@
+- [x] Inspect issue, branch base, authentication/pairing and storage paths.
+- [x] Implement approved per-device enrollment, transport authentication, secure storage and revocation.
+- [x] Prove approve/connect/revoke regression and run relevant checks.
+- [ ] Open security draft PR; complete required reviews and record exact evidence.
+- [ ] Update issue and handoff; commit and push branch.

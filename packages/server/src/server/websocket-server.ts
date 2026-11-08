@@ -1,3 +1,5 @@
+import { DeviceAccess } from "./device-access.js";
+import { randomBytes, randomUUID } from "node:crypto";
 import { stat } from "node:fs/promises";
 import type { CreationSnapshot } from "@getpaseo/protocol/messages";
 import { CreationService } from "./creation/index.js";
@@ -6,7 +8,6 @@ import { WebSocket, WebSocketServer } from "ws";
 import type { IncomingMessage, Server as HTTPServer } from "http";
 import { join } from "path";
 import { hostname as getHostname } from "node:os";
-import { randomUUID } from "node:crypto";
 import { monitorEventLoopDelay } from "node:perf_hooks";
 import type { AgentManager, AgentMetricsSnapshot } from "./agent/agent-manager.js";
 import type { AgentStorage } from "./agent/agent-storage.js";
@@ -569,6 +570,14 @@ export class VoiceAssistantWebSocketServer {
   private onBranchChanged!:
     | ((workspaceId: string, oldBranch: string | null, newBranch: string | null) => void)
     | null;
+  private devicePassword: string | undefined;
+  private deviceAccess!: DeviceAccess;
+  private deviceEnrollments = new Map<
+    string,
+    { ws: WebSocketLike; name: string; code: string; expires: number }
+  >();
+  private deviceOnlySockets = new WeakSet<WebSocketLike>();
+
   private serverCapabilities: ServerCapabilities | undefined;
   private readonly runtimeMetrics = new WebSocketRuntimeMetricsWindow();
   private lastRuntimeMetricsSnapshot: WebSocketRuntimeDiagnosticPayload | null = null;
@@ -814,11 +823,16 @@ export class VoiceAssistantWebSocketServer {
     wsConfig: WebSocketServerConfig,
     auth: DaemonAuthConfig | undefined,
   ): WebSocketServer {
+    this.deviceAccess = new DeviceAccess(this.paseoHome);
     const password = auth?.password;
+    this.devicePassword = password;
     const wss = new WebSocketServer({
       server,
       path: "/ws",
-      handleProtocols: (protocols) => selectWebSocketProtocol(protocols, password),
+      handleProtocols: (protocols) =>
+        protocols.has("paseo.device")
+          ? "paseo.device"
+          : selectWebSocketProtocol(protocols, password),
       verifyClient: ({ req }, callback) => {
         this.verifyWsUpgrade(
           req,
@@ -913,6 +927,11 @@ export class VoiceAssistantWebSocketServer {
     request: IncomingMessage,
     password: string | undefined,
   ): Promise<void> {
+    if (ws.protocol === "paseo.device") {
+      this.deviceOnlySockets.add(ws);
+      await this.attachSocket(ws, request);
+      return;
+    }
     if (password) {
       const requestMetadata = extractSocketRequestMetadata(request);
       const protocol = extractWsBearerProtocol(request.headers["sec-websocket-protocol"]);
@@ -980,6 +999,7 @@ export class VoiceAssistantWebSocketServer {
     initialHello?: WSHelloMessage,
   ): Promise<void> {
     if (metadata?.transport === "relay") {
+      if (this.devicePassword) this.deviceOnlySockets.add(ws);
       this.incrementRuntimeCounter("relayExternalSocketAttached");
     }
     await this.attachSocket(ws, undefined, metadata, false, admission, initialHello);
@@ -1534,6 +1554,67 @@ export class VoiceAssistantWebSocketServer {
     return pending;
   }
 
+  private requiresDeviceAdmission(ws: WebSocketLike, message: WSHelloMessage): boolean {
+    return (
+      this.deviceOnlySockets.has(ws) || Boolean(message.deviceCredential || message.enrollDevice)
+    );
+  }
+
+  private admitDevice(
+    ws: WebSocketLike,
+    message: WSHelloMessage,
+    pending: PendingConnection,
+  ): boolean {
+    if (!this.devicePassword && !message.deviceCredential) return true;
+    const device = this.deviceAccess.authenticate(message.deviceCredential ?? null);
+    if (
+      message.authToken &&
+      isBearerTokenValid({ password: this.devicePassword, token: message.authToken }) &&
+      this.devicePassword
+    ) {
+      pending.admission = OWNER_SESSION_ADMISSION;
+    } else if (device) {
+      pending.admission = { principalId: `device:${device.id}`, permissions: device.permissions };
+    } else if (message.enrollDevice && !message.deviceCredential) {
+      for (const [id, entry] of this.deviceEnrollments) {
+        if (entry.expires < Date.now() || entry.ws.readyState !== 1)
+          this.deviceEnrollments.delete(id);
+      }
+      if (
+        this.deviceEnrollments.size >= 32 ||
+        [...this.deviceEnrollments.values()].some((entry) => entry.ws === ws)
+      ) {
+        ws.close(4401, "Pairing unavailable");
+        return false;
+      }
+      if (pending.helloTimeout) clearTimeout(pending.helloTimeout);
+      pending.helloTimeout = setTimeout(() => {
+        this.deviceEnrollments.delete(id);
+        ws.close(4401, "Pairing expired");
+      }, 120_000);
+      const id = randomUUID();
+      const code = randomBytes(4).toString("hex");
+      this.deviceEnrollments.set(id, {
+        ws,
+        name: message.enrollDevice,
+        code,
+        expires: Date.now() + 120_000,
+      });
+      this.sendToClient(ws, {
+        type: "access.device.enrollment",
+        serverId: this.serverId,
+        id,
+        code,
+      });
+      return false;
+    } else {
+      this.clearPendingConnection(ws);
+      ws.close(4401, "Device credential required");
+      return false;
+    }
+    return true;
+  }
+
   private handleHello(params: {
     ws: WebSocketLike;
     message: WSHelloMessage;
@@ -1557,6 +1638,9 @@ export class VoiceAssistantWebSocketServer {
       }
       return;
     }
+
+    if (this.requiresDeviceAdmission(ws, message) && !this.admitDevice(ws, message, pending))
+      return;
 
     const clientId = message.clientId.trim();
     if (clientId.length === 0) {
@@ -1710,6 +1794,7 @@ export class VoiceAssistantWebSocketServer {
         // is >= v0.2.0.
         forgeSearch: true,
         // COMPAT(daemonStatusRpc): added in v0.1.76, remove gate after 2026-11-18.
+        deviceCredentials: true,
         ...(this.advertiseDaemonStatusRpc ? { daemonStatusRpc: true } : {}),
         // COMPAT(daemonConfigReload): added in v0.4.0, remove gate after 2027-02-14.
         daemonConfigReload: true,
@@ -2157,6 +2242,67 @@ export class VoiceAssistantWebSocketServer {
     }
   }
 
+  private handleDeviceRequest(
+    ws: WebSocketLike,
+    message: Extract<WSInboundMessage, { type: "access.devices.request" }>,
+    activeConnection: SessionConnection | undefined,
+  ): void {
+    const reply = (
+      payload: Omit<
+        Extract<WSOutboundMessage, { type: "access.devices.response" }>,
+        "type" | "requestId"
+      >,
+    ) =>
+      this.sendToClient(ws, {
+        type: "access.devices.response",
+        requestId: message.requestId,
+        ...payload,
+      });
+    if (!activeConnection?.session.allowsPermission("access.manage")) {
+      reply({ error: "Access management permission required" });
+      return;
+    }
+    try {
+      if (message.action === "approve") {
+        const entry = this.deviceEnrollments.get(message.id ?? "");
+        if (!entry || entry.expires < Date.now() || entry.ws.readyState !== 1)
+          throw new Error("Pairing request expired");
+        this.deviceEnrollments.delete(message.id!);
+        const issued = this.deviceAccess.issue(
+          entry.name,
+          activeConnection.session.getPermissions(),
+        );
+        this.sendToClient(entry.ws, {
+          type: "access.device.enrollment",
+          serverId: this.serverId,
+          id: message.id!,
+          code: entry.code,
+          credential: issued.credential,
+        });
+        // Issuance does not admit a session. The next hello must prove the credential.
+      } else if (message.action === "revoke") {
+        if (!message.id) throw new Error("Device id required");
+        this.deviceAccess.revoke(message.id);
+        for (const connection of new Set([
+          ...this.sessions.values(),
+          ...this.externalSessionsByKey.values(),
+        ])) {
+          if (connection.principalId !== `device:${message.id}`) continue;
+          connection.session.setPermissions([]);
+          for (const socket of connection.sockets) socket.close(4401, "Device revoked");
+        }
+      }
+      reply({
+        devices: this.deviceAccess.list(),
+        pending: [...this.deviceEnrollments]
+          .filter(([, e]) => e.expires > Date.now() && e.ws.readyState === 1)
+          .map(([id, e]) => ({ id, name: e.name, code: e.code })),
+      });
+    } catch {
+      reply({ error: "Device access operation failed" });
+    }
+  }
+
   private handleRawMessage(
     ws: WebSocketLike,
     data: Buffer | ArrayBuffer | Buffer[] | string,
@@ -2202,6 +2348,10 @@ export class VoiceAssistantWebSocketServer {
       }
 
       const message = parsedMessage.data;
+      if (message.type === "access.devices.request") {
+        this.handleDeviceRequest(ws, message, activeConnection);
+        return;
+      }
       this.recordInboundMessageType(message.type);
 
       if (message.type === "ping") {
@@ -2304,19 +2454,8 @@ export class VoiceAssistantWebSocketServer {
     const err = error instanceof Error ? error : new Error(String(error));
     const { rawPayload, parsedPayload } = this.decodeRawMessagePayloadForError(data);
 
-    const trimmedRawPayload =
-      typeof rawPayload === "string" && rawPayload.length > 2000
-        ? `${rawPayload.slice(0, 2000)}... (truncated)`
-        : rawPayload;
-
-    log.error(
-      {
-        err,
-        rawPayload: trimmedRawPayload,
-        parsedPayload,
-      },
-      "Failed to parse/handle message",
-    );
+    void rawPayload;
+    log.error({ errorName: err.name }, "Failed to parse/handle message");
 
     if (this.pendingConnections.has(ws)) {
       this.clearPendingConnection(ws);

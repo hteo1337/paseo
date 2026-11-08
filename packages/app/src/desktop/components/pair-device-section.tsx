@@ -1,3 +1,4 @@
+import { DeviceAccessSection } from "./device-access-section";
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Text, View } from "react-native";
 import * as Clipboard from "expo-clipboard";
@@ -107,6 +108,9 @@ export function PairDeviceSection({ serverId, onClose }: PairDeviceSectionProps)
 
   return (
     <View testID="pair-device-content">
+      {client && isConnected && serverFeatures?.deviceCredentials === true ? (
+        <DeviceAccessSection client={client} />
+      ) : null}
       <PairDeviceBody
         isPending={supportsPairingRpc && pairingQuery.isPending}
         isDisconnected={isDisconnected}

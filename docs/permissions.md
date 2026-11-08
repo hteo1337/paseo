@@ -15,6 +15,14 @@ A principal is the durable identity the daemon authorizes. A credential proves t
 
 A pairing invitation is neither. It is an expiring, single-use exchange that creates a principal and credential with the permissions selected by its issuer.
 
+## Device enrollment
+
+Pairing offers carry only connection details and the daemon public key. A new client on a password-protected host requests approval over its connection; compare its code in **Pair device** on a trusted client before approving. Requests expire after two minutes and are bound to the requesting socket. Approval copies the issuer's current explicit permissions.
+
+Native apps keep the issued credential in the OS secure store. Browser clients keep it in tab memory because web storage is plaintext; closing the tab requires approval again. Host profiles and pairing links never contain a device credential. The daemon persists only a digest and device metadata in `device-credentials.json`.
+
+Revocation removes the digest, clears retained session permissions and closes the device's active sockets. A host with password authentication disabled retains its existing unrestricted access; enrollment does not secure that mode. Each host approves and revokes its own devices.
+
 ## Permissions
 
 | Permission          | Authority                                                                  |

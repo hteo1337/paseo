@@ -3535,6 +3535,7 @@ export const ServerInfoStatusPayloadSchema = z
     features: z
       .object({
         // COMPAT(agentRequestReceipts): added in v0.8.0; remove gate after 2027-03-05.
+        deviceCredentials: z.boolean().optional(),
         agentRequestReceipts: z.boolean().optional(),
         // COMPAT(workspaceRequestReceipts): added in v0.8.0; remove gate after 2027-03-07.
         workspaceRequestReceipts: z.boolean().optional(),
@@ -7435,8 +7436,34 @@ export const WSPongMessageSchema = z.object({
   type: z.literal("pong"),
 });
 
+export const DeviceAccessRequestSchema = z.object({
+  type: z.literal("access.devices.request"),
+  requestId: z.string().max(100),
+  action: z.enum(["list", "approve", "revoke"]),
+  id: z.string().max(100).optional(),
+});
+export const DeviceAccessResponseSchema = z.object({
+  type: z.literal("access.devices.response"),
+  requestId: z.string(),
+  error: z.string().optional(),
+  devices: z
+    .array(z.object({ id: z.string(), name: z.string(), createdAt: z.string() }))
+    .optional(),
+  pending: z.array(z.object({ id: z.string(), name: z.string(), code: z.string() })).optional(),
+});
+export const DeviceEnrollmentSchema = z.object({
+  type: z.literal("access.device.enrollment"),
+  serverId: z.string(),
+  id: z.string(),
+  code: z.string(),
+  credential: z.string().optional(),
+});
+
 export const WSHelloMessageSchema = z.object({
   type: z.literal("hello"),
+  authToken: z.string().max(256).optional(),
+  deviceCredential: z.string().max(256).optional(),
+  enrollDevice: z.string().min(1).max(80).optional(),
   clientId: z.string().min(1),
   clientType: z.enum(["mobile", "browser", "cli", "mcp", "hub"]),
   protocolVersion: z.number().int(),
@@ -7482,6 +7509,7 @@ export const WSSessionOutboundSchema = z.object({
 
 // Complete WebSocket message schemas
 export const WSInboundMessageSchema = z.discriminatedUnion("type", [
+  DeviceAccessRequestSchema,
   WSPingMessageSchema,
   WSHelloMessageSchema,
   WSRecordingStateMessageSchema,
@@ -7489,6 +7517,8 @@ export const WSInboundMessageSchema = z.discriminatedUnion("type", [
 ]);
 
 export const WSOutboundMessageSchema = z.discriminatedUnion("type", [
+  DeviceAccessResponseSchema,
+  DeviceEnrollmentSchema,
   WSPongMessageSchema,
   WSSessionOutboundSchema,
 ]);
