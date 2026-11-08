@@ -1,3 +1,4 @@
+import { DeviceEnrollmentNotices } from "@/components/device-enrollment-notices";
 import "@/styles/unistyles";
 import { BottomSheetModalProvider } from "@gorhom/bottom-sheet";
 import { PortalProvider } from "@gorhom/portal";
@@ -611,6 +612,7 @@ function AppContainer({ children, chromeEnabled: chromeEnabledOverride }: AppCon
         <WorkspaceSetupDialog />
         <KeyboardShortcutsDialog />
         <AppDiagnosticHost />
+        <DeviceEnrollmentNotices />
         <ChangelogHost />
         <QuittingOverlay />
       </AppearanceStyleBoundary>

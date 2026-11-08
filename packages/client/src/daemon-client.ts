@@ -330,6 +330,15 @@ export interface DaemonClientConfig {
   appVersion?: string;
   runtimeGeneration?: number | null;
   password?: string;
+  deviceCredential?: string;
+  enrollDevice?: string;
+  onDeviceEnrollment?: (event: {
+    id: string;
+    code: string;
+    serverId: string;
+    credential?: string;
+  }) => void | Promise<void>;
+
   authHeader?: string;
   suppressSendErrors?: boolean;
   transportFactory?: DaemonTransportFactory;
@@ -1284,7 +1293,7 @@ export class DaemonClient {
     } else if (this.config.authHeader) {
       headers.Authorization = this.config.authHeader;
     }
-    const protocols = password ? [`paseo.bearer.${password}`] : undefined;
+    const protocols = this.connectionProtocols(password);
 
     try {
       // Reconnect can overlap with browser close/error delivery ordering.
@@ -5055,6 +5064,47 @@ export class DaemonClient {
     });
   }
 
+  private deviceRequests = new Map<
+    string,
+    (response: {
+      error?: string;
+      devices?: { id: string; name: string; createdAt: string }[];
+      pending?: { id: string; name: string; code: string }[];
+    }) => void
+  >();
+
+  async manageDevices(action: "list" | "approve" | "revoke", id?: string) {
+    if (this.getLastServerInfoMessage()?.features?.deviceCredentials !== true)
+      throw new Error("Update this host to manage devices");
+    const requestId = `device-${Date.now()}-${Math.random()}`;
+    return new Promise<{
+      devices: { id: string; name: string; createdAt: string }[];
+      pending: { id: string; name: string; code: string }[];
+    }>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        this.deviceRequests.delete(requestId);
+        reject(new Error("Device operation timed out"));
+      }, 10_000);
+      this.deviceRequests.set(requestId, (response) => {
+        clearTimeout(timer);
+        if (response.error) reject(new Error(response.error));
+        else resolve({ devices: response.devices ?? [], pending: response.pending ?? [] });
+      });
+      try {
+        this.sendJsonMessage("access.devices.request", "access.devices.request", {
+          type: "access.devices.request",
+          requestId,
+          action,
+          id,
+        });
+      } catch (error) {
+        clearTimeout(timer);
+        this.deviceRequests.delete(requestId);
+        reject(error);
+      }
+    });
+  }
+
   async getDaemonPairingOffer(
     options?: DaemonPairingOfferOptions,
   ): Promise<DaemonPairingOfferPayload> {
@@ -5993,6 +6043,12 @@ export class DaemonClient {
     return this.config.url;
   }
 
+  private connectionProtocols(password: string | null | undefined): string[] | undefined {
+    if (this.config.deviceCredential || this.config.enrollDevice) return ["paseo.device"];
+    if (password) return [`paseo.bearer.${password}`];
+    return undefined;
+  }
+
   private sendHelloMessage(): void {
     if (!this.transport) {
       this.scheduleReconnect({
@@ -6006,6 +6062,13 @@ export class DaemonClient {
     try {
       this.sendJsonMessage("hello", "hello", {
         type: "hello",
+        ...(this.config.e2ee?.enabled && this.config.password
+          ? { authToken: this.config.password }
+          : {}),
+        ...(this.config.deviceCredential ? { deviceCredential: this.config.deviceCredential } : {}),
+        ...(this.config.enrollDevice && !this.config.deviceCredential
+          ? { enrollDevice: this.config.enrollDevice }
+          : {}),
         clientId: this.config.clientId,
         clientType: this.config.clientType ?? "cli",
         protocolVersion: 1,
@@ -6154,6 +6217,27 @@ export class DaemonClient {
       return;
     }
 
+    if (parsed.data.type === "access.device.enrollment") {
+      const event = parsed.data;
+      void Promise.resolve(this.config.onDeviceEnrollment?.(event))
+        .then(() => {
+          if (event.credential) {
+            this.config.deviceCredential = event.credential;
+            this.sendHelloMessage();
+          }
+          return undefined;
+        })
+        .catch(() => {
+          this.lastErrorValue = "Device credential could not be saved";
+        });
+      return;
+    }
+    if (parsed.data.type === "access.devices.response") {
+      const resolve = this.deviceRequests.get(parsed.data.requestId);
+      this.deviceRequests.delete(parsed.data.requestId);
+      resolve?.(parsed.data);
+      return;
+    }
     this.traceInstant("paseo.ws.message.inbound", {
       envelopeType: "session",
       messageType: parsed.data.message.type,

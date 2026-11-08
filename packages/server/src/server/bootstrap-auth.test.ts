@@ -46,6 +46,102 @@ describe("daemon bearer auth", () => {
     process.env = { ...originalEnv, PASEO_SUPERVISED: "0" };
   });
 
+  test("approves a device, connects without a password, and revokes its active session", async () => {
+    const daemon = await createTestPaseoDaemon({ auth: { password: CORRECT_PASSWORD_HASH } });
+    const sockets: WebSocket[] = [];
+    const next = (ws: WebSocket, type: string) =>
+      new Promise<Record<string, unknown>>((resolve, reject) => {
+        const timer = setTimeout(() => {
+          ws.off("message", listener);
+          reject(new Error(`Missing ${type}`));
+        }, 3000);
+        const listener = (raw: import("ws").RawData) => {
+          const message = JSON.parse(raw.toString());
+          if (message.type !== type) return;
+          clearTimeout(timer);
+          ws.off("message", listener);
+          resolve(message);
+        };
+        ws.on("message", listener);
+      });
+    const hello = {
+      type: "hello",
+      clientId: "device-regression",
+      clientType: "mobile",
+      protocolVersion: 1,
+    };
+    try {
+      const owner = (
+        await connectWebSocket({ port: daemon.port, protocol: "paseo.bearer.correct-password" })
+      ).ws;
+      sockets.push(owner);
+      const ownerReady = next(owner, "session");
+      owner.send(JSON.stringify({ ...hello, clientId: "owner-regression" }));
+      await ownerReady;
+      const phone = (await connectWebSocket({ port: daemon.port, protocol: "paseo.device" })).ws;
+      sockets.push(phone);
+      const pending = next(phone, "access.device.enrollment");
+      phone.send(JSON.stringify({ ...hello, enrollDevice: "Regression phone" }));
+      const enrollment = await pending;
+      expect(enrollment.credential).toBeUndefined();
+      const denied = next(phone, "access.devices.response");
+      phone.send(
+        JSON.stringify({
+          type: "access.devices.request",
+          requestId: "denied",
+          action: "approve",
+          id: enrollment.id,
+        }),
+      );
+      expect((await denied).error).toBe("Access management permission required");
+      const issued = next(phone, "access.device.enrollment");
+      const approval = next(owner, "access.devices.response");
+      owner.send(
+        JSON.stringify({
+          type: "access.devices.request",
+          requestId: "approve",
+          action: "approve",
+          id: enrollment.id,
+        }),
+      );
+      const credential = (await issued).credential;
+      expect(typeof credential).toBe("string");
+      const listing = await approval;
+      const devices = listing.devices as { id: string; name: string }[];
+      expect(devices.map((d) => d.name)).toEqual(["Regression phone"]);
+      const connected = (await connectWebSocket({ port: daemon.port, protocol: "paseo.device" }))
+        .ws;
+      sockets.push(connected);
+      const ready = next(connected, "session");
+      connected.send(JSON.stringify({ ...hello, deviceCredential: credential }));
+      await ready;
+      const closed = new Promise<number>((resolve) =>
+        connected.once("close", (code) => resolve(code)),
+      );
+      const revoked = next(owner, "access.devices.response");
+      owner.send(
+        JSON.stringify({
+          type: "access.devices.request",
+          requestId: "revoke",
+          action: "revoke",
+          id: devices[0]!.id,
+        }),
+      );
+      expect((await revoked).devices).toEqual([]);
+      expect(await closed).toBe(4401);
+      const rejected = (await connectWebSocket({ port: daemon.port, protocol: "paseo.device" })).ws;
+      sockets.push(rejected);
+      const refused = new Promise<number>((resolve) =>
+        rejected.once("close", (code) => resolve(code)),
+      );
+      rejected.send(JSON.stringify({ ...hello, deviceCredential: credential }));
+      expect(await refused).toBe(4401);
+    } finally {
+      for (const ws of sockets) ws.close();
+      await daemon.close();
+    }
+  });
+
   test("leaves HTTP and WebSocket open when no password is configured", async () => {
     const daemonHandle = await createTestPaseoDaemon();
     try {

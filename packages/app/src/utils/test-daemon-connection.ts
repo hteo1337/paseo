@@ -1,3 +1,5 @@
+import { getDeviceCredential, loadDeviceCredential } from "@/runtime/device-credentials";
+import { handleDeviceEnrollment } from "@/runtime/device-enrollment";
 import { DaemonClient } from "@getpaseo/client/internal/daemon-client";
 import type { DaemonClientConfig } from "@getpaseo/client/internal/daemon-client";
 import type { HostConnection } from "@/types/host-connection";
@@ -113,6 +115,25 @@ export class DaemonConnectionTestError extends Error {
   }
 }
 
+async function deviceConfigForProbe(connection: HostConnection, serverId?: string) {
+  if (serverId) await loadDeviceCredential(serverId);
+  const credential = serverId ? getDeviceCredential(serverId) : undefined;
+  return credential ||
+    connection.type === "relay" ||
+    (connection.type === "directTcp" && !connection.password)
+    ? {
+        ...(credential ? { deviceCredential: credential } : { enrollDevice: "Paseo app" }),
+        connectTimeoutMs: 125_000,
+        onDeviceEnrollment: (event: {
+          id: string;
+          code: string;
+          serverId: string;
+          credential?: string;
+        }) => handleDeviceEnrollment(event.serverId, event),
+      }
+    : {};
+}
+
 export async function buildClientConfig(
   connection: HostConnection,
   serverId?: string,
@@ -130,7 +151,9 @@ export async function buildClientConfig(
 ): Promise<DaemonClientConfig> {
   const clientId = await deps.getClientId();
   const desktopTransportFactory = deps.createDesktopTransportFactory();
+  const deviceConfig = await deviceConfigForProbe(connection, serverId);
   const base = {
+    ...deviceConfig,
     clientId,
     clientType: "mobile" as const,
     appVersion: deps.resolveAppVersion() ?? undefined,
@@ -284,5 +307,9 @@ export async function connectToDaemon(
   deps: DaemonConnectionDependencies<DaemonProbeClient> = defaultDaemonConnectionDependencies,
 ): Promise<{ client: DaemonProbeClient; serverId: string; hostname: string | null }> {
   const config = await buildClientConfig(connection, options?.serverId, options, deps);
-  return connectAndProbe(config, resolveTimeout(connection, options), deps);
+  return connectAndProbe(
+    config,
+    config.enrollDevice ? 125_000 : resolveTimeout(connection, options),
+    deps,
+  );
 }

@@ -1,3 +1,5 @@
+import { getDeviceCredential, loadDeviceCredential } from "./device-credentials";
+import { handleDeviceEnrollment } from "./device-enrollment";
 import { useSyncExternalStore, useMemo } from "react";
 import AsyncStorage from "@react-native-async-storage/async-storage";
 import equal from "fast-deep-equal/es6";
@@ -507,8 +509,21 @@ function createDefaultDeps(): HostRuntimeControllerDeps {
   return {
     createClient: ({ host, connection, clientId, runtimeGeneration }) => {
       const desktopTransportFactory = createDesktopDaemonTransportFactory();
+      const deviceCredential = getDeviceCredential(host.serverId);
+      const deviceConfig =
+        deviceCredential ||
+        connection.type === "relay" ||
+        (connection.type === "directTcp" && !connection.password)
+          ? {
+              ...(deviceCredential ? { deviceCredential } : { enrollDevice: "Paseo app" }),
+              connectTimeoutMs: 125_000,
+              onDeviceEnrollment: (event: { id: string; code: string; credential?: string }) =>
+                handleDeviceEnrollment(host.serverId, event),
+            }
+          : {};
       const webSocketConfig = { webSocketFactory: createAppWebSocketFactory() };
       const base = {
+        ...deviceConfig,
         suppressSendErrors: true,
         clientId,
         clientType: "mobile",
@@ -1502,6 +1517,7 @@ export class HostRuntimeStore {
           shouldPersistHosts = true;
         }
       }
+      await Promise.all(profiles.map((profile) => loadDeviceCredential(profile.serverId)));
       this.hosts = profiles;
       this.replicaCache.setHosts(profiles.map((profile) => profile.serverId));
       projectIconCache.setHosts(profiles.map((profile) => profile.serverId));

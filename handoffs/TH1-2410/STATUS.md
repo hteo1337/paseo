@@ -1,0 +1,11 @@
+# TH1-2410 — Per-device credentials
+
+- Issue: https://linear.app/th1337/issue/TH1-2410/security-paseo-app-per-device-credentials-so-phones-never-need-the (Paseo Upstream; In Progress).
+- Repo: hteo1337/paseo; branch: dispatch/TH1-2410; fork/main base 550ddec46. Draft PR: https://github.com/hteo1337/paseo/pull/9 (lane:security); implementation b1d110159. Recovery branch not landed; host-page prompt untouched.
+- Done: hash-only device store; bounded 2-minute socket-bound approval; copied explicit grants; list/revoke with live-session shutdown; device hello on direct/relay; native SecureStore, browser tab memory. Unrestricted no-password mode preserved.
+- Done: Pair device management UI and approval notices; credential-free QR/URLs/host registry; raw error payload logging removed; docs updated. Branch pushed; issue linked and evidence recorded.
+- Verification: original WS server fails new regression (Server sent no subprotocol); final `cd packages/server && npx vitest run src/server/bootstrap-auth.test.ts --bail=1`: 6 passed. `npm run build:client`, `npm run format`, `npm run typecheck`, `npm run lint`, `git diff --check`: pass; lint 0 warnings/errors.
+- Verification: temporary `npx tsx packages/server/src/server/th1-2410-smoke.ts` passes isolated local E2EE relay approve/connect/revoke and checks no issued secret in persisted JSON/pairing URL; script removed, copy at /tmp/th1-2410-smoke.ts; local relay needs --var PASEO_RELAY_UPSTREAM:.
+- Unverified: headless `npm run test:e2e --workspace=@getpaseo/app -- e2e/browser/pair-device-relay.spec.ts --workers=1 --trace=on` exited 1 without completed result (log /tmp/th1-2410-browser.log). Native device behavior and fleet-wide routing not established; fork main lacks the routed fleet code described by issue. Approval is per host.
+- Reviews: Semif adversarial_required (0.99759). Dispatcher returned backend_busy, then continuity_conflict: issue TH1-2410 has an active task. Lead must dispatch exact-head latest Sol, exactly one adversarial Sol, and read-only security-auditor after writer stops; no bypass. CI pending at inspection, not certified green.
+- Next/open: finish UI/fleet verification; resolve blocking review findings and get same-reviewer confirmation; remove handoff files before merge. Keep draft; no merge/install/live-daemon restart. Teo merges after reviews and CI.
