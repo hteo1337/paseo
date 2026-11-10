@@ -2450,6 +2450,65 @@ describe("HostRuntimeStore", () => {
     }
   });
 
+  it("waits for the origin instead of requesting a routed host's password", async () => {
+    useHostRuntimeClock();
+    const origin = new FakeDaemonClient();
+    origin.setConnectionState({ status: "connecting", attempt: 1 });
+    const hostA = makeHost({ serverId: "srv_a", connections: [makeHost().connections[0]!] });
+    const relay = makeHost().connections[1]!;
+    const hostB = makeHost({
+      serverId: "srv_b",
+      connections: [relay, { id: "via:srv_a", type: "routed", originServerId: "srv_a" }],
+    });
+    const attempts: string[] = [];
+    const store = new HostRuntimeStore({
+      storage: createMemoryHostRuntimeStorage({
+        "@paseo:daemon-registry": JSON.stringify([hostA, hostB]),
+      }),
+      deps: {
+        createClient: () => {
+          throw new Error("probe clients are supplied");
+        },
+        connectToDaemon: async ({ host, connection }) => {
+          if (host.serverId === "srv_a") {
+            return {
+              client: origin as unknown as DaemonClient,
+              serverId: host.serverId,
+              hostname: host.label,
+            };
+          }
+          expect(host.password).toBeUndefined();
+          attempts.push(connection.id);
+          if (connection.type === "relay") throw new DaemonAuthenticationError("password_required");
+          if (!origin.isConnected) throw new Error("Origin unavailable");
+          return {
+            client: makeConnectedProbeClient(5) as unknown as DaemonClient,
+            serverId: host.serverId,
+            hostname: host.label,
+          };
+        },
+        getClientId: async () => "cid_waiting_origin",
+      },
+    });
+    try {
+      await store.boot();
+      await store.runProbeCycleNow("srv_b");
+      expect(attempts).toEqual(expect.arrayContaining([relay.id, "via:srv_a"]));
+      expect(store.getSnapshot("srv_b")?.awaitingOriginServerId).toBe("srv_a");
+      origin.setConnectionState({ status: "connected" });
+      await vi.waitFor(() => expect(store.getSnapshot("srv_b")?.connectionStatus).toBe("online"), {
+        timeout: 200,
+        interval: 1,
+      });
+      expect(store.getSnapshot("srv_b")?.activeConnectionId).toBe("via:srv_a");
+      expect(store.getSnapshot("srv_b")?.awaitingOriginServerId).toBeNull();
+      expect(store.getHosts().find((host) => host.serverId === "srv_b")?.password).toBeUndefined();
+      expect(attempts.filter((id) => id === relay.id)).toHaveLength(1);
+    } finally {
+      store.syncHosts([]);
+    }
+  });
+
   it.each([false, true])(
     "keeps B and C distinct with routed and direct candidates (B direct first: %s)",
     async (directFirst) => {
@@ -5409,9 +5468,22 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
     expect(useSessionStore.getState().sessions["srv_removed"]).toBeUndefined();
   });
 
-  it("saves and reconnects a rejected saved host after changing its password", async () => {
+  it("saves and reconnects a rejected saved host without losing unreadable registry entries", async () => {
+    const savedHost = makeHost({
+      serverId: "srv_test",
+      connections: [directA],
+      preferredConnectionId: directA.id,
+    });
+    const unreadableHost = storedWithUnreadableEntries[2];
+    const storage = createMemoryHostRuntimeStorage({
+      [REGISTRY_KEY]: JSON.stringify([
+        { ...savedHost, connections: [...savedHost.connections, futureConnection] },
+        unreadableHost,
+      ]),
+      "@paseo:e2e": "1",
+    });
     const store = new HostRuntimeStore({
-      storage: createMemoryHostRuntimeStorage(),
+      storage,
       deps: {
         createClient: () => new FakeDaemonClient() as unknown as DaemonClient,
         connectToDaemon: async ({ host }) => {
@@ -5426,19 +5498,35 @@ describe("HostRuntimeStore initial connection hint bootstrap", () => {
         getClientId: async () => "cid_test_password_setting",
       },
     });
-    await store.upsertDirectConnection({ serverId: "srv_test", endpoint: "lan:6767" });
+    await store.boot();
     await onceHostSnapshotMatches(
       store,
       "srv_test",
       (snapshot) => snapshot?.authFailureReason === "password_required",
     );
     expect(store.getSnapshot("srv_test")?.connectionStatus).toBe("error");
+    expect(store.getSnapshot("srv_test")?.authFailureConnectionId).toBe(
+      savedHost.connections[0]?.id,
+    );
     await store.setHostPassword("srv_test", "correct-password");
     await waitForHostOnline(store, "srv_test");
     expect(store.getHosts()[0]?.password).toBe("correct-password");
     expect(store.getSnapshot("srv_test")?.authFailureReason).toBeNull();
+    expect(store.getSnapshot("srv_test")?.authFailureConnectionId).toBeNull();
+    expect(await readRegistry(storage)).toMatchObject([
+      {
+        serverId: "srv_test",
+        password: "correct-password",
+        connections: [...savedHost.connections, futureConnection],
+      },
+      unreadableHost,
+    ]);
     await store.setHostPassword("srv_test", "");
     expect(store.getHosts()[0]?.password).toBeUndefined();
+    expect(await readRegistry(storage)).toMatchObject([
+      { serverId: "srv_test", connections: [...savedHost.connections, futureConnection] },
+      unreadableHost,
+    ]);
     store.syncHosts([]);
   });
 
