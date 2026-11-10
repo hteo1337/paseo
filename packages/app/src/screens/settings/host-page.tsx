@@ -266,14 +266,16 @@ export function HostConnectionError({ serverId }: { serverId: string }) {
   const failure = pendingFailure ?? getHostConnectionFailure(snapshot);
   const connection = host?.connections.find((entry) => entry.id === failure?.connectionId);
 
+  const needsPassword = Boolean(failure?.reason && !awaitingOrigin);
+
   useEffect(() => {
-    if (snapshot?.connectionStatus !== "online" || isSaving) return;
-    // Another connection can recover the host without submitting this draft.
+    if (isSaving || (needsPassword && snapshot?.connectionStatus !== "online")) return;
+    // Discard the draft when recovery or an offline origin hides its editor.
     inputRef.current?.replaceText("");
     setPassword("");
     setSaveError(null);
     setPendingFailure(null);
-  }, [snapshot?.connectionStatus, isSaving]);
+  }, [snapshot?.connectionStatus, needsPassword, isSaving]);
 
   const submit = useCallback(async () => {
     if (!password.length || savingRef.current || !failure?.reason) return;
@@ -297,7 +299,6 @@ export function HostConnectionError({ serverId }: { serverId: string }) {
   }, [password, failure, serverId, setHostPassword, t]);
 
   if (!failure || !host) return null;
-  const needsPassword = failure.reason && !awaitingOrigin;
   const title = awaitingOrigin
     ? t("settings.host.password.awaitingOrigin", { host: host.label, origin: awaitingOrigin })
     : failure.title;

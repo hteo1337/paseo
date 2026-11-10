@@ -1,9 +1,9 @@
 // @vitest-environment jsdom
 import React, { act } from "react";
 import { createRoot } from "react-dom/client";
-import { expect, it, vi } from "vitest";
+import { beforeEach, expect, it, vi } from "vitest";
 import { fireEvent } from "@testing-library/react";
-const state = vi.hoisted(() => ({ online: false, save: vi.fn() }));
+const state = vi.hoisted(() => ({ online: false, originOnline: true, save: vi.fn() }));
 vi.mock("react-native", () => ({ View: "div", Text: "span", Pressable: "button", Alert: {} }));
 vi.mock("react-native-unistyles", () => ({
   StyleSheet: { create: () => ({}) },
@@ -12,20 +12,27 @@ vi.mock("react-native-unistyles", () => ({
 }));
 vi.mock("react-i18next", () => ({ useTranslation: () => ({ t: (key: string) => key }) }));
 vi.mock("@/runtime/host-runtime", () => ({
-  useHostRuntimeSnapshot: () =>
-    state.online
-      ? { connectionStatus: "online" }
-      : {
-          connectionStatus: "error",
-          lastError: "Password required",
-          authFailureReason: "password_required",
-          authFailureConnectionId: "direct",
-        },
+  useHostRuntimeSnapshot: (serverId: string) => {
+    if (serverId === "origin") {
+      return { connectionStatus: state.originOnline ? "online" : "error" };
+    }
+    if (state.online) return { connectionStatus: "online" };
+    return {
+      connectionStatus: "error",
+      lastError: "Password required",
+      authFailureReason: "password_required",
+      authFailureConnectionId: "direct",
+      awaitingOriginServerId: "origin",
+    };
+  },
   useHosts: () => [
     {
       serverId: "host",
       label: "Host",
-      connections: [{ id: "direct", type: "directTcp", endpoint: "localhost:1234" }],
+      connections: [
+        { id: "direct", type: "directTcp", endpoint: "localhost:1234" },
+        { id: "via:origin", type: "routed", originServerId: "origin" },
+      ],
     },
   ],
   useHostMutations: () => ({ setHostPassword: state.save }),
@@ -116,6 +123,11 @@ vi.mock("./daemon-lifecycle", () => ({
   updateDaemonFromSettings: () => null,
 }));
 import { HostConnectionError } from "./host-page";
+beforeEach(() => {
+  state.online = false;
+  state.originOnline = true;
+  state.save.mockReset();
+});
 it("discards an unsubmitted password after the host reconnects another way", () => {
   (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
   const container = document.createElement("div");
@@ -136,6 +148,56 @@ it("discards an unsubmitted password after the host reconnects another way", () 
     expect(container.querySelector("button")!.disabled).toBe(true);
     act(() => container.querySelector("button")!.click());
     expect(state.save).not.toHaveBeenCalled();
+  } finally {
+    act(() => root.unmount());
+  }
+});
+
+it("discards a draft across an origin flap while protecting an in-flight submission", async () => {
+  (globalThis as { IS_REACT_ACT_ENVIRONMENT?: boolean }).IS_REACT_ACT_ENVIRONMENT = true;
+  const container = document.createElement("div");
+  const root = createRoot(container);
+  const render = () => act(() => root.render(<HostConnectionError serverId="host" />));
+  try {
+    render();
+    act(() =>
+      fireEvent.change(container.querySelector("input")!, { target: { value: "synthetic-draft" } }),
+    );
+    expect(container.querySelector("button")!.disabled).toBe(false);
+    state.originOnline = false;
+    render();
+    expect(container.querySelector("input")).toBeNull();
+    state.originOnline = true;
+    render();
+    expect(container.querySelector("input")!.value.length).toBe(0);
+    expect(container.querySelector("button")!.disabled).toBe(true);
+    act(() => container.querySelector("button")!.click());
+    expect(state.save).not.toHaveBeenCalled();
+
+    let rejectSave!: () => void;
+    state.save.mockImplementation(
+      () =>
+        new Promise<void>((_resolve, reject) => {
+          rejectSave = () => reject(new Error("Synthetic storage failure"));
+        }),
+    );
+    act(() =>
+      fireEvent.change(container.querySelector("input")!, {
+        target: { value: "synthetic-submission" },
+      }),
+    );
+    act(() => container.querySelector("button")!.click());
+    expect(state.save).toHaveBeenCalledTimes(1);
+    state.online = true;
+    render();
+    expect(container.querySelector("button")!.disabled).toBe(true);
+    state.online = false;
+    render();
+    await act(async () => rejectSave());
+    // A failed save remains retryable: the online snapshot during saving must
+    // not discard the submitted draft or change the argument already captured.
+    expect(container.querySelector("button")!.disabled).toBe(false);
+    expect(state.save.mock.calls[0][1].length > 0).toBe(true);
   } finally {
     act(() => root.unmount());
   }
