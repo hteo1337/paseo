@@ -4910,7 +4910,6 @@ describe("Claude import descriptor scheduling", () => {
 test.each(["claude-sonnet-5", "claude-opus-5-5"])(
   "Claude effective model: settings default cannot report a switch before %s runs",
   async (effectiveModel) => {
-    const { AgentManager } = await import("../../agent-manager.js");
     const logger = createTestLogger();
     const client = new ClaudeAgentClient({ logger });
     const config = {
@@ -4994,7 +4993,6 @@ test.each(["claude-sonnet-5", "claude-opus-5-5"])(
 );
 
 test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider model switch", async () => {
-  const { AgentManager } = await import("../../agent-manager.js");
   const logger = createTestLogger();
   const client = new ClaudeAgentClient({ logger });
   const config = { provider: "claude" as const, cwd: os.tmpdir(), model: "claude-sonnet-5" };

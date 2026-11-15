@@ -1,5 +1,4 @@
 import type { AgentSnapshotPayload } from "@getpaseo/protocol/messages";
-import { render } from "../../output/index.js";
 
 const daemonTarget = { kind: "endpoint" as const, host: "example.test:12345" };
 
@@ -158,9 +157,9 @@ describe("runLsCommand", () => {
   });
 
   it("marks background agents in a BACKGROUND column only for inclusive listings", async () => {
-    const client = createPagingClient();
-    const fetchAgents: typeof client.fetchAgents = async (options) => {
-      const page = await client.fetchAgents(options);
+    const pagingClient = createPagingClient();
+    const fetchAgents: typeof pagingClient.fetchAgents = async (options) => {
+      const page = await pagingClient.fetchAgents(options);
       return {
         ...page,
         entries: page.entries.map(({ agent }) => ({
@@ -168,7 +167,7 @@ describe("runLsCommand", () => {
         })),
       };
     };
-    const connect = async () => ({ ...client, fetchAgents });
+    const connect = async () => ({ ...pagingClient, fetchAgents });
 
     const inclusive = await listAgents({ daemonTarget, all: true, global: true }, connect);
     const rows = render(inclusive, { noColor: true }).split("\n");

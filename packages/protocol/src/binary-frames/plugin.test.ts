@@ -59,6 +59,28 @@ describe("plugin binary frames", () => {
     });
   });
 
+  it("preserves scoped binary RPC targets and rejects malformed scopes", () => {
+    const request = {
+      requestId: "scoped",
+      pluginId: "uploads",
+      method: "upload.store",
+      payload: new Uint8Array([5, 6]),
+    };
+    const scope = { workspaceId: "workspace-1", agentId: "agent-1" };
+    expect(decodePluginFrame(encodePluginInputFrame({ ...request, scope }))).toMatchObject({
+      scope,
+    });
+    expect(decodePluginFrame(encodePluginInputFrame(request))).not.toHaveProperty("scope");
+    expect(
+      decodePluginFrame(
+        encodePluginInputFrame({
+          ...request,
+          scope: { workspaceId: "", agentId: "agent-1" },
+        }),
+      ),
+    ).toBeNull();
+  });
+
   it("rejects truncated frames", () => {
     expect(decodePluginFrame(new Uint8Array([0x20]))).toBeNull();
     expect(decodePluginFrame(new Uint8Array([0x20, 9, 1]))).toBeNull();

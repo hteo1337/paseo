@@ -2689,8 +2689,8 @@ export class Session {
       this.dispatchProviderMessage(msg) ??
       this.dispatchOrchestrationSkillsMessage(msg) ??
       this.dispatchPluginDirectoryMessage(msg) ??
-      this.dispatchPluginMessage(msg, source) ??
-      this.dispatchPluginRpcMessage(msg) ??
+      this.dispatchPluginMessage(msg) ??
+      this.dispatchPluginRpcMessage(msg, source) ??
       this.dispatchHostServiceMessage(msg) ??
       this.dispatchMiscMessage(msg);
     if (promise) await promise;
@@ -2796,10 +2796,7 @@ export class Session {
     }
   }
 
-  private dispatchPluginMessage(
-    msg: SessionInboundMessage,
-    source?: object,
-  ): Promise<void> | undefined {
+  private dispatchPluginMessage(msg: SessionInboundMessage): Promise<void> | undefined {
     if (msg.type === "plugin.list.request") {
       return (this.pluginRuntime?.listPlugins() ?? Promise.resolve([])).then((plugins) => {
         this.emit({
@@ -2876,7 +2873,10 @@ export class Session {
     return undefined;
   }
 
-  private dispatchPluginRpcMessage(msg: SessionInboundMessage): Promise<void> | undefined {
+  private dispatchPluginRpcMessage(
+    msg: SessionInboundMessage,
+    source?: object,
+  ): Promise<void> | undefined {
     if (msg.type === "plugin.rpc.invoke.request") {
       return this.handlePluginRpcInvocation(msg, source);
     }
@@ -4048,7 +4048,7 @@ export class Session {
           await this.emitProjectUpdate({ kind: "upsert", project });
         const changedIds = new Set(result.changedProjects.map((project) => project.projectId));
         await this.emitWorkspaceUpdatesForWorkspaceIds(
-          (await this.workspaceRegistry.list())
+          (await this.workspaceRegistry.listAll())
             .filter((workspace) => !workspace.archivedAt && changedIds.has(workspace.projectId))
             .map((workspace) => workspace.workspaceId),
         );
@@ -8296,28 +8296,32 @@ export class Session {
             {
               scope: { kind: "workspace", workspaceId: existing.workspaceId },
               requestId: request.requestId,
-          ...(request.ifNoLiveAgents
-            ? {
-                abortIf: () =>
-                  this.agentManager
-                    .listAgentsIncludingInternal()
-                    .filter(
-                      (agent) =>
-                        agent.workspaceId === existing.workspaceId && agent.lifecycle !== "closed",
-                    )
-                    .map((agent) => agent.id),
-                holdNewRuns: () =>
-                  this.agentManager.holdNewRunsForArchive(existing.workspaceId, existing.cwd),
-                keepDirectory: true as const,
-              }
-            : {}),
+              ...(request.ifNoLiveAgents
+                ? {
+                    abortIf: () =>
+                      this.agentManager
+                        .listAgentsIncludingInternal()
+                        .filter(
+                          (agent) =>
+                            agent.workspaceId === existing.workspaceId &&
+                            agent.lifecycle !== "closed",
+                        )
+                        .map((agent) => agent.id),
+                    holdNewRuns: () =>
+                      this.agentManager.holdNewRunsForArchive(existing.workspaceId, existing.cwd),
+                    keepDirectory: true as const,
+                  }
+                : {}),
               signal,
             },
           );
           if (archive.deferredByAgentIds?.length) {
             throw new Error(`Workspace has live agents: ${archive.deferredByAgentIds.join(", ")}`);
           }
-          if (request.ifNoLiveAgents && !archive.archivedWorkspaceIds.includes(existing.workspaceId)) {
+          if (
+            request.ifNoLiveAgents &&
+            !archive.archivedWorkspaceIds.includes(existing.workspaceId)
+          ) {
             throw new Error(`Guarded workspace archive did not archive ${existing.workspaceId}`);
           }
           return archive;
@@ -9745,18 +9749,22 @@ function sessionEventCategory(message: SessionOutboundMessage): SessionEventSubs
     case "hub.execution.agent.stream":
       return message.type;
     case "status":
-      switch (message.payload.status) {
-        case "server_info":
-          return "status.server_info";
-        case "daemon_config_changed":
-          return "status.daemon_config_changed";
-        case "plugin_catalog_changed":
-          return "status.plugin_catalog_changed";
-        case "plugin_settings_changed":
-          return "status.plugin_settings_changed";
-        default:
-          return null;
-      }
+      return statusSessionEventCategory(message.payload.status);
+    default:
+      return null;
+  }
+}
+
+function statusSessionEventCategory(status: string): SessionEventSubscription | null {
+  switch (status) {
+    case "server_info":
+      return "status.server_info";
+    case "daemon_config_changed":
+      return "status.daemon_config_changed";
+    case "plugin_catalog_changed":
+      return "status.plugin_catalog_changed";
+    case "plugin_settings_changed":
+      return "status.plugin_settings_changed";
     default:
       return null;
   }

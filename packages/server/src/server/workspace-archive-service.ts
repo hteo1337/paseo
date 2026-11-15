@@ -476,15 +476,22 @@ async function archiveTargetRecords(
   },
   storedRecordsByWorkspace?: ReadonlyMap<string, StoredAgentRecord[]>,
   requireClosedAgents = false,
-): Promise<{ archivedAgents: Set<string>; archivedWorkspaceIds: string[]; deferredByAgentIds: string[] }> {
+): Promise<{
+  archivedAgents: Set<string>;
+  archivedWorkspaceIds: string[];
+  deferredByAgentIds: string[];
+}> {
   const archivedAgents = new Set<string>();
   const archivedWorkspaceIds: string[] = [];
 
   const teardownResults = await Promise.allSettled(
     targetWorkspaceIds.map(async (workspaceId) => {
       const agents = await archiveWorkspaceContents(
-        dependencies, workspaceId, options.archivedAt,
-        storedRecordsByWorkspace?.get(workspaceId), requireClosedAgents,
+        dependencies,
+        workspaceId,
+        options.archivedAt,
+        storedRecordsByWorkspace?.get(workspaceId),
+        requireClosedAgents,
       );
       options.checkpoint();
       return { workspaceId, agents };
@@ -748,7 +755,9 @@ export async function archiveWorkspaceContents(
     Promise.allSettled(
       agentIdsToArchive.map((agentId) =>
         dependencies.agentManager.getAgent(agentId)
-          ? dependencies.agentManager.archiveAgent(agentId, archivedAt, { requireIdle: requireIdleClose })
+          ? dependencies.agentManager.archiveAgent(agentId, archivedAt, {
+              requireIdle: requireIdleClose,
+            })
           : dependencies.agentManager.archiveSnapshot(agentId, archivedAt),
       ),
     ),

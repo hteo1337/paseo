@@ -754,6 +754,14 @@ function ComposerTextSurface(props: ComposerTextSurfaceProps): React.ReactElemen
 
 // The ghost replaces the placeholder rather than sitting on top of it, and only
 // ever shows over an empty input.
+function availableGhostSuggestion(
+  suggestion: GhostSuggestion | null,
+  fullscreen: boolean,
+  readOnly: boolean,
+): GhostSuggestion | null {
+  return fullscreen || readOnly ? null : suggestion;
+}
+
 function resolveGhostPresentation(input: {
   ghostSuggestion: GhostSuggestion | null;
   value: string;
@@ -2127,7 +2135,7 @@ export const MessageInput = forwardRef<MessageInputRef, MessageInputProps>(
     );
 
     const ghostPresentation = resolveGhostPresentation({
-      ghostSuggestion: isFullscreen || readOnly ? null : ghostSuggestion,
+      ghostSuggestion: availableGhostSuggestion(ghostSuggestion, isFullscreen, readOnly),
       value: readOnly
         ? value
         : resolveComposerSurfaceText(

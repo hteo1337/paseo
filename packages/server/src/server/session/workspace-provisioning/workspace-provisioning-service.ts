@@ -441,14 +441,17 @@ export function createWorkspaceProvisioningService(deps: {
         updatedAt: timestamp,
         ...(await resolveCreationMetadata(context)),
       });
-    if (!reuseExisting) {
-      await workspaceRegistry.upsert(workspace, {
+      if (!reuseExisting) {
+        await workspaceRegistry.upsert(workspace, {
+          expectsInitialAgent: context?.expectsInitialAgent,
+        });
+        emitWorkspaceCreated(workspace);
+        return workspace;
+      }
+      const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, {
         expectsInitialAgent: context?.expectsInitialAgent,
+        ...(managedGitCheckout || !projectId ? { rehomeProjectId: project.projectId } : {}),
       });
-      emitWorkspaceCreated(workspace);
-      return workspace;
-    }
-      const claimed = await workspaceRegistry.getOrCreateActiveByCwd(workspace, { expectsInitialAgent: context?.expectsInitialAgent, ...(managedGitCheckout || !projectId ? { rehomeProjectId: project.projectId } : {}) });
       if (claimed.created) emitWorkspaceCreated(claimed.workspace);
       return claimed.workspace;
     };
@@ -551,7 +554,7 @@ export function createWorkspaceProvisioningService(deps: {
     context?: { background?: boolean; callerWorkspaceId?: string },
   ): Promise<PersistedWorkspaceRecord> {
     const normalizedCwd = resolve(cwd);
-    const background = await resolveBackground(context);
+    const background = (await resolveCreationMetadata(context)).background;
     // Path-based discovery selects public work; explicit-ID recovery bypasses this selector.
     // Opening a directory explicitly recovers an archived workspace at that path.
     const workspaces = (await workspaceRegistry.listAll())
@@ -598,7 +601,7 @@ export function createWorkspaceProvisioningService(deps: {
     if (input.createdWorktree) return input.createdWorktree.workspace.workspaceId;
     if (input.requestedWorkspaceId) return input.requestedWorkspaceId;
 
-    const background = await resolveBackground(input);
+    const background = (await resolveCreationMetadata(input)).background;
     const workspaceCwd = await resolveCreateAgentWorkspaceCwd(input.cwd);
 
     const lockKey = await canonicalPath(workspaceCwd);
@@ -611,7 +614,7 @@ export function createWorkspaceProvisioningService(deps: {
     if (previous) await previous;
     try {
       const project = await findOrCreateProjectForDirectory(workspaceCwd);
-      const workspaces = await workspaceRegistry.list();
+      const workspaces = await workspaceRegistry.listAll();
       const workspacePaths = new Map(
         await Promise.all(
           workspaces.map(
