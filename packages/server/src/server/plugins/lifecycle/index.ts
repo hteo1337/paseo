@@ -134,7 +134,11 @@ const beforeSchemas = {
     .strict(),
 
   "worktree.create.before": worktreeRequestSchema,
-  "agent.create.before": CreateAgentRequestMessageSchema.pick({ config: true, env: true, metadata: true })
+  "agent.create.before": CreateAgentRequestMessageSchema.pick({
+    config: true,
+    env: true,
+    metadata: true,
+  })
     .extend({
       creation: z
         .object({
@@ -329,7 +333,11 @@ function validateAgentCreateResult(
   // COMPAT(create-provenance): added in TH1-728; remove after 2027-04-12.
   // Older plugins may return only config/env. Keep server-owned provenance
   // for the next hook instead of letting an omission erase the caller.
-  return { ...next, metadata: next.metadata ?? previous.metadata, ...(previous.creation === undefined ? {} : { creation: previous.creation }) };
+  return {
+    ...next,
+    metadata: next.metadata ?? previous.metadata,
+    ...(previous.creation === undefined ? {} : { creation: previous.creation }),
+  };
 }
 
 export async function validateBeforeResult<Name extends keyof PluginWireBeforeRequests>(
@@ -533,8 +541,8 @@ export class PluginHookHandlers implements PluginLifecycleRegistration {
 }
 
 function sameSessionOpenIdentity(
-  previous: SessionOpenWireRequest,
-  next: SessionOpenWireRequest,
+  previous: z.infer<(typeof beforeSchemas)["agent.open.before"]>,
+  next: z.infer<(typeof beforeSchemas)["agent.open.before"]>,
 ): boolean {
   const { env: _oldEnv, tools: _oldTools, mcpServers: _oldMcp, ...oldIdentity } = previous;
   const { env: _newEnv, tools: _newTools, mcpServers: _newMcp, ...newIdentity } = next;
