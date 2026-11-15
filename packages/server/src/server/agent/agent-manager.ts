@@ -2201,7 +2201,7 @@ export class AgentManager {
     const currentResumeOptions = { purpose } satisfies AgentResumeSessionOptions;
 
     const launchEnv = record?.launchEnv;
-    const workspaceId = resolveResumeWorkspaceId({ options, record });
+    const workspaceId = resolveResumeWorkspaceId({ options, record }) ?? null;
     const { storedConfig, launchConfig, paseoToolPolicy } = await this.prepareSessionConfig(
       mergedConfig,
       resolvedAgentId,
@@ -2215,7 +2215,6 @@ export class AgentManager {
       );
     }
     this.paseoToolPolicies.set(resolvedAgentId, paseoToolPolicy);
-    const workspaceId = nullableHookValue(options?.workspaceId);
     const model = nullableHookValue(storedConfig.model);
     const title = overrides?.title ?? record?.title ?? nullableHookValue(storedConfig.title);
     const launchContext = await this.buildLaunchContext(
@@ -2260,7 +2259,7 @@ export class AgentManager {
       // The caller read its metadata and attention before this turn in the lane; a setMetadata
       // or attention clear queued ahead of it has saved a newer record, the one the open hooks saw.
       ...(record ? { metadata: record.metadata, attention: extractAttention(record) } : {}),
-      workspaceId,
+      workspaceId: workspaceId ?? undefined,
       launchEnv,
       persistence: handle,
       restoring: true,
@@ -3151,16 +3150,16 @@ export class AgentManager {
       const normalizedModelId =
         typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
 
-    await this.pluginLifecycle?.before("agent.set_model", {
-      agentId,
-      provider: agent.provider,
-      source: "client",
-      fromModel: agent.runtimeInfo?.model ?? agent.config.model ?? null,
-      toModel: normalizedModelId,
-      title,
-      cwd: agent.config.cwd,
-    });
-    this.assertSessionStillActive(agent);
+      await this.pluginLifecycle?.before("agent.set_model", {
+        agentId,
+        provider: agent.provider,
+        source: "client",
+        fromModel: agent.runtimeInfo?.model ?? agent.config.model ?? null,
+        toModel: normalizedModelId,
+        title,
+        cwd: agent.config.cwd,
+      });
+      this.assertSessionStillActive(agent);
 
       const selection = await agent.session.setModel?.(normalizedModelId);
       await this.drainSessionEvents(agentId);
@@ -4111,12 +4110,18 @@ export class AgentManager {
     }
   }
 
+  private requiresRuntimeCollection(agentId: string): boolean {
+    return (
+      this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && Boolean(this.registry))
+    );
+  }
+
   streamAgent(
     agentId: string,
     prompt: AgentPromptInput,
     options?: AgentRunOptions,
   ): AsyncGenerator<AgentStreamEvent> {
-    if (this.collectingRuntimes.has(agentId) || (!this.agents.has(agentId) && this.registry))
+    if (this.requiresRuntimeCollection(agentId))
       return this.streamAfterRuntimeCollection(agentId, prompt, options);
     const existingAgent = this.requireSessionAgent(agentId);
     if (this.historySessions.has(existingAgent.session))

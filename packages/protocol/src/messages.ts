@@ -1852,6 +1852,7 @@ export const PluginRpcInvokeRequestSchema = z.object({
   pluginId: PluginIdSchema,
   method: z.string().min(1),
   input: z.unknown().optional(),
+  scope: PluginRpcInvocationScopeSchema.optional(),
 });
 
 export const PluginRpcSubscribeRequestSchema = z.object({
@@ -1860,7 +1861,6 @@ export const PluginRpcSubscribeRequestSchema = z.object({
   pluginId: PluginIdSchema,
   method: z.string().min(1),
   input: z.unknown(),
-  scope: PluginRpcInvocationScopeSchema.optional(),
 });
 
 export const AgentTimelineAppendRequestSchema = z.object({
