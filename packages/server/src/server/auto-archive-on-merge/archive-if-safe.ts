@@ -70,23 +70,10 @@ export async function archiveIfSafe(input: {
   const cwd = snapshot.cwd;
   const pullRequest = snapshot.forge.pullRequest;
 
-  if (
-    !pullRequest?.isMerged ||
-    !snapshot.git.headSha ||
-    snapshot.git.headSha !== pullRequest.headSha ||
-    snapshot.forge.error
-  ) {
+  if (!pullRequest?.isMerged || !hasMatchingArchiveHead(snapshot)) {
     return "skipped";
   }
-  if (snapshot.git.isDirty !== false) {
-    return "skipped";
-  }
-  if (
-    (snapshot.git.aheadOfOrigin !== null && snapshot.git.aheadOfOrigin !== 0) ||
-    (snapshot.git.behindOfOrigin !== null && snapshot.git.behindOfOrigin !== 0)
-  ) {
-    return "skipped";
-  }
+  if (hasUnpushedArchiveChanges(snapshot.git)) return "skipped";
 
   const ownership = await deps.isPaseoOwnedWorktreeCwd(cwd, {
     paseoHome: options.paseoHome,
@@ -209,4 +196,20 @@ function canonicalPath(target: string): string {
   } catch {
     return path.resolve(target);
   }
+}
+
+function hasUnpushedArchiveChanges(git: WorkspaceGitRuntimeSnapshot["git"]): boolean {
+  return (
+    git.isDirty !== false ||
+    (git.aheadOfOrigin !== null && git.aheadOfOrigin !== 0) ||
+    (git.behindOfOrigin !== null && git.behindOfOrigin !== 0)
+  );
+}
+
+function hasMatchingArchiveHead(snapshot: WorkspaceGitRuntimeSnapshot): boolean {
+  return (
+    Boolean(snapshot.git.headSha) &&
+    snapshot.git.headSha === snapshot.forge.pullRequest?.headSha &&
+    !snapshot.forge.error
+  );
 }

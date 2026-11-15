@@ -1863,6 +1863,11 @@ function ComposerContentImpl({
     ],
   );
 
+  const hasText = useSyncExternalStore(
+    textSource.subscribe,
+    () => Boolean(textSource.getSnapshot()),
+    () => Boolean(textSource.getSnapshot()),
+  );
   const promptSuggestions = usePromptSuggestions({
     serverId,
     agentId,
