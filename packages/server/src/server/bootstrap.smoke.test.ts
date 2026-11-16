@@ -1279,7 +1279,13 @@ test.each(["reject", "stall"] as const)(
       expect(child!.exitCode !== null || child!.signalCode !== null).toBe(true);
       expect((await handle.daemon.agentStorage.get(agent.id))?.lastStatus).toBe("closed");
       expect(handle.daemon.agentManager.getAgent(agent.id)).toBeNull();
-      expect((await handle.daemon.agentStorage.get(peer.id))?.lastStatus).toBe("running");
+      const retainedPeer = await handle.daemon.agentStorage.get(peer.id);
+      expect(retainedPeer?.lastStatus).toBe(failure === "reject" ? "error" : "running");
+      if (failure === "reject") {
+        expect(retainedPeer?.lastError).toContain(
+          "Provider process cleanup incomplete: peer close rejected",
+        );
+      }
     } finally {
       finishStream();
       if (child && child.exitCode === null && child.signalCode === null) {

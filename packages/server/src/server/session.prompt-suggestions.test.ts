@@ -86,6 +86,9 @@ function createSession(
       stt: null,
       tts: null,
       providerSnapshotManager: createProviderSnapshotManagerStub().manager,
+      checkoutDiffManager: createStub<NonNullable<SessionOptions["checkoutDiffManager"]>>({
+        streams: createStub<NonNullable<SessionOptions["checkoutDiffManager"]>["streams"]>({}),
+      }),
       terminalManager: null,
     }),
   );

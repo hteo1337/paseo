@@ -18489,7 +18489,7 @@ test.each(["null", "throws"])(
     expect(opened).toEqual([expect.objectContaining({ model: null, requestedModel: "sonnet" })]);
     expect(close).toHaveBeenCalledOnce();
     expect(manager.listAgents()).toEqual([]);
-    expect(await storage.list()).toEqual([]);
+    expect(await storage.listAll()).toEqual([]);
   },
 );
 

@@ -544,7 +544,12 @@ function sameSessionOpenIdentity(
   previous: z.infer<(typeof beforeSchemas)["agent.open.before"]>,
   next: z.infer<(typeof beforeSchemas)["agent.open.before"]>,
 ): boolean {
-  const { env: _oldEnv, tools: _oldTools, mcpServers: _oldMcp, ...oldIdentity } = previous;
+  const {
+    env: _oldEnv,
+    tools: _oldTools,
+    mcpServers: _oldMcp,
+    ...oldIdentity
+  } = { ...previous, background: previous.background, metadata: previous.metadata };
   const { env: _newEnv, tools: _newTools, mcpServers: _newMcp, ...newIdentity } = next;
   return isDeepStrictEqual(oldIdentity, newIdentity);
 }

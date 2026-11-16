@@ -1170,16 +1170,29 @@ export async function createPaseoDaemon(
   const ensureWorkspaceForCreateExternal = async (
     cwd: string,
     firstAgentContext?: FirstAgentContext,
-    context?: { background?: boolean; callerWorkspaceId?: string },
+    context?: { background?: boolean; callerWorkspaceId?: string; freshWorkspace?: boolean },
   ): Promise<string> => {
-    // Reuse the active workspace for this directory; minting a row per create
-    // left hundreds of duplicate workspaces sharing one cwd.
-    const workspaceId = await workspaceProvisioning.resolveOrCreateWorkspaceIdForCreateAgent({
-      cwd,
-      createdWorktree: null,
-      initialTitle: resolveFirstAgentPromptTitle(firstAgentContext),
-      callerWorkspaceId: context?.callerWorkspaceId,
-    });
+    // Trusted daemon executions own isolated archive lifetimes; ordinary launches reuse cwd.
+    const workspaceId = context?.freshWorkspace
+      ? (
+          await workspaceProvisioning.createWorkspaceForDirectory(
+            cwd,
+            resolveFirstAgentPromptTitle(firstAgentContext),
+            undefined,
+            {
+              expectsInitialAgent: true,
+              background: context.background,
+              callerWorkspaceId: context.callerWorkspaceId,
+            },
+          )
+        ).workspaceId
+      : await workspaceProvisioning.resolveOrCreateWorkspaceIdForCreateAgent({
+          cwd,
+          createdWorktree: null,
+          initialTitle: resolveFirstAgentPromptTitle(firstAgentContext),
+          background: context?.background,
+          callerWorkspaceId: context?.callerWorkspaceId,
+        });
     if (firstAgentContext) {
       const workspace = await workspaceRegistry.get(workspaceId);
       if (!workspace) throw new Error(`Workspace ${workspaceId} disappeared during creation`);
