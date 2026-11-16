@@ -241,7 +241,7 @@ async function createRegistryBackedScheduleWorkspaceDeps(rootDir: string): Promi
   return {
     workspaceRegistry,
     createDirectoryWorkspace: async (input) => {
-      return workspaceProvisioning.createWorkspaceForDirectory(
+      return workspaceProvisioning.findOrCreateWorkspaceForDirectory(
         input.cwd,
         input.firstAgentContext.prompt,
       );

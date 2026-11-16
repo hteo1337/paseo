@@ -513,7 +513,6 @@ export class PluginService {
   }
 
   async disablePlugin(pluginId: string): Promise<PluginListItem> {
-    this.cancelStart(pluginId);
     const operation = {
       kind: "disable",
       completion: this.patchSource(pluginId, (source) => ({ ...source, enabled: false })),
@@ -521,6 +520,7 @@ export class PluginService {
     this.pendingOperations.set(pluginId, operation);
     try {
       await operation.completion;
+      this.cancelStart(pluginId);
     } finally {
       if (this.pendingOperations.get(pluginId) === operation)
         this.pendingOperations.delete(pluginId);
@@ -536,11 +536,11 @@ export class PluginService {
 
   async removePlugin(pluginId: string): Promise<void> {
     this.requireSource(pluginId);
-    this.cancelStart(pluginId);
     const operation = { kind: "remove", completion: this.removeSource(pluginId) } as const;
     this.pendingOperations.set(pluginId, operation);
     try {
       await operation.completion;
+      this.cancelStart(pluginId);
     } finally {
       if (this.pendingOperations.get(pluginId) === operation)
         this.pendingOperations.delete(pluginId);
@@ -646,7 +646,11 @@ export class PluginService {
     this.runtime.clearReload?.(pluginId);
   }
 
-  private async startPlugin(pluginId: string, sourcePath: string, publishTurn?: Promise<unknown>): Promise<void> {
+  private async startPlugin(
+    pluginId: string,
+    sourcePath: string,
+    publishTurn?: Promise<unknown>,
+  ): Promise<void> {
     const generation = (this.startGenerations.get(pluginId) ?? 0) + 1;
     this.startGenerations.set(pluginId, generation);
     const isCurrent = () =>

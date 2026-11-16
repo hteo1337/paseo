@@ -1,3 +1,4 @@
+import { claimActiveWorkspaceForTest } from "./test-fixtures/reconciliation-registries.js";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -1128,6 +1129,8 @@ function createDeps(options?: {
     existsOnDisk: async () => true,
     listAll: async () => Array.from(workspaces.values()),
     listActive: async () => Array.from(workspaces.values()).filter((record) => !record.archivedAt),
+    getOrCreateActiveByCwd: (record, context) =>
+      claimActiveWorkspaceForTest(workspaceRegistry, record, context),
     get: async (workspaceId) => workspaces.get(workspaceId) ?? null,
     update: async (workspaceId, updater) => {
       const workspace = workspaces.get(workspaceId);

@@ -1,3 +1,4 @@
+import { areEquivalentPaths } from "../../utils/path.js";
 import type pino from "pino";
 import { createPersistedProjectRecord } from "../workspace-registry.js";
 import type {
@@ -129,4 +130,26 @@ export function deferred(): { promise: Promise<void>; resolve(): void } {
     resolve = accept;
   });
   return { promise, resolve };
+}
+
+export async function claimActiveWorkspaceForTest(
+  registry: Pick<WorkspaceRegistry, "listAll" | "upsert">,
+  record: PersistedWorkspaceRecord,
+  context?: Parameters<WorkspaceRegistry["getOrCreateActiveByCwd"]>[1],
+): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }> {
+  const existing = (await registry.listAll()).find(
+    (candidate) =>
+      !candidate.archivedAt &&
+      candidate.background === record.background &&
+      areEquivalentPaths(candidate.cwd, record.cwd),
+  );
+  if (existing) {
+    const workspace = context?.rehomeProjectId
+      ? { ...existing, projectId: context.rehomeProjectId }
+      : existing;
+    if (workspace !== existing) await registry.upsert(workspace);
+    return { workspace, created: false };
+  }
+  await registry.upsert(record);
+  return { workspace: record, created: true };
 }

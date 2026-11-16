@@ -553,7 +553,7 @@ describe("workspace registries", () => {
       created: true,
     });
     expect(
-      (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+      (await workspaceRegistry.listAll()).filter((workspace) => !workspace.archivedAt),
     ).toHaveLength(2);
   });
 
@@ -593,7 +593,7 @@ describe("workspace registries", () => {
     expect(await removal).toBe(true);
     await expect(claim).rejects.toThrow("Project is being removed");
     await expect(workspaceRegistry.upsert(record)).rejects.toThrow("Project is being removed");
-    expect(await workspaceRegistry.list()).toEqual([]);
+    expect(await workspaceRegistry.listAll()).toEqual([]);
   });
 
   test("archived-history project removal rejects active records and racing claims", async () => {

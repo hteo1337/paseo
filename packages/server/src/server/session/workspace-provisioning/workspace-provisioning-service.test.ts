@@ -254,7 +254,7 @@ test("linked worktrees share their git-common-dir project while another repo sta
   expect(otherWorkspace.projectId).not.toBe(mainWorkspace.projectId);
   expect((await projectRegistry.get(linkedWorkspace.projectId))?.rootPath).toBe(mainRepo);
   expect(
-    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+    (await workspaceRegistry.listAll()).filter((workspace) => !workspace.archivedAt),
   ).toHaveLength(4);
 });
 
@@ -517,7 +517,7 @@ test("two launch paths into the same branch and cwd share one workspace", async 
   expect(second.cwd).toBe(branchCwd);
   expect(distinct.workspaceId).not.toBe(first.workspaceId);
   expect(
-    (await workspaceRegistry.list()).filter((workspace) => !workspace.archivedAt),
+    (await workspaceRegistry.listAll()).filter((workspace) => !workspace.archivedAt),
   ).toHaveLength(2);
 });
 
@@ -963,7 +963,7 @@ test("create-agent reuses only active directory workspaces and groups disposable
   unsubscribe();
   expect(concurrentB).toBe(concurrentA);
   expect(
-    (await workspaceRegistry.list()).filter((workspace) => workspace.cwd === concurrentCwd),
+    (await workspaceRegistry.listAll()).filter((workspace) => workspace.cwd === concurrentCwd),
   ).toHaveLength(1);
   expect(mutations).toEqual([{ workspaceId: concurrentA, expectsInitialAgent: true }]);
 
@@ -1376,7 +1376,7 @@ test("a failed import cannot remove a successful import from another session", a
   await expect(first).rejects.toThrow("first provider import failed");
   const successful = await second;
   expect(successful.createdWorkspace).toBeNull();
-  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+  expect((await workspaceRegistry.listAll()).map((workspace) => workspace.workspaceId)).toEqual([
     successful.value,
   ]);
 });
@@ -1418,7 +1418,7 @@ test("a targeted import keeps the workspace after another import fails", async (
   await expect(first).rejects.toThrow("first provider import failed");
   expect((await targeted).createdWorkspace).toBeNull();
   expect(targetedOperationRan).toBe(true);
-  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+  expect((await workspaceRegistry.listAll()).map((workspace) => workspace.workspaceId)).toEqual([
     requestedWorkspaceId,
   ]);
 });
@@ -1450,7 +1450,7 @@ test("create-agent keeps a workspace reused during a failed provider import", as
   releaseImport();
 
   await expect(imported).rejects.toThrow("provider import failed");
-  expect((await workspaceRegistry.list()).map((workspace) => workspace.workspaceId)).toEqual([
+  expect((await workspaceRegistry.listAll()).map((workspace) => workspace.workspaceId)).toEqual([
     agentWorkspaceId,
   ]);
 });
@@ -1630,9 +1630,12 @@ test("a failed workspace unarchive write keeps agents archived and permits retry
 
   class FailingWorkspaceRegistry extends FileBackedWorkspaceRegistry {
     failWrites = true;
-    override async upsert(record: PersistedWorkspaceRecord): Promise<void> {
+    override async getOrCreateActiveByCwd(
+      record: PersistedWorkspaceRecord,
+      context?: Parameters<FileBackedWorkspaceRegistry["getOrCreateActiveByCwd"]>[1],
+    ): Promise<{ workspace: PersistedWorkspaceRecord; created: boolean }> {
       if (this.failWrites && !record.archivedAt) throw new Error("Workspace write failed");
-      await super.upsert(record);
+      return super.getOrCreateActiveByCwd(record, context);
     }
   }
   const registry = new FailingWorkspaceRegistry(
