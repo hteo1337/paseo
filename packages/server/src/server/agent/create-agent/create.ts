@@ -31,6 +31,7 @@ import { foldFeatureValues, type LegacyFeatureValues } from "../option-controls.
 
 /** How a workspace this creation makes inherits its creator's visibility. */
 interface McpWorkspaceIntent {
+  freshWorkspace?: boolean;
   background?: boolean;
   callerWorkspaceId?: string;
 }
@@ -52,7 +53,7 @@ export interface CreateAgentCommandDependencies {
 export type EnsureWorkspaceForCreate = (
   cwd: string,
   firstAgentContext?: FirstAgentContext,
-  context?: { background?: boolean; callerWorkspaceId?: string },
+  context?: McpWorkspaceIntent,
 ) => Promise<string>;
 
 export interface CreateAgentFromSessionInput {
@@ -302,6 +303,7 @@ async function resolveMcpCreateAgent(
     : null;
   const cwd = resolveMcpInitialCwd(input, parentAgent);
   const workspaceIntent = {
+    ...(input.owner?.kind === "daemon" ? { freshWorkspace: true } : {}),
     background: inheritWorkspaceBackground(input.background, parentAgent),
     callerWorkspaceId: parentAgent?.workspaceId,
   };

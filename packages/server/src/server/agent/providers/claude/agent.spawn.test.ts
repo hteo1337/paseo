@@ -37,6 +37,15 @@ function createQueryMock(events: unknown[]): Query {
 function createChildProcessStub(): ChildProcess {
   const child = new EventEmitter() as ChildProcess;
   child.stderr = new EventEmitter() as ChildProcess["stderr"];
+  Object.assign(child, {
+    exitCode: null,
+    signalCode: null,
+    kill: vi.fn((signal: NodeJS.Signals = "SIGTERM") => {
+      Object.assign(child, { signalCode: signal });
+      child.emit("exit", null, signal);
+      return true;
+    }),
+  });
   return child;
 }
 
@@ -101,5 +110,6 @@ describe("Claude spawn override", () => {
     expect(claudeSpawnCall).toBeDefined();
     const spawnOptions = claudeSpawnCall?.[2];
     expect(spawnOptions?.shell).toBe(false);
+    expect(spawnSpy.mock.results[0]?.value.kill).toHaveBeenCalledWith("SIGTERM");
   });
 });

@@ -4905,7 +4905,7 @@ test.each(["claude-sonnet-5", "claude-opus-5-5"])(
     });
     const agent = await manager.createAgent(config, undefined, {});
     try {
-      const init = adapter.translateMessageToEvents({
+      const init = await adapter.translateMessageToEvents({
         type: "system",
         subtype: "init",
         session_id: "existing",
@@ -4918,7 +4918,7 @@ test.each(["claude-sonnet-5", "claude-opus-5-5"])(
       expect(await session.getRuntimeInfo()).toMatchObject({ model: config.model });
       expect(requests).toEqual([]);
 
-      const assistant = adapter.translateMessageToEvents({
+      const assistant = await adapter.translateMessageToEvents({
         type: "assistant",
         session_id: "existing",
         message: {
@@ -4989,7 +4989,7 @@ test("Claude synthetic 429 notice cannot turn a Sonnet create into a provider mo
     expect(opened).toEqual([
       expect.objectContaining({ model: null, requestedModel: config.model }),
     ]);
-    const notice = adapter.translateMessageToEvents({
+    const notice = await adapter.translateMessageToEvents({
       type: "assistant",
       session_id: "limit-session",
       error: "rate_limit",
@@ -5056,7 +5056,7 @@ test("Claude effective model: streamed switch survives late init and ignores syn
       model: "claude-opus-5-5",
       permissionMode: "default",
     } as SDKMessage;
-    expect(adapter.translateMessageToEvents(init).map((event) => event.type)).toEqual([
+    expect((await adapter.translateMessageToEvents(init)).map((event) => event.type)).toEqual([
       "thread_started",
     ]);
     const start = {
@@ -5067,7 +5067,7 @@ test("Claude effective model: streamed switch survives late init and ignores syn
         message: { model: "claude-opus-5-5", usage: { input_tokens: 1, output_tokens: 0 } },
       },
     } as SDKMessage;
-    expect(adapter.translateMessageToEvents(start)[0]).toMatchObject({
+    expect((await adapter.translateMessageToEvents(start))[0]).toMatchObject({
       type: "model_changed",
       runtimeInfo: { model: "claude-opus-5-5" },
     });
@@ -5076,15 +5076,15 @@ test("Claude effective model: streamed switch survives late init and ignores syn
       session_id: "streamed",
       message: { model: "claude-opus-5-5", role: "assistant", content: [] },
     } as SDKMessage;
-    expect(adapter.translateMessageToEvents(assistant)).toEqual([]);
+    expect(await adapter.translateMessageToEvents(assistant)).toEqual([]);
     expect(
-      adapter.translateMessageToEvents({ ...init, model: "claude-sonnet-5" } as SDKMessage),
+      await adapter.translateMessageToEvents({ ...init, model: "claude-sonnet-5" } as SDKMessage),
     ).toEqual([]);
-    adapter.translateMessageToEvents({
+    await adapter.translateMessageToEvents({
       ...assistant,
       message: { model: "<synthetic>", role: "assistant", content: [] },
     } as SDKMessage);
-    adapter.translateMessageToEvents({
+    await adapter.translateMessageToEvents({
       ...assistant,
       parent_tool_use_id: "child-tool",
       message: { model: "claude-sonnet-5", role: "assistant", content: [] },
@@ -5132,7 +5132,7 @@ test.each([
     Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
     const adapter = session as unknown as TestClaudeSession;
     try {
-      const events = adapter.translateMessageToEvents({
+      const events = await adapter.translateMessageToEvents({
         type: "assistant",
         session_id: "limit-turn",
         error,
@@ -5167,7 +5167,7 @@ test.each([
     Object.assign(session, { lastOptionsModel: previousModel });
     const adapter = session as unknown as TestClaudeSession;
     try {
-      const events = adapter.translateMessageToEvents({
+      const events = await adapter.translateMessageToEvents({
         type: "assistant",
         session_id: "inference-turn",
         message: {
@@ -5196,7 +5196,7 @@ test("Claude effective model: a resumed redelivery of an already-persisted Opus 
   });
   Object.assign(session, { lastOptionsModel: "claude-sonnet-5" });
   const adapter = session as unknown as TestClaudeSession & {
-    ingestPersistedHistory(content: string, replay: unknown): void;
+    ingestPersistedHistory(entries: Iterable<unknown>, replay: unknown): Promise<void>;
   };
   try {
     const historyLine = JSON.stringify({
@@ -5210,7 +5210,7 @@ test("Claude effective model: a resumed redelivery of an already-persisted Opus 
         content: [{ type: "text", text: "old output" }],
       },
     });
-    adapter.ingestPersistedHistory(historyLine, {
+    await adapter.ingestPersistedHistory([JSON.parse(historyLine)], {
       restoredIds: new Set(),
       toolOwners: new Map(),
     });
@@ -5228,9 +5228,9 @@ test("Claude effective model: a resumed redelivery of an already-persisted Opus 
       },
     } as SDKMessage;
     expect(
-      adapter
-        .translateMessageToEvents(redelivered)
-        .filter((event) => event.type === "model_changed"),
+      (await adapter.translateMessageToEvents(redelivered)).filter(
+        (event) => event.type === "model_changed",
+      ),
     ).toEqual([]);
     expect(await session.getRuntimeInfo()).toMatchObject({ model: "claude-sonnet-5" });
 
@@ -5245,7 +5245,7 @@ test("Claude effective model: a resumed redelivery of an already-persisted Opus 
         content: [{ type: "text", text: "new output" }],
       },
     } as SDKMessage;
-    expect(adapter.translateMessageToEvents(genuineOpusTurn)[0]).toMatchObject({
+    expect((await adapter.translateMessageToEvents(genuineOpusTurn))[0]).toMatchObject({
       type: "model_changed",
       runtimeInfo: { model: "claude-opus-5-5" },
     });
