@@ -213,6 +213,7 @@ test("a session-open hook that returns its own object without metadata or backgr
       provider: "codex",
       cwd: "/project",
       title: null,
+      model: null,
       background: true,
       labels: {},
       metadata: { "linear.issue": { id: "ENG-1" } },

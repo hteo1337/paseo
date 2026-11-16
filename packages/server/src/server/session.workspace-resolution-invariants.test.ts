@@ -1,3 +1,4 @@
+import { claimActiveWorkspaceForTest } from "./test-fixtures/reconciliation-registries.js";
 import { createWorkspaceRuntimeStore } from "./workspace-runtime-store/index.js";
 import { createAgentMessageDeliveryStub } from "./test-utils/session-stubs.js";
 import {
@@ -161,6 +162,17 @@ function createHarness(input: {
       listAll: async () => Array.from(workspaces.values()),
       listActive: async () =>
         Array.from(workspaces.values()).filter((record) => !record.archivedAt),
+      getOrCreateActiveByCwd: (record, context) =>
+        claimActiveWorkspaceForTest(
+          {
+            listAll: async () => Array.from(workspaces.values()),
+            upsert: async (workspace) => {
+              workspaces.set(workspace.workspaceId, workspace);
+            },
+          },
+          record,
+          context,
+        ),
       get: async (id: string) => workspaces.get(id) ?? null,
       upsert: async (record: PersistedWorkspaceRecord) => {
         workspaces.set(record.workspaceId, record);

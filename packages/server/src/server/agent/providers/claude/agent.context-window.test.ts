@@ -38,7 +38,7 @@ function contextQuery({
         yield {
           type: "stream_event",
           session_id: "context-session",
-          event: { type: "message_start", message: { usage: { input_tokens: 249_950 } } },
+          event: { type: "message_start", message: { model, usage: { input_tokens: 249_950 } } },
         };
         yield {
           type: "stream_event",

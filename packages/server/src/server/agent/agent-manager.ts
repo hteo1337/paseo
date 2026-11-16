@@ -2543,6 +2543,7 @@ export class AgentManager {
     } else if (this.agents.get(agentId) === existing) {
       existing.lifecycle = "error";
       existing.lastError = policyErrorMessage(error);
+      this.raiseErrorAttention(existing);
       this.emitState(existing);
     }
   }
@@ -2931,6 +2932,7 @@ export class AgentManager {
 
     const archivedRecord = await this.markRecordArchived(stored, requestedArchivedAt);
     const { archivedAt } = archivedRecord;
+    agent.updatedAt = new Date(archivedRecord.updatedAt);
     try {
       await this.closeAgentRuntime(agentId, undefined, {
         // Same recheck as above, but immediately before session.close() so a turn
@@ -2949,7 +2951,6 @@ export class AgentManager {
       }
       throw error;
     }
-    agent.updatedAt = new Date(archivedRecord.updatedAt);
     await this.syncNativeArchiveState(stored.provider, stored.persistence, "archive");
     this.discardRetainedAgentState(agentId);
 

@@ -307,7 +307,7 @@ describe("AgentStorage", () => {
     await storage.applySnapshot(
       createManagedAgent({ id: "mcp-selection", provider: "codex", config }),
     );
-    const [record] = await new AgentStorage(storagePath, logger).list();
+    const [record] = await new AgentStorage(storagePath, logger).listAll();
     expect(record.config).toMatchObject(config);
     expect(buildConfigOverrides(record)).toMatchObject(config);
     expect(buildSessionConfig(record)).toMatchObject(config);

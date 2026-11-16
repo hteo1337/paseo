@@ -113,7 +113,7 @@ async function createWorkspaceJourney() {
   const options = {
     logger: { child: () => ({ warn: vi.fn() }) } as unknown as Logger,
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
-    agentManager: { subscribe: () => () => {} },
+    agentManager: { subscribe: () => () => {}, listAgentsIncludingInternal: () => [] },
     workspaceGitService: {
       onSnapshotUpdated: (nextListener: (next: WorkspaceGitRuntimeSnapshot) => void) => {
         listener = nextListener;
@@ -210,6 +210,7 @@ async function createUnobservedWorkspace(journeyOptions?: {
   const options = {
     logger,
     paseoHome,
+    agentManager: { subscribe: () => () => {}, listAgentsIncludingInternal: () => [] },
     daemonConfigStore: { get: () => ({ autoArchiveAfterMerge: true }) },
     workspaceGitService: {
       onSnapshotUpdated: service.onSnapshotUpdated.bind(service),
