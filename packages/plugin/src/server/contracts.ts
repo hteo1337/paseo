@@ -1,6 +1,11 @@
 import type { PaseoApi } from "@getpaseo/client";
 import type { ZodType, input as ZodInput, output as ZodOutput } from "zod";
-import type { PluginRpcContract, PluginRpcWorkspacePermission, PluginSubscriptionContract, PluginWireInput } from "../rpc.js";
+import type {
+  PluginRpcContract,
+  PluginRpcWorkspacePermission,
+  PluginSubscriptionContract,
+  PluginWireInput,
+} from "../rpc.js";
 import type { PluginCleanup } from "../contracts.js";
 import type { ProviderRegistration } from "./provider.js";
 import type { UsageSourceRegistration } from "./usage.js";
