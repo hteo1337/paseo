@@ -110,15 +110,13 @@ async function drainAgentRunIterator(
   }
 }
 
-export async function startAgentRun(
+function traceAgentRunRequest(
   agentManager: AgentRunController,
   agentId: string,
   prompt: AgentPromptInput,
   logger: Logger,
   options?: StartAgentRunOptions,
-): Promise<PromptDispatchResult> {
-  const release = agentManager.beginAgentUse?.(agentId);
-  try {
+): void {
   const snapshot = agentManager.getAgent(agentId);
   logger.trace(
     {
@@ -132,40 +130,68 @@ export async function startAgentRun(
     },
     "agent.session.start_stream.request",
   );
-  // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
-  // in-flight turn — replaceAgentRun would interrupt the running turn. The
-  // intercept lives at this layer so it covers every prompt entrypoint.
-  const admit = options?.admit;
-  const admitCommand = admit
-    ? () => {
-        if (!admit()) throw new Error("Queued agent message was withdrawn");
-      }
-    : undefined;
-  if (await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions, admitCommand)) {
-    options?.onDispatch?.("out_of_band");
-    return { disposition: "out_of_band" };
-  }
-  const promptStart = new ForegroundPromptStart(agentId, admit);
+}
+
+export async function startAgentRun(
+  agentManager: AgentRunController,
+  agentId: string,
+  prompt: AgentPromptInput,
+  logger: Logger,
+  options?: StartAgentRunOptions,
+): Promise<PromptDispatchResult> {
+  const release = agentManager.beginAgentUse?.(agentId);
   try {
-    try {
-      await agentManager.reloadStalePluginSession(agentId);
-      return await startAgentRunInner(agentManager, agentId, prompt, logger, options, promptStart);
-    } catch (error) {
-      if (!isStaleProviderSessionError(error)) throw error;
-      logger.info(
-        { agentId, err: error },
-        "Provider session went stale; reopening from persistence",
-      );
-      // The live session belongs to a retired plugin runtime. Reload swaps in a
-      // fresh session on the current runtime while preserving history and labels.
-      await agentManager.reloadAgentSession(agentId);
-      return await startAgentRunInner(agentManager, agentId, prompt, logger, options, promptStart);
+    traceAgentRunRequest(agentManager, agentId, prompt, logger, options);
+    // Out-of-band commands (e.g. /goal pause) must run WITHOUT canceling an
+    // in-flight turn — replaceAgentRun would interrupt the running turn. The
+    // intercept lives at this layer so it covers every prompt entrypoint.
+    const admit = options?.admit;
+    const admitCommand = admit
+      ? () => {
+          if (!admit()) throw new Error("Queued agent message was withdrawn");
+        }
+      : undefined;
+    if (await agentManager.tryRunOutOfBand(agentId, prompt, options?.runOptions, admitCommand)) {
+      options?.onDispatch?.("out_of_band");
+      return { disposition: "out_of_band" };
     }
-  } catch (error) {
-    promptStart.end();
-    throw error;
+    const promptStart = new ForegroundPromptStart(agentId, admit);
+    try {
+      try {
+        await agentManager.reloadStalePluginSession(agentId);
+        return await startAgentRunInner(
+          agentManager,
+          agentId,
+          prompt,
+          logger,
+          options,
+          promptStart,
+        );
+      } catch (error) {
+        if (!isStaleProviderSessionError(error)) throw error;
+        logger.info(
+          { agentId, err: error },
+          "Provider session went stale; reopening from persistence",
+        );
+        // The live session belongs to a retired plugin runtime. Reload swaps in a
+        // fresh session on the current runtime while preserving history and labels.
+        await agentManager.reloadAgentSession(agentId);
+        return await startAgentRunInner(
+          agentManager,
+          agentId,
+          prompt,
+          logger,
+          options,
+          promptStart,
+        );
+      }
+    } catch (error) {
+      promptStart.end();
+      throw error;
+    }
+  } finally {
+    release?.();
   }
-  } finally { release?.(); }
 }
 
 async function startAgentRunInner(
@@ -407,7 +433,9 @@ export async function sendPromptToAgent(
     (joined) =>
       sendPreparedPromptToAgent({
         ...send,
-        useOwnerId: params.useOwnerId ?? (source && "agentId" in source ? `agent:${source.agentId}` : undefined),
+        useOwnerId:
+          params.useOwnerId ??
+          (source && "agentId" in source ? `agent:${source.agentId}` : undefined),
         prompt: joined.prompt,
         sessionMode: joined.sessionMode,
         unarchive: joined.unarchive,
@@ -424,56 +452,58 @@ export async function sendPreparedPromptToAgent(
 ): Promise<PromptDispatchResult> {
   const release = params.agentManager.beginAgentUse(params.agentId, params.useOwnerId);
   try {
-  const unarchive = params.unarchive ?? true;
+    const unarchive = params.unarchive ?? true;
 
-  const record = await params.agentStorage.get(params.agentId);
-  let archivedAtToRestore: string | null = null;
-  if (record?.archivedAt) {
-    if (!unarchive) {
-      return { disposition: "turn_started", started: Promise.resolve() };
+    const record = await params.agentStorage.get(params.agentId);
+    let archivedAtToRestore: string | null = null;
+    if (record?.archivedAt) {
+      if (!unarchive) {
+        return { disposition: "turn_started", started: Promise.resolve() };
+      }
+      if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
+        archivedAtToRestore = record.archivedAt;
+      }
     }
-    if (await unarchiveAgentState(params.agentStorage, params.agentManager, params.agentId)) {
-      archivedAtToRestore = record.archivedAt;
-    }
-  }
 
-  try {
-    await ensureAgentLoaded(params.agentId, {
-      useOwnerId: params.useOwnerId,
-      agentManager: params.agentManager,
-      agentStorage: params.agentStorage,
-      logger: params.logger,
+    try {
+      await ensureAgentLoaded(params.agentId, {
+        useOwnerId: params.useOwnerId,
+        agentManager: params.agentManager,
+        agentStorage: params.agentStorage,
+        logger: params.logger,
+      });
+    } catch (error) {
+      // A send that could not load the agent leaves it where it was: still archived.
+      // Concurrent sends share this load, so none of them holds a live session.
+      if (archivedAtToRestore) {
+        await params.agentManager.archiveSnapshot(params.agentId, archivedAtToRestore);
+      }
+      throw error;
+    }
+
+    if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId)) {
+      throw new AgentTurnBusyError(`Agent ${params.agentId} is running`);
+    }
+    if (params.sessionMode) {
+      await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
+    }
+
+    await params.beforeDispatch?.();
+    if (!params.idleOnly && params.admit?.() === false) {
+      throw new Error("Queued agent message was withdrawn");
+    }
+    return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
+      replaceRunning: !params.idleOnly,
+      idleOnly: params.idleOnly,
+      admit: params.admit,
+      onDispatch: params.onDispatch,
+      activeTurnBehavior: params.activeTurnBehavior,
+      clearPendingPermissions: params.clearPendingPermissions,
+      runOptions: params.runOptions,
     });
-  } catch (error) {
-    // A send that could not load the agent leaves it where it was: still archived.
-    // Concurrent sends share this load, so none of them holds a live session.
-    if (archivedAtToRestore) {
-      await params.agentManager.archiveSnapshot(params.agentId, archivedAtToRestore);
-    }
-    throw error;
+  } finally {
+    release();
   }
-
-  if (params.idleOnly && params.agentManager.hasInFlightRun(params.agentId)) {
-    throw new AgentTurnBusyError(`Agent ${params.agentId} is running`);
-  }
-  if (params.sessionMode) {
-    await params.agentManager.setAgentMode(params.agentId, params.sessionMode);
-  }
-
-  await params.beforeDispatch?.();
-  if (!params.idleOnly && params.admit?.() === false) {
-    throw new Error("Queued agent message was withdrawn");
-  }
-  return await startAgentRun(params.agentManager, params.agentId, params.prompt, params.logger, {
-    replaceRunning: !params.idleOnly,
-    idleOnly: params.idleOnly,
-    admit: params.admit,
-    onDispatch: params.onDispatch,
-    activeTurnBehavior: params.activeTurnBehavior,
-    clearPendingPermissions: params.clearPendingPermissions,
-    runOptions: params.runOptions,
-  });
-  } finally { release(); }
 }
 
 export async function startCreatedAgentInitialPrompt(

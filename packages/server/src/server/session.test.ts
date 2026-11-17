@@ -6802,6 +6802,7 @@ test("deduplicates repeated command names in list_commands_response for live age
   const liveSession = createSessionForTest({
     messages: liveMessages,
     agentManager: {
+      beginAgentUse: () => () => {},
       waitForAgentClose: async () => undefined,
       getAgent: () =>
         ({

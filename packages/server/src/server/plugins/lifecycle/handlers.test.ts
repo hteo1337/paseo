@@ -414,6 +414,7 @@ test("session-open instructions compose, survive old hooks, and are ignored for 
     purpose: "interactive",
     env: {},
     title: null,
+    model: null,
     labels: {},
     metadata: {},
     tools: [],
@@ -428,6 +429,7 @@ test("session-open instructions compose, survive old hooks, and are ignored for 
     paseo,
   );
   expect(history).not.toHaveProperty("appendSystemPrompt");
+});
 
 test("set_model: a throw refuses and a changed result throws", async () => {
   const input = {

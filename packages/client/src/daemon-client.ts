@@ -7007,7 +7007,14 @@ export class DaemonClient {
     const frame = encodePluginInputFrame({ requestId, pluginId, method, payload: input, scope });
     const payload = await this.sendCorrelatedRequest({
       requestId,
-      message: { type: "plugin.rpc.invoke.request", requestId, pluginId, method, input: null, ...(scope ? { scope } : {}) },
+      message: {
+        type: "plugin.rpc.invoke.request",
+        requestId,
+        pluginId,
+        method,
+        input: null,
+        ...(scope ? { scope } : {}),
+      },
       responseType: "plugin.rpc.invoke.response",
       options: { skipQueue: true },
       transmit: () => this.sendBinaryFrame(frame),

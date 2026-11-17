@@ -1,3 +1,4 @@
+import { realpath } from "node:fs/promises";
 import { afterEach, expect, test } from "vitest";
 import type { SessionOutboundMessage } from "../messages.js";
 import { HubRelationshipHarness } from "./test-utils/relationship-harness.js";
@@ -75,7 +76,9 @@ test("Hub execute can list daemon projects but cannot rename them", async () => 
     type: "project.list.response",
     payload: {
       requestId: "list-projects",
-      projects: [{ projectId: expect.any(String), projectRootPath: hub.repoRoot() }],
+      projects: [
+        { projectId: expect.any(String), projectRootPath: await realpath(hub.repoRoot()) },
+      ],
     },
   });
   if (listed.type !== "project.list.response") throw new Error("Expected project list response");

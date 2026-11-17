@@ -193,18 +193,17 @@ async function archiveByScopeWithPriority(
     checkpoint();
     const target = await resolveArchiveTarget(dependencies, request.scope);
     const targetWorkspaceIds = target.workspaceIds;
-  
+
     const earlyAbort = archiveAbortResult(request.abortIf?.());
     if (earlyAbort) return earlyAbort;
 
     await stopWorkspaceSetups(dependencies, target.setupWorkspaceIds, request.requestId);
     checkpoint();
-  
-  
+
     const releaseRunHold = request.holdNewRuns?.();
     let removedDirectory = false;
     let directoryLeftBehind: ArchiveResult["directoryLeftBehind"];
-  
+
     try {
       if (targetWorkspaceIds.length > 0) {
         dependencies.markWorkspaceArchiving(targetWorkspaceIds, new Date().toISOString());
@@ -213,7 +212,7 @@ async function archiveByScopeWithPriority(
         await dependencies.emitWorkspaceUpdatesForWorkspaceIds(targetWorkspaceIds);
       }
       checkpoint();
-  
+
       const storedRecordsByWorkspace = request.abortIf
         ? new Map<string, StoredAgentRecord[]>()
         : undefined;
@@ -224,15 +223,16 @@ async function archiveByScopeWithPriority(
         storedRecordsByWorkspace,
       );
       if (storedAbort) return storedAbort;
-  
+
       // Once teardown starts, cancellation commits to completion.
-      const { archivedAgents, archivedWorkspaceIds, deferredByAgentIds } = await archiveTargetRecords(
-        dependencies,
-        targetWorkspaceIds,
-        { requestId: request.requestId, checkpoint, archivedAt },
-        storedRecordsByWorkspace,
-        Boolean(request.holdNewRuns),
-      );
+      const { archivedAgents, archivedWorkspaceIds, deferredByAgentIds } =
+        await archiveTargetRecords(
+          dependencies,
+          targetWorkspaceIds,
+          { requestId: request.requestId, checkpoint, archivedAt },
+          storedRecordsByWorkspace,
+          Boolean(request.holdNewRuns),
+        );
       checkpoint();
       if (deferredByAgentIds.length > 0) {
         return {
@@ -242,7 +242,7 @@ async function archiveByScopeWithPriority(
           deferredByAgentIds,
         };
       }
-  
+
       if (target.backing?.mainRepoRoot) {
         try {
           await dependencies.workspaceGitService.getSnapshot(target.backing.mainRepoRoot, {
@@ -256,7 +256,7 @@ async function archiveByScopeWithPriority(
           );
         }
       }
-  
+
       if (target.backing !== null) {
         const removal = await finishArchiveDirectory(
           dependencies,
@@ -267,7 +267,7 @@ async function archiveByScopeWithPriority(
         removedDirectory = removal.removedDirectory;
         directoryLeftBehind = removal.directoryLeftBehind;
       }
-  
+
       return {
         archivedAgentIds: Array.from(archivedAgents),
         archivedWorkspaceIds,
