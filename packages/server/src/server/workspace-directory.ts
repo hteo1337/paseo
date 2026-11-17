@@ -175,7 +175,6 @@ function activeWorkspaceRecords(
 
 export class WorkspaceDirectory {
   private readonly directoryProbeLimit = pLimit(16);
-  private readonly archivingByWorkspaceId = new Map<string, string>();
   /**
    * Per-workspace last-seen winning bucket + entered-at. Persists across
    * `buildDescriptorMap` calls inside the daemon process; reset on cold start.

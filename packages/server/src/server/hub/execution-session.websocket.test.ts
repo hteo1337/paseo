@@ -1,3 +1,5 @@
+import { mkdtemp, realpath, rm, symlink } from "node:fs/promises";
+import path from "node:path";
 import { afterEach, expect, test } from "vitest";
 import type { SessionOutboundMessage } from "../messages.js";
 import { HubRelationshipHarness } from "./test-utils/relationship-harness.js";
@@ -92,6 +94,39 @@ test("Hub execute can list daemon projects but cannot rename them", async () => 
     payload: { requestId: "rename-project", code: "access_denied" },
   });
 });
+
+test.runIf(process.platform === "darwin")(
+  "Hub lists /var aliases using the canonical /private/var project root",
+  async () => {
+    const hub = await launchRelationship();
+    const aliasParent = await mkdtemp("/var/tmp/paseo-hub-path-");
+    const aliasRoot = path.join(aliasParent, "repo");
+    const privateAliasRoot = aliasRoot.replace(/^\/var\//, "/private/var/");
+    try {
+      await symlink(hub.repoRoot(), aliasRoot, "dir");
+      expect(await realpath("/var")).toBe("/private/var");
+      expect(privateAliasRoot).not.toBe(aliasRoot);
+      expect(await realpath(aliasRoot)).toBe(hub.repoRoot());
+      expect(await realpath(privateAliasRoot)).toBe(hub.repoRoot());
+      await hub.createSiblingWorkspace(aliasRoot);
+
+      expect(
+        await hub.requestOrdinary({
+          type: "project.list.request",
+          requestId: "list-aliased-project",
+        }),
+      ).toMatchObject({
+        type: "project.list.response",
+        payload: {
+          requestId: "list-aliased-project",
+          projects: [{ projectId: expect.any(String), projectRootPath: hub.repoRoot() }],
+        },
+      });
+    } finally {
+      await rm(aliasParent, { recursive: true, force: true });
+    }
+  },
+);
 
 test("Hub execute can title the workspace created with an agent", async () => {
   const hub = await launchRelationship();

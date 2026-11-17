@@ -310,8 +310,6 @@ export default function contribute(server) {
     }
   });
 
-
-
   it("bounds pending RPCs, recovers slots and attributes slow requests without payloads", async () => {
     const directory = await createPlugin("bounded", `export default function() {}`);
     const child = createReloadChild("bounded", [], ["wait"]);

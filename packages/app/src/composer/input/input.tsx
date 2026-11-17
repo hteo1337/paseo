@@ -689,13 +689,13 @@ function ComposerTextSurface(props: ComposerTextSurfaceProps): React.ReactElemen
     },
     [focusHintLabel],
   );
-  const shouldShowFocusHint =
+  const showMeasuredFocusHint =
     isActiveComposer &&
     focusHintVisible &&
     Boolean(focusInputKeys) &&
     focusHintLabel.trim().length > 0;
   const focusHintWidth =
-    shouldShowFocusHint && focusHintLayout?.label === focusHintLabel
+    showMeasuredFocusHint && focusHintLayout?.label === focusHintLabel
       ? focusHintLayout.width
       : undefined;
   // Make room for the hint in the same render that reveals it.
@@ -746,7 +746,7 @@ function ComposerTextSurface(props: ComposerTextSurfaceProps): React.ReactElemen
         onPasteError={props.onPasteError}
         autoFocus={props.autoFocus}
       />
-      {shouldShowFocusHint ? (
+      {showMeasuredFocusHint ? (
         <Text
           key={focusHintLabel}
           style={[styles.focusHintText, focusHintWidth === undefined && styles.unmeasuredFocusHint]}

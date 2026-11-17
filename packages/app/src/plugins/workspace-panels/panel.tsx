@@ -128,7 +128,9 @@ function PluginPanelBody({ theme }: { theme: PluginTheme }) {
       Surface={Surface}
       key={`${serverId}/${target.pluginId}/${target.panelId}/${target.context}`}
     >
-      <PluginInstallationProvider plugin={plugin} state={stateSource} scope={scope}>{panel}</PluginInstallationProvider>
+      <PluginInstallationProvider plugin={plugin} scope={scope}>
+        {panel}
+      </PluginInstallationProvider>
     </SurfaceErrorBoundary>
   );
 }

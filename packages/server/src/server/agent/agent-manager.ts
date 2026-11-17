@@ -1001,6 +1001,15 @@ export interface RetiredInternalAgent {
   lastMessage: string | null;
 }
 
+interface PendingForegroundTurnParams {
+  agent: ActiveManagedAgent;
+  agentId: string;
+  pendingRun: PendingForegroundRun;
+  prompt: AgentPromptInput;
+  options?: AgentRunOptions;
+  promptStart?: ForegroundPromptStart;
+}
+
 export class AgentManager {
   private readonly pluginLifecycle: PluginLifecycle | undefined;
   private readonly retiredInternalAgents = new Map<
@@ -2234,6 +2243,7 @@ export class AgentManager {
     },
     resumeOptions?: AgentResumeSessionOptions,
   ): Promise<ManagedAgent> {
+    options = options ?? {};
     this.assertAcceptingAgentRegistrations();
     const resolvedAgentId = validateAgentId(
       agentId ?? this.idFactory(),
@@ -2245,7 +2255,7 @@ export class AgentManager {
       ...overrides,
       provider: handle.provider,
     } as AgentSessionConfig;
-    this.assertArchiveAdmission(resolvedAgentId, options?.workspaceId, mergedConfig.cwd);
+    this.assertArchiveAdmission(resolvedAgentId, options.workspaceId, mergedConfig.cwd);
     // Decide residency from durable state inside the lifecycle lane. A loader may
     // have read the record before a queued archive or restore completed. Residency is
     // settled before the config is prepared, because a history load reads an archived
@@ -2283,7 +2293,7 @@ export class AgentManager {
         workspaceId,
         model,
         title,
-        background: options?.background,
+        background: options.background,
         ...agentEntityData(record ?? options),
       },
     );
@@ -3184,7 +3194,9 @@ export class AgentManager {
       this.withLiveInteractiveSessionUnlocked(agentId, async (agent) => {
         const notice = (await agent.session.setMode(modeId)) ?? null;
         await this.drainSessionEvents(agentId);
+        this.assertSessionStillActive(agent);
         const currentMode = (await agent.session.getCurrentMode()) ?? modeId;
+        this.assertSessionStillActive(agent);
         agent.config.modeId = currentMode ?? undefined;
         agent.currentModeId = currentMode;
         // Update runtimeInfo to reflect the new mode
@@ -3205,19 +3217,20 @@ export class AgentManager {
         const normalizedModelId =
           typeof modelId === "string" && modelId.trim().length > 0 ? modelId : null;
 
-      await this.pluginLifecycle?.before("agent.set_model", {
-        agentId,
-        provider: agent.provider,
-        source: "client",
-        fromModel: agent.runtimeInfo?.model ?? agent.config.model ?? null,
-        toModel: normalizedModelId,
-        title,
-        cwd: agent.config.cwd,
-      });
-      this.assertSessionStillActive(agent);
+        await this.pluginLifecycle?.before("agent.set_model", {
+          agentId,
+          provider: agent.provider,
+          source: "client",
+          fromModel: agent.runtimeInfo?.model ?? agent.config.model ?? null,
+          toModel: normalizedModelId,
+          title,
+          cwd: agent.config.cwd,
+        });
+        this.assertSessionStillActive(agent);
 
         const selection = await agent.session.setModel?.(normalizedModelId);
         await this.drainSessionEvents(agentId);
+        this.assertSessionStillActive(agent);
 
         // A reset clears the preference even when the provider retains its active model.
         let effectiveModelId = normalizedModelId;
@@ -3250,9 +3263,11 @@ export class AgentManager {
           notice = (await agent.session.setThinkingOption(normalizedThinkingOptionId)) ?? null;
         }
         await this.drainSessionEvents(agentId);
+        this.assertSessionStillActive(agent);
 
         let effectiveThinkingOptionId = normalizedThinkingOptionId;
         const runtimeInfo = await agent.session.getRuntimeInfo();
+        this.assertSessionStillActive(agent);
         if (runtimeInfo.thinkingOptionId !== undefined) {
           effectiveThinkingOptionId = runtimeInfo.thinkingOptionId;
         }
@@ -3309,7 +3324,9 @@ export class AgentManager {
           ended = (await agent.session.applyOptions(sent)) ?? {};
           // Changes the provider made on its own while applying are older than its final answer.
           await this.drainSessionEvents(agentId);
+          this.assertSessionStillActive(agent);
           await this.refreshRuntimeInfo(agent, { emit: false });
+          this.assertSessionStillActive(agent);
           // An option can choose the model too, as an fx connection does. Reopening the agent on
           // the earlier preference would send that model to the new connection.
           const modelAfter = agent.runtimeInfo?.model;
@@ -3932,16 +3949,12 @@ export class AgentManager {
     }
   }
 
-  private async startPendingForegroundTurn(params: {
-    agent: ActiveManagedAgent;
-    agentId: string;
-    pendingRun: PendingForegroundRun;
-    prompt: AgentPromptInput;
-    options?: AgentRunOptions;
-    promptStart?: ForegroundPromptStart;
-  }): Promise<string | null> {
+  private async startPendingForegroundTurn(
+    params: PendingForegroundTurnParams,
+  ): Promise<string | null> {
     const { agent, agentId, pendingRun, prompt, options, promptStart } = params;
     if (promptStart?.admit?.() === false) {
+      pendingRun.resolveAdmission({ approved: true });
       this.runs.settleForegroundRun(agentId, pendingRun.token);
       return null;
     }
@@ -3953,6 +3966,7 @@ export class AgentManager {
       }
       await this.checkForegroundTurnPolicy(agent, options);
       this.assertSessionStillActive(agent);
+      if (promptStart?.admit?.() === false) throw new AgentTurnStartCanceledError();
       pendingRun.resolveAdmission({ approved: true });
       if (agent.provider === "claude") this.approvedClaudeSessions.add(agent.session);
       const result = await agent.session.startTurn(prompt, options);
@@ -3965,64 +3979,72 @@ export class AgentManager {
       }
       return result.turnId;
     } catch (error) {
-      pendingRun.resolveAdmission(
-        error instanceof TurnStartRefusal
-          ? { approved: false, message: error.message }
-          : { approved: true },
-      );
-      if (error instanceof AgentTurnStartCanceledError) {
-        if (!pendingRun.settled) {
-          if (options?.clientMessageId) {
-            this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
-              messageId: options.clientMessageId,
-            });
-          }
-          await this.handleStreamEvent(agent, {
-            type: "turn_canceled",
-            provider: agent.provider,
-            reason: "interrupted",
-          });
-          this.finalizeForegroundTurn(agent);
-          this.runs.settleForegroundRun(agentId, pendingRun.token);
-        }
-        return null;
-      }
-      if (pendingRun.settled) {
-        throw error;
-      }
-      if (isStaleProviderSessionError(error) || error instanceof TurnStartRefusal) {
-        this.runs.settleForegroundStart(pendingRun, {
-          status: "failed",
-          error: error.message,
-          stale: isStaleProviderSessionError(error),
-        });
-        agent.pendingReplacement = false;
-        if (!agent.activeForegroundTurnId && agent.lifecycle !== "error") agent.lifecycle = "idle";
-        this.runs.settleForegroundRun(agentId, pendingRun.token);
-        throw error;
-      }
-      agent.pendingReplacement = false;
-      const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
-      this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
-      try {
-        // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
+      return this.handleForegroundStartError(params, error);
+    }
+  }
+
+  private async handleForegroundStartError(
+    params: PendingForegroundTurnParams,
+    error: unknown,
+  ): Promise<null> {
+    const { agent, agentId, pendingRun, prompt, options } = params;
+    pendingRun.resolveAdmission(
+      error instanceof TurnStartRefusal
+        ? { approved: false, message: error.message }
+        : { approved: true },
+    );
+    if (error instanceof AgentTurnStartCanceledError) {
+      if (!pendingRun.settled) {
         if (options?.clientMessageId) {
           this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
             messageId: options.clientMessageId,
           });
         }
         await this.handleStreamEvent(agent, {
-          type: "turn_failed",
+          type: "turn_canceled",
           provider: agent.provider,
-          error: errorMsg,
+          reason: "interrupted",
         });
         this.finalizeForegroundTurn(agent);
-      } finally {
-        // A steer waiting on this start is released only once the run is cleared.
         this.runs.settleForegroundRun(agentId, pendingRun.token);
       }
+      return null;
+    }
+    if (pendingRun.settled) {
       throw error;
     }
+    if (isStaleProviderSessionError(error) || error instanceof TurnStartRefusal) {
+      this.runs.settleForegroundStart(pendingRun, {
+        status: "failed",
+        error: error.message,
+        ...(isStaleProviderSessionError(error) ? { stale: true as const } : {}),
+      });
+      agent.pendingReplacement = false;
+      if (!agent.activeForegroundTurnId && agent.lifecycle !== "error") agent.lifecycle = "idle";
+      this.runs.settleForegroundRun(agentId, pendingRun.token);
+      throw error;
+    }
+    agent.pendingReplacement = false;
+    const errorMsg = error instanceof Error ? error.message : "Failed to start turn";
+    this.runs.settleForegroundStart(pendingRun, { status: "failed", error: errorMsg });
+    try {
+      // A terminal rejection belongs after the submitted prompt even though no provider turn exists.
+      if (options?.clientMessageId) {
+        this.recordSubmittedPrompt(agent, prompt, options.clientMessageId, "rejected", {
+          messageId: options.clientMessageId,
+        });
+      }
+      await this.handleStreamEvent(agent, {
+        type: "turn_failed",
+        provider: agent.provider,
+        error: errorMsg,
+      });
+      this.finalizeForegroundTurn(agent);
+    } finally {
+      // A steer waiting on this start is released only once the run is cleared.
+      this.runs.settleForegroundRun(agentId, pendingRun.token);
+    }
+    throw error;
   }
 
   private async ensureInteractiveSession(agentId: string): Promise<ActiveManagedAgent> {
@@ -4063,6 +4085,7 @@ export class AgentManager {
       });
     }
     const agent = await this.ensureInteractiveSessionUnlocked(agentId);
+    this.assertSessionStillActive(agent);
     try {
       return await operation(agent);
     } catch (error) {
@@ -4070,7 +4093,9 @@ export class AgentManager {
       await this.runs.getPendingRun(agentId)?.settledPromise.catch(() => undefined);
       if (this.hasInFlightRun(agentId)) throw error;
       await this.trackAgentRegistrationOperation(this.reloadAgentSessionInternal(agentId));
-      return await operation(this.requireSessionAgent(agentId));
+      const resumed = this.requireSessionAgent(agentId);
+      this.assertSessionStillActive(resumed);
+      return await operation(resumed);
     }
   }
 
@@ -4303,6 +4328,7 @@ export class AgentManager {
           phaseAtRequest,
           resolveDeferredAdmission!,
         ));
+      promptStart?.bind(pendingRun);
       turnId = await this.startPendingForegroundTurn({
         agent,
         agentId,
@@ -6562,6 +6588,19 @@ export class AgentManager {
     );
   }
 
+  private isFinalizedTerminalEvent(
+    agent: ActiveManagedAgent,
+    event: AgentStreamEvent,
+    eventTurnId: string | undefined,
+  ): boolean {
+    return Boolean(
+      eventTurnId &&
+      isTurnTerminalEvent(event) &&
+      this.runs.hasFinalizedTurn(agent, eventTurnId) &&
+      this.runs.getTurnId(agent.id) !== eventTurnId,
+    );
+  }
+
   private async handleStreamEvent(
     agent: ActiveManagedAgent,
     event: AgentStreamEvent,
@@ -6576,14 +6615,7 @@ export class AgentManager {
       return false;
     }
     this.traceHandleStreamEventStart(agent, event, eventTurnId, isForegroundEvent);
-    if (
-      eventTurnId &&
-      isTurnTerminalEvent(event) &&
-      this.runs.hasFinalizedTurn(agent, eventTurnId) &&
-      this.runs.getTurnId(agent.id) !== eventTurnId
-    ) {
-      return false;
-    }
+    if (this.isFinalizedTerminalEvent(agent, event, eventTurnId)) return false;
 
     // Only update timestamp for live events, not history replay
     if (!options?.fromHistory) {

@@ -1398,7 +1398,8 @@ export class HubRelationshipHarness {
   }
 
   private async createHome(): Promise<void> {
-    this.root = await mkdtemp(path.join(tmpdir(), "paseo-hub-relationship-"));
+    // Workspace provisioning identifies Git roots canonically, including macOS /var aliases.
+    this.root = realpathSync(await mkdtemp(path.join(tmpdir(), "paseo-hub-relationship-")));
     this.paseoHome = path.join(this.root, ".paseo");
     const staticDir = path.join(this.root, "static");
     await Promise.all([mkdir(this.paseoHome, { recursive: true }), mkdir(staticDir)]);

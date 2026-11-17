@@ -556,7 +556,12 @@ test("agent creation hooks change the provider and environment before the sessio
     await client.installDirectoryPlugin(pluginDirectory);
     await client.installDirectoryPlugin(extraPlugin);
     const agent = await client.createAgent({
-      config: { provider: "claude", cwd: directory, title: "Hook test", systemPrompt: "Saved instructions" },
+      config: {
+        provider: "claude",
+        cwd: directory,
+        title: "Hook test",
+        systemPrompt: "Saved instructions",
+      },
       labels: { direct: "operator" },
     });
     expect(agent.provider).toBe(PROVIDER_ID);
